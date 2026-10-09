@@ -18,8 +18,9 @@ is doing.
   SSH access. Passwords, key passphrases and host-key prompts appear in the app.
 - **Agent setup:** if Claude Code or Codex is missing, New Session offers to
   install it in a terminal you can watch. Nothing installs without your click.
-- **Turn notifications:** one click adds Dolphin's hook to Claude Code and
-  Codex, and the bell tells you when an agent finishes a turn.
+- **Connect your agents:** one click gives Claude Code and Codex Dolphin's
+  turn notifications (the bell tells you when one finishes) and its memory, so
+  what you tell Dolphin reaches the agents doing the work.
 - **Chat:** ask Dolphin about your projects and sessions, or have it start work
   in a new agent session. It runs on your installed Claude Code or Codex.
 - **Memory:** every machine gets its own [GBrain](https://github.com/garrytan/gbrain),
@@ -32,7 +33,8 @@ is doing.
 
 ## Requirements
 
-- Linux (x64) or macOS 11 or later (Apple Silicon or Intel).
+- Linux (x64) or macOS 11 or later (Apple Silicon or Intel). SSH machines can
+  also be Linux arm64 (Graviton, Ampere, Raspberry Pi).
 - For agents: [Claude Code](https://docs.claude.com/en/docs/claude-code) and/or
   [Codex](https://github.com/openai/codex). Dolphin can install either for you
   (Codex needs npm or Homebrew).

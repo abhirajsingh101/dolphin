@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import agent_clis, agent_hooks_setup, recent_repos
+from . import agent_clis, agent_hooks_setup, agent_memory_setup, recent_repos
 from .database import get_db
 from .models import Project
 
@@ -56,3 +56,19 @@ async def recent_git_repos(db: AsyncSession = Depends(get_db)):
     _helper_mode()
     linked = {path for path in (await db.scalars(select(Project.path))).all() if path}
     return await asyncio.to_thread(recent_repos.find, 6, linked)
+
+
+@router.get("/api/desktop/agent-memory")
+async def agent_memory_status():
+    _helper_mode()
+    return await asyncio.to_thread(agent_memory_setup.status)
+
+
+@router.post("/api/desktop/agent-memory")
+async def connect_agent_memory(body: HooksRequest):
+    """Register Dolphin's memory with the chosen agents (their own `mcp add`)."""
+    _helper_mode()
+    try:
+        return await asyncio.to_thread(agent_memory_setup.connect, list(body.agents))
+    except (ValueError, RuntimeError, OSError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error

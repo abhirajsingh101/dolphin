@@ -22,12 +22,12 @@ test('Turn On adds Dolphin\'s hook for the agents installed here', { timeout: 12
   try {
     const window = await app.firstWindow();
     await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
-    const prompt = window.getByRole('region', { name: 'Agent notifications' });
+    const prompt = window.getByRole('region', { name: 'Agent setup' });
     await prompt.getByRole('button', { name: 'Turn On' }).waitFor({ timeout: 30_000 });
     await window.screenshot({ path: path.join(shots, 'desktop-hooks-prompt.png') });
     await prompt.getByRole('button', { name: 'Turn On' }).click();
     await prompt.getByRole('status').waitFor();
-    assert.match(await prompt.getByRole('status').innerText(), /Notifications are on/);
+    assert.match(await prompt.getByRole('status').innerText(), /notifications are on/);
     const shim = path.join(dolphinHome, 'bin', 'dolphin-hook');
     if (has('claude')) assert.match(readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'), new RegExp(`${shim} --provider claude --event stop`));
     if (has('codex')) {

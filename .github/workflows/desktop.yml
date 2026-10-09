@@ -27,11 +27,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # 22.04's older glibc is what lets the Linux helper run on older hosts.
-          - { target: linux-x64, os: ubuntu-22.04 }
-          - { target: darwin-arm64, os: macos-15 }
-          - { target: darwin-x64, os: macos-15-intel }
+        # 22.04's older glibc is what lets the Linux helpers run on older hosts.
+        # Linux arm64 (for SSH machines such as Graviton, Ampere or a Raspberry
+        # Pi) builds where GitHub's arm64 runners are free: public repositories.
+        include: ${{ fromJSON(github.event.repository.private
+          && '[{"target":"linux-x64","os":"ubuntu-22.04"},{"target":"darwin-arm64","os":"macos-15"},{"target":"darwin-x64","os":"macos-15-intel"}]'
+          || '[{"target":"linux-x64","os":"ubuntu-22.04"},{"target":"linux-arm64","os":"ubuntu-22.04-arm"},{"target":"darwin-arm64","os":"macos-15"},{"target":"darwin-x64","os":"macos-15-intel"}]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -104,12 +105,25 @@ jobs:
           npm ci --prefix dolphin-web
           npm ci --prefix dolphin-desktop
 
+      # Signed and notarised on macOS when these repository secrets exist:
+      #   MAC_CERTIFICATE (base64 .p12 of a Developer ID Application cert),
+      #   MAC_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+      #   APPLE_TEAM_ID. Without them the build is unsigned, as before.
       - name: Package
         working-directory: dolphin-desktop
         env:
-          # Unsigned until a Developer ID certificate is configured.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist
+          MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "$RUNNER_OS" = macOS ] && [ -n "$MAC_CERTIFICATE" ]; then
+            export CSC_LINK="$MAC_CERTIFICATE" CSC_KEY_PASSWORD="$MAC_CERTIFICATE_PASSWORD"
+            npm run dist -- -c.mac.notarize=true
+          else
+            CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist
+          fi
 
       - name: First run on a clean machine (Linux)
         if: runner.os == 'Linux'

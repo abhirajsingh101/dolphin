@@ -9,7 +9,7 @@ import GlassSessionWindow from './GlassSessionWindow';
 import GlassProjectTasks from './GlassProjectTasks';
 import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
-import AgentHooksPrompt from './AgentHooksPrompt';
+import AgentSetupPrompt from './AgentSetupPrompt';
 import BrainStatus from './BrainStatus';
 import UpdateNotice from './UpdateNotice';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
@@ -967,7 +967,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             </div>
             {desktop && <UpdateNotice />}
             <BrainStatus />
-            {desktop && <AgentHooksPrompt />}
+            {desktop && <AgentSetupPrompt />}
             {renderSignals?.((text) => { setDraft(text); composerInput.current?.focus(); })}
             <form
               className="glass-composer"
