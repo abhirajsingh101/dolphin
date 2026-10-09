@@ -189,7 +189,7 @@ from .task_workflow_service import (
     submit_research_brief,
     workflow_state_for,
 )
-from .seed import seed_projects
+from .seed import link_inbox, seed_projects
 from .system_health_service import (
     HISTORY_CHARTS,
     NetdataUnavailable,
@@ -526,6 +526,7 @@ async def startup():
     await recover_agent_runs()
     async with async_session() as session:
         await seed_projects(session)
+        await link_inbox(session)
         await reconcile_temporary_workspace_cleanup(session)
     if fleet_runtime is not None:
         await fleet_runtime.start(async_session)

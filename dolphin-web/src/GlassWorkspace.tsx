@@ -775,7 +775,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               <button onClick={() => void refresh()}>Retry connection</button>
             </div>
           )}
-          {desktop && inventoryAvailable && !projects.some((p) => p.path) && (
+          {desktop && inventoryAvailable && !projects.some((p) => p.path && !p.is_inbox) && (
             <Suspense fallback={null}>
               <DesktopStart
                 onOpenFolder={() => setPickingProject(true)}

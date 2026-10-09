@@ -406,6 +406,9 @@ async def test_startup_runs_cleanup_and_schedules_both_maintenance_loops(
     async def seed_projects(_session):
         events.append("seed")
 
+    async def link_inbox(_session):
+        events.append("inbox")
+
     async def reconcile(_session):
         events.append("workspace-cleanup")
 
@@ -419,6 +422,7 @@ async def test_startup_runs_cleanup_and_schedules_both_maintenance_loops(
     monkeypatch.setattr(main, "init_db", init_db)
     monkeypatch.setattr(main, "async_session", _SessionContext)
     monkeypatch.setattr(main, "seed_projects", seed_projects)
+    monkeypatch.setattr(main, "link_inbox", link_inbox)
     monkeypatch.setattr(main, "reconcile_temporary_workspace_cleanup", reconcile)
     monkeypatch.setattr(main, "_prune_terminal_attachments_once", prune_once)
     monkeypatch.setattr(main.asyncio, "create_task", create_task)
@@ -449,6 +453,7 @@ async def test_startup_runs_cleanup_and_schedules_both_maintenance_loops(
     assert events == [
         "db",
         "seed",
+        "inbox",
         "workspace-cleanup",
         "attachment-cleanup",
     ]

@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from .models import Notification, Project
 from .tmux_service import _run_tmux
@@ -166,11 +166,39 @@ async def scan_once(session_factory, broadcaster: Broadcaster) -> list[dict]:
             created.append((row, project_name))
         if not created:
             return []
+        await db.flush()
+        await _supersede(db, [row for row, _ in created])
         await db.commit()
         items = [to_item(row, name) for row, name in created]
     for item in items:
         broadcaster.publish(item)
     return items
+
+
+def _origin(row: Notification) -> tuple[str, str]:
+    """What a newer turn supersedes: its project, or its session when no project matched."""
+    return ("project", row.project_id) if row.project_id else ("session", row.session_name)
+
+
+async def _supersede(db, new_rows: list[Notification]) -> None:
+    """Only the newest turn from a project stays unread: the earlier ones, new or
+    already stored, are marked read so the bell counts each project once."""
+    now = datetime.now(timezone.utc)
+    newest: dict[tuple[str, str], Notification] = {}
+    for row in new_rows:
+        key = _origin(row)
+        if key not in newest or row.finished_at > newest[key].finished_at:
+            newest[key] = row
+    for row in new_rows:
+        if newest[_origin(row)] is not row and row.read_at is None:
+            row.read_at = now
+    for (kind, value), row in newest.items():
+        same = Notification.project_id == value if kind == "project" else (
+            Notification.project_id.is_(None) & (Notification.session_name == value))
+        await db.execute(update(Notification).where(
+            same, Notification.read_at.is_(None), Notification.id.not_in([r.id for r in new_rows]),
+            Notification.finished_at <= row.finished_at,
+        ).values(read_at=now))
 
 
 async def prune(db, *, now: datetime | None = None, keep: int = KEEP) -> None:

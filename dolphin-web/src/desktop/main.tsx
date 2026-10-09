@@ -6,14 +6,19 @@ import ReactDOM from 'react-dom/client';
 import { ArrowLeft } from 'lucide-react';
 
 import DictationProvider from '../DictationProvider';
+import DolphinIcon from '../DolphinIcon';
 import ErrorBoundary from '../ErrorBoundary';
 import { applyTheme, readStoredTheme } from '../theme';
+import '../glass.css';
+import './glassHealth.css';
 import './desktop.css';
 
 const GlassWorkspace = React.lazy(() => import('../GlassWorkspace'));
 const SystemHealthView = React.lazy(() => import('../SystemHealthView'));
 
 type Surface = 'workspace' | 'health';
+/** The machine this window works on (the preload hands it over). */
+const host = (window as { dolphinDesktop?: { config?: { host?: string } } }).dolphinDesktop?.config?.host;
 const surfaceOf = (hash: string): Surface => (hash === '#/health' ? 'health' : 'workspace');
 
 /* Dolphin Desktop shows two surfaces: the workspace, and System Health for the
@@ -28,11 +33,21 @@ function DesktopRouter() {
   return (
     <React.Suspense fallback={<p className="desktop-loading">Opening Dolphin…</p>}>
       {surface === 'health' ? (
-        <div className="desktop-health">
-          <nav className="desktop-health-bar" aria-label="System Health">
-            <a href="#/workspace"><ArrowLeft size={16} aria-hidden="true" /> Back to Workspace</a>
-          </nav>
-          <SystemHealthView />
+        <div className="glass-health">
+          <header className="glass-health-top">
+            <a className="glass-brand" href="#/workspace" aria-label="Dolphin workspace">
+              <span className="dolphin-mark"><DolphinIcon /></span>
+              Dolphin
+            </a>
+            {host && <span className="glass-host" title={`Working on ${host}`}>{host}</span>}
+            <span className="glass-health-crumb">System Health</span>
+            <a className="glass-health-back" href="#/workspace">
+              <ArrowLeft size={15} aria-hidden="true" /> Back to Workspace
+            </a>
+          </header>
+          <main className="glass-health-stage">
+            <SystemHealthView />
+          </main>
         </div>
       ) : (
         <GlassWorkspace desktop />

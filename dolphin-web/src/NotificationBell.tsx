@@ -28,6 +28,11 @@ function targetOf(item: AppNotification): NotificationTarget | null {
 }
 
 /** Every finished agent turn, pushed by the backend; a click opens its session. */
+/** Turns from one project (or, with no project, one session) replace each other. */
+function sameOrigin(a: AppNotification, b: AppNotification): boolean {
+  return a.project_id ? a.project_id === b.project_id : !b.project_id && a.session_name === b.session_name;
+}
+
 export default function NotificationBell({ onOpen }: { onOpen: (target: NotificationTarget) => void }) {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -78,9 +83,13 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
       }
       if (known.current.has(item.id)) return;
       known.current.add(item.id);
-      setItems((current) => [item, ...current].slice(0, 100));
+      // A project's newest turn replaces its earlier ones: the backend has
+      // marked those read, so they leave the count and their pop-ups go.
+      setItems((current) => [item, ...current.map((entry) => (
+        !entry.read && sameOrigin(entry, item) ? { ...entry, read: true } : entry))].slice(0, 100));
+      setToasts((current) => current.filter((toast) => !sameOrigin(toast, item)));
       if (item.read) return;
-      setUnread((count) => count + 1);
+      void fetchNotifications(1).then((list) => setUnread(list.unread_count), () => setUnread((count) => count + 1));
       // In view, show it beside the bell; the open list already shows it.
       if (document.visibilityState === 'visible' && !openRef.current) {
         setToasts((current) => [item, ...current.filter((toast) => toast.id !== item.id)].slice(0, MAX_TOASTS));

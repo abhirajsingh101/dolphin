@@ -55,6 +55,23 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     const bodyText = await window.locator('body').innerText();
     assert.doesNotMatch(bodyText, /Netdata is unavailable|Backend unavailable/);
 
+    // The page scrolls to its last panels, in the glass panel, under the
+    // window's own header.
+    const scroll = window.locator('.glass-health .health-scroll-area');
+    const room = await scroll.evaluate((element) => element.scrollHeight - element.clientHeight);
+    assert.ok(room > 0, 'System Health is taller than the window');
+    await scroll.hover();
+    await window.mouse.wheel(0, 20_000);
+    await window.waitForFunction(() => {
+      const element = document.querySelector('.glass-health .health-scroll-area');
+      return element.scrollTop >= element.scrollHeight - element.clientHeight - 2;
+    });
+    const last = window.locator('.health-detail-grid').last();
+    assert.ok(await last.isVisible() && (await last.boundingBox()).y < (await window.evaluate(() => innerHeight)), 'the last panels come into view');
+    await window.screenshot({ path: path.join(shots, 'desktop-health-bottom.png') });
+    const region = await window.locator('.glass-health-top').evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-app-region') || getComputedStyle(element).getPropertyValue('app-region'));
+    assert.equal(region, 'drag');
+
     await window.getByRole('link', { name: /Back to Workspace/ }).click();
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
   } finally {

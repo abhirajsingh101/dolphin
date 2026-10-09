@@ -283,3 +283,41 @@ async def test_stream_sends_published_items_and_heartbeats():
     assert await anext(stream) == ": ping\n\n"
     await stream.aclose()
     assert not broadcaster._queues
+
+
+@pytest.mark.asyncio
+async def test_a_new_turn_marks_the_projects_earlier_turns_read(factory, monkeypatch, tmp_path):
+    # The bell counts each project once: its newest turn. Earlier unread turns
+    # from the same project, stored before or found in the same scan, become read;
+    # other projects are untouched. A turn with no project falls back to its session.
+    atlas, docs = tmp_path / "atlas", tmp_path / "docs"
+    atlas.mkdir()
+    docs.mkdir()
+    async with factory() as db:
+        db.add_all([Project(id="atlas", name="Atlas", path=str(atlas)), Project(id="docs", name="Docs", path=str(docs))])
+        await db.commit()
+    at = lambda minute: datetime(2026, 10, 9, 8, minute, tzinfo=timezone.utc)  # noqa: E731
+    turns: list = []
+
+    async def pane_turns():
+        return list(turns)
+
+    monkeypatch.setattr(turn_notifications, "_pane_turns", pane_turns)
+    broadcaster = turn_notifications.Broadcaster()
+
+    turns[:] = [("%1", "atlas-build", str(atlas), {"id": "a1", "provider": "codex", "finished_at": at(1), "summary": ""}),
+                ("%2", "docs-main", str(docs), {"id": "d1", "provider": "codex", "finished_at": at(2), "summary": ""}),
+                ("%9", "scratch", "/", {"id": "s1", "provider": "codex", "finished_at": at(3), "summary": ""})]
+    await turn_notifications.scan_once(factory, broadcaster)
+
+    # A later scan: Atlas finishes twice (another session of the same project),
+    # and the unmatched session once more.
+    turns[:] = [("%3", "atlas-docs", str(atlas), {"id": "a2", "provider": "claude", "finished_at": at(5), "summary": ""}),
+                ("%1", "atlas-build", str(atlas), {"id": "a3", "provider": "codex", "finished_at": at(6), "summary": ""}),
+                ("%9", "scratch", "/", {"id": "s2", "provider": "codex", "finished_at": at(7), "summary": ""})]
+    items = {item["turn_id"]: item for item in await turn_notifications.scan_once(factory, broadcaster)}
+    assert items["a2"]["read"] is True and items["a3"]["read"] is False and items["s2"]["read"] is False
+
+    async with factory() as db:
+        unread = set((await db.scalars(select(Notification.turn_id).where(Notification.read_at.is_(None)))).all())
+    assert unread == {"a3", "d1", "s2"}
