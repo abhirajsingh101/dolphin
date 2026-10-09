@@ -43,6 +43,15 @@ function DesktopRouter() {
 
 applyTheme(readStoredTheme());
 
+// The window has no separate title bar; desktop.css lays each page's header out
+// around this platform's window controls and makes it the drag area.
+const bridge = (window as { dolphinDesktop?: { platform?: string; onFullscreen?: (listener: (on: boolean) => void) => void } }).dolphinDesktop;
+if (bridge?.platform) document.documentElement.dataset.platform = bridge.platform;
+bridge?.onFullscreen?.((on) => {
+  if (on) document.documentElement.dataset.fullscreen = '';
+  else delete document.documentElement.dataset.fullscreen;
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary label="Dolphin">

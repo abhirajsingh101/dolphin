@@ -23,6 +23,28 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor({ timeout: 30_000 });
     await window.getByText(/sessions in view/).waitFor({ timeout: 30_000 });
     assert.equal(await window.getByRole('link', { name: 'Missions' }).count(), 0);
+
+    // No separate title bar: the header is the drag area, its controls stay
+    // clickable, and on Linux it leaves room for the window controls drawn over it.
+    const chrome = await window.evaluate(() => {
+      const region = (selector) => { const style = getComputedStyle(document.querySelector(selector)); return style.getPropertyValue('-webkit-app-region') || style.getPropertyValue('app-region'); };
+      const overlay = navigator.windowControlsOverlay;
+      return {
+        platform: document.documentElement.dataset.platform,
+        header: region('.glass-top'),
+        search: region('.glass-global-search'),
+        overlay: overlay?.visible,
+        controlsWidth: overlay ? window.innerWidth - overlay.getTitlebarAreaRect().width : 0,
+        headerPadding: parseFloat(getComputedStyle(document.querySelector('.glass-top')).paddingRight),
+      };
+    });
+    assert.equal(chrome.platform, process.platform);
+    assert.equal(chrome.header, 'drag');
+    assert.equal(chrome.search, 'no-drag');
+    if (process.platform !== 'darwin') {
+      assert.equal(chrome.overlay, true);
+      assert.ok(chrome.headerPadding >= chrome.controlsWidth - 18, `header leaves room for window controls: ${JSON.stringify(chrome)}`);
+    }
     await window.screenshot({ path: path.join(shots, 'desktop-workspace.png') });
 
     await window.getByRole('link', { name: 'System Health' }).click();

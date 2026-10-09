@@ -8,6 +8,11 @@ const config = ipcRenderer.sendSync('dolphin:config') as { apiBase: string; toke
 
 contextBridge.exposeInMainWorld('dolphinDesktop', {
   config: config ?? undefined,
+  // Lets the page lay out its header around this platform's window controls.
+  platform: process.platform,
+  onFullscreen: (listener: (fullscreen: boolean) => void) => {
+    ipcRenderer.on('dolphin:fullscreen', (_event, fullscreen: boolean) => listener(Boolean(fullscreen)));
+  },
   setBadge: (count: number) => ipcRenderer.send('dolphin:badge', count),
   sshHosts: (): Promise<string[]> => ipcRenderer.invoke('dolphin:ssh-hosts'),
   connect: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:connect', target),

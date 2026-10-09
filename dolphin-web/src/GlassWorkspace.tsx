@@ -78,6 +78,11 @@ function FocusItem({ id, selected, activity, label, onOpen, onUnpin, children }:
 }
 /** `desktop`: Dolphin Desktop's build, which has no Missions or legacy views
     but does have System Health. */
+/** Dolphin Desktop: the machine this window is connected to. */
+const desktopHost = typeof window === 'undefined'
+  ? undefined
+  : (window as { dolphinDesktop?: { config?: { host?: string } } }).dolphinDesktop?.config?.host;
+
 export default function GlassWorkspace({ desktop = false, renderSignals }: {
   desktop?: boolean;
   /** The web app's suggestion tray, shown above the composer. The desktop app has none. */
@@ -673,6 +678,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </span>
           Dolphin
         </a>
+        {desktop && desktopHost && <span className="glass-host" title={`Working on ${desktopHost}`}>{desktopHost}</span>}
         {!desktop && <a className="glass-fleet-link" href="#/fleet">Missions</a>}
         <button
           className="glass-global-search"

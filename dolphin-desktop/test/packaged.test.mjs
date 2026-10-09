@@ -33,6 +33,10 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     await window.waitForURL(/app:\/\/dolphin\/desktop\.html/, { timeout: 120_000 });
     await window.getByRole('region', { name: 'Get started' }).getByRole('button', { name: 'Open Folder' }).waitFor({ timeout: 30_000 });
     await window.screenshot({ path: path.join(shots, 'packaged-first-run.png') });
+    // The whole screen, so the window's own controls (drawn outside the page) show too.
+    if (process.platform === 'darwin') {
+      try { execFileSync('screencapture', ['-x', path.join(shots, 'packaged-window.png')]); } catch { /* no screen access */ }
+    }
 
     // Memory sets itself up in the background, then answers remember and recall.
     const memory = window.getByRole('region', { name: 'Memory' });

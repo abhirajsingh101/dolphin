@@ -35,3 +35,42 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Integrated title bar (dolphin-desktop/src/main.ts, windowChrome). The page's
+   header is the window's drag area; its controls stay clickable. macOS draws
+   its traffic lights over the header's left end, Linux and Windows draw their
+   controls over the right end (the titlebar-area env() values say where). */
+html[data-platform] :is(.glass-top, .desktop-health-bar) {
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+html[data-platform] :is(.glass-top, .desktop-health-bar) :is(a, button, input, select, textarea, label, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+html[data-platform="darwin"]:not([data-fullscreen]) .glass-top {
+  padding-left: 58px;
+}
+html[data-platform="darwin"]:not([data-fullscreen]) .desktop-health-bar {
+  padding-left: 82px;
+}
+html[data-platform]:not([data-platform="darwin"]) .glass-top {
+  padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) - 18px));
+}
+html[data-platform]:not([data-platform="darwin"]) .desktop-health-bar {
+  padding-right: calc(var(--sp-4) + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+.desktop-health-bar {
+  min-height: 44px;
+}
+
+/* Which machine this window works on: the title bar used to say so. */
+.glass-host {
+  overflow: hidden;
+  max-width: 180px;
+  color: var(--glass-muted);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
