@@ -86,7 +86,9 @@ test('the first connection asks to trust the host key inside the app', { timeout
     const asked = app.waitForEvent('window', { predicate: (w) => w.url().includes('askpass.html'), timeout: 60_000 });
     await connect.getByRole('button', { name: 'Connect' }).click();
     const dialog = await asked;
-    await dialog.getByText(/authenticity of host|fingerprint/i).waitFor();
+    // ssh's question, said plainly: which machine, and its key on its own line.
+    await dialog.getByText(/First connection to localhost/).waitFor();
+    assert.match(await dialog.locator('.fingerprint').innerText(), /SHA256:\S+$/);
     await dialog.screenshot({ path: path.join(shots, 'desktop-askpass.png') });
     await dialog.getByRole('button', { name: 'Trust and Connect' }).click();
     await app.waitForEvent('window', { predicate: (w) => w.url().includes('desktop.html'), timeout: 150_000 }).catch(() => undefined);

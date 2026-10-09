@@ -2,25 +2,50 @@
 <html lang="en">
 <head><meta charset="utf-8"><title>Dolphin — SSH</title><link rel="stylesheet" href="style.css"></head>
 <body>
-  <main>
-    <p id="question"></p>
+  <main class="card compact">
+    <div class="prompt-head">
+      <span class="prompt-icon" id="icon" aria-hidden="true"></span>
+      <div>
+        <h2 id="title">SSH</h2>
+        <p id="question"></p>
+      </div>
+    </div>
+    <p class="fingerprint" id="fingerprint" hidden></p>
     <form id="form">
       <label for="answer" hidden>Answer</label>
-      <input id="answer" autocomplete="off" aria-label="Answer">
+      <input id="answer" class="plain" autocomplete="off" aria-label="Answer">
       <button type="submit" id="ok">Continue</button>
     </form>
-    <div id="confirm" hidden>
+    <div class="row" id="confirm" hidden>
+      <button type="button" id="no" class="secondary">Cancel</button>
       <button type="button" id="yes">Trust and Connect</button>
-      <button type="button" id="no" class="host">Cancel</button>
     </div>
   </main>
   <script>
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
     const mode = params.get('mode');
-    document.getElementById('question').textContent = params.get('question');
+    const question = params.get('question') || '';
+    const icons = {
+      key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
+      shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>',
+    };
     const send = (value) => window.dolphinAskpass.answer(id, value);
     if (mode === 'confirm') {
+      // ssh's first-connection question, said plainly, with the fingerprint apart.
+      const host = (question.match(/authenticity of host '([^']+)'/) || [])[1];
+      const fingerprint = ((question.match(/key fingerprint is (\S+)/) || [])[1] || '').replace(/\.$/, '');
+      const kind = (question.match(/(\S+) key fingerprint/) || [])[1];
+      document.getElementById('icon').innerHTML = icons.shield;
+      document.getElementById('title').textContent = host ? `First connection to ${host.split(' ')[0]}` : 'Trust this machine?';
+      document.getElementById('question').textContent = host
+        ? 'Dolphin has not seen this machine before. Check its key matches before you trust it.'
+        : question;
+      if (fingerprint) {
+        const box = document.getElementById('fingerprint');
+        box.textContent = `${kind ? kind + ' ' : ''}${fingerprint}`;
+        box.hidden = false;
+      }
       document.getElementById('form').hidden = true;
       document.getElementById('confirm').hidden = false;
       document.getElementById('yes').addEventListener('click', () => send('yes'));
@@ -28,6 +53,9 @@
       document.getElementById('yes').focus();
     } else {
       const input = document.getElementById('answer');
+      document.getElementById('icon').innerHTML = icons.key;
+      document.getElementById('title').textContent = mode === 'secret' ? 'Password needed' : 'SSH';
+      document.getElementById('question').textContent = question;
       if (mode === 'secret') input.type = 'password';
       input.focus();
       document.getElementById('form').addEventListener('submit', (event) => { event.preventDefault(); send(input.value); });

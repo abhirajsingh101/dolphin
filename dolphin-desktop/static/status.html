@@ -2,14 +2,41 @@
 <html lang="en">
 <head><meta charset="utf-8"><title>Dolphin</title><link rel="stylesheet" href="style.css"></head>
 <body>
-  <main>
-    <img src="dolphin-icon.png" alt="">
+  <main class="card center">
+    <div class="orb loading" id="orb"><img src="dolphin-icon.png" alt=""></div>
     <h1>Dolphin</h1>
-    <p id="status" role="status" aria-live="polite">Opening…</p>
+    <p id="status" class="status" role="status" aria-live="polite">Opening…</p>
+    <div class="progress" id="progress"></div>
+    <div id="failure" hidden>
+      <div class="error-box" id="error" role="alert"></div>
+      <div class="actions">
+        <button type="button" id="retry">Try Again</button>
+        <button type="button" class="secondary" id="logs">Show Logs</button>
+      </div>
+    </div>
   </main>
   <script>
     const status = document.getElementById('status');
-    window.setStatus = (text) => { status.textContent = text; };
+    let pending;
+    // Status lines cross-fade instead of jumping.
+    window.setStatus = (text) => {
+      clearTimeout(pending);
+      status.classList.add('changing');
+      pending = setTimeout(() => { status.textContent = text; status.classList.remove('changing'); }, 160);
+    };
+    // A failure stops the loading motion and offers a way forward.
+    window.setError = (title, detail) => {
+      clearTimeout(pending);
+      status.classList.remove('changing');
+      status.textContent = title;
+      document.getElementById('orb').classList.remove('loading');
+      document.getElementById('progress').hidden = true;
+      document.getElementById('error').textContent = detail;
+      document.getElementById('failure').hidden = false;
+      document.getElementById('retry').focus();
+    };
+    document.getElementById('retry').addEventListener('click', () => window.dolphinDesktop?.retry?.());
+    document.getElementById('logs').addEventListener('click', () => window.dolphinDesktop?.openLogs?.());
     if (location.hash) status.textContent = decodeURIComponent(location.hash.slice(1));
   </script>
 </body>

@@ -64,10 +64,10 @@ function windowChrome(): BrowserWindowConstructorOptions {
   return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', height: HEADER_HEIGHT }, backgroundColor: background };
 }
 
-async function openHost(host: HostSpec, from?: BrowserWindow): Promise<void> {
+async function openHost(host: HostSpec, from?: BrowserWindow, bounds?: Electron.Rectangle): Promise<void> {
   const title = host.kind === 'local' ? 'This Computer' : host.target;
   const window = from ?? new BrowserWindow({
-    width: 1440, height: 900, minWidth: 720, minHeight: 480, show: false, title: `Dolphin — ${title}`,
+    width: 1440, height: 900, ...bounds, minWidth: 720, minHeight: 480, show: false, title: `Dolphin — ${title}`,
     ...windowChrome(),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
@@ -98,9 +98,24 @@ async function openHost(host: HostSpec, from?: BrowserWindow): Promise<void> {
     window.setTitle(`Dolphin — ${state.connection.label}`);
     await window.loadURL(`${APP_ORIGIN}/desktop.html#/workspace`);
   } catch (error) {
-    status(`Could not open ${title}: ${error instanceof Error ? error.message : String(error)}`);
+    const detail = error instanceof Error ? error.message : String(error);
+    void window.webContents.executeJavaScript(
+      `window.setError ? window.setError(${JSON.stringify(`Could not open ${title}`)}, ${JSON.stringify(detail)}) : window.setStatus(${JSON.stringify(detail)})`,
+    ).catch(() => undefined);
   }
 }
+
+// The launch page's buttons after a failure: start this window's host again,
+// or show the helper's logs.
+ipcMain.on('dolphin:retry', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const state = windows.get(event.sender.id);
+  if (!window || !state) return;
+  // A fresh window for the same machine, in the same place; the failed one goes.
+  void openHost(state.host, undefined, window.getBounds());
+  window.close();
+});
+ipcMain.on('dolphin:open-logs', () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')));
 
 function openConnectWindow(): void {
   const window = new BrowserWindow({

@@ -2,36 +2,62 @@
 <html lang="en">
 <head><meta charset="utf-8"><title>Connect to Machine</title><link rel="stylesheet" href="style.css"></head>
 <body>
-  <main>
-    <h1>Connect to Machine</h1>
-    <p>Dolphin connects with your SSH keys and sets itself up on the machine. Your agents run there and keep running when you close Dolphin.</p>
+  <main class="card">
+    <div class="prompt-head">
+      <span class="prompt-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>
+      </span>
+      <div>
+        <h2>Connect to Machine</h2>
+        <p>Uses your SSH keys. Dolphin sets itself up there, and your agents keep running after you close it.</p>
+      </div>
+    </div>
     <form id="form">
       <label for="target" hidden>Host</label>
-      <input id="target" placeholder="gpu-box or user@10.0.0.5" autocomplete="off" autofocus aria-label="SSH host">
-      <button type="submit">Connect</button>
+      <div class="field">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
+        <input id="target" placeholder="gpu-box or user@10.0.0.5" autocomplete="off" autofocus aria-label="SSH host">
+      </div>
+      <button type="submit" id="connect">Connect</button>
     </form>
     <p id="error" class="error" role="alert"></p>
+    <p class="hosts-title" id="hosts-title" hidden>From your SSH config</p>
     <ul id="hosts" aria-label="Hosts from your SSH config"></ul>
   </main>
   <script>
     const form = document.getElementById('form');
     const input = document.getElementById('target');
     const error = document.getElementById('error');
+    const button = document.getElementById('connect');
+    const serverIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>';
+    function busy(on) {
+      button.disabled = on;
+      input.disabled = on;
+      for (const host of document.querySelectorAll('button.host')) host.disabled = on;
+      button.innerHTML = on ? '<span class="spinner" aria-hidden="true"></span> Connecting' : 'Connect';
+    }
     async function connect(target) {
       error.textContent = '';
-      const result = await window.dolphinDesktop.connect(target.trim());
-      if (result && result.error) error.textContent = result.error;
+      busy(true);
+      try {
+        const result = await window.dolphinDesktop.connect(target.trim());
+        if (result && result.error) error.textContent = result.error;
+      } finally {
+        busy(false);
+      }
     }
     form.addEventListener('submit', (event) => { event.preventDefault(); if (input.value.trim()) connect(input.value); });
     window.dolphinDesktop.sshHosts().then((hosts) => {
       const list = document.getElementById('hosts');
+      document.getElementById('hosts-title').hidden = hosts.length === 0;
       for (const host of hosts) {
         const item = document.createElement('li');
-        const button = document.createElement('button');
-        button.className = 'host';
-        button.textContent = host;
-        button.addEventListener('click', () => connect(host));
-        item.append(button);
+        const choice = document.createElement('button');
+        choice.className = 'host';
+        choice.innerHTML = serverIcon;
+        choice.append(document.createTextNode(host));
+        choice.addEventListener('click', () => connect(host));
+        item.append(choice);
         list.append(item);
       }
     });

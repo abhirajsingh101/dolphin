@@ -74,6 +74,17 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
 
     await window.getByRole('link', { name: /Back to Workspace/ }).click();
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
+
+    // Motion: dialogs scale in from their scrim; reduced motion turns it off.
+    await window.getByRole('button', { name: 'Open command palette' }).click();
+    const panelAnimation = () => window.locator('.cp-panel').evaluate((element) => getComputedStyle(element).animationName);
+    assert.equal(await panelAnimation(), 'dd-pop');
+    await window.keyboard.press('Escape');
+    await window.emulateMedia({ reducedMotion: 'reduce' });
+    await window.getByRole('button', { name: 'Open command palette' }).click();
+    assert.equal(await panelAnimation(), 'none');
+    await window.keyboard.press('Escape');
+    await window.emulateMedia({ reducedMotion: 'no-preference' });
   } finally {
     // The app exits directly on quit (see main.ts will-quit), which Playwright's
     // close() does not notice; wait for the process instead.

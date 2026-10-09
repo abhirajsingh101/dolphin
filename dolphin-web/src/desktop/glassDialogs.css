@@ -1,0 +1,148 @@
+/* Dolphin Desktop paint for surfaces the web app shares in its plain style:
+   the folder picker and command palette become glass (their own tokens point
+   at the glass ones), the machine name is a chip, and the loading splash
+   matches the launch page. */
+
+.picker-panel,
+.cp-panel {
+  --surface: var(--glass-solid);
+  --surface-2: transparent;
+  --surface-3: var(--glass-selection);
+  --border: var(--glass-edge);
+  --border-interactive: var(--glass-edge);
+  --text: var(--glass-text);
+  --text-2: var(--glass-muted);
+  --text-3: var(--glass-muted);
+  --accent: var(--glass-accent);
+  --accent-soft: var(--glass-selection);
+  border-color: var(--glass-edge);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--glass-sheen), transparent 45%), var(--glass-panel);
+  box-shadow: 0 24px 60px var(--glass-dialog-shadow), var(--glass-shadow);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+.picker-scrim,
+.new-session-scrim {
+  background: var(--glass-scrim);
+  backdrop-filter: blur(4px);
+}
+.picker-footer {
+  background: linear-gradient(110deg, var(--glass-bubble), transparent);
+}
+.picker-panel .dt-input {
+  border-color: var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-bubble);
+}
+.picker-panel .dt-btn {
+  border-radius: var(--r-full);
+}
+.new-session-panel {
+  --surface: var(--glass-solid);
+  border-color: var(--glass-edge);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--glass-sheen), transparent 45%), var(--glass-panel);
+  box-shadow: 0 24px 60px var(--glass-dialog-shadow), var(--glass-shadow);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+.new-session-header {
+  border-bottom-color: var(--glass-edge);
+}
+
+/* The machine this window works on, as a chip beside the brand. */
+.glass-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  margin-left: -6px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-full);
+  background: var(--glass-bubble);
+  color: var(--glass-muted);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glass-host::before {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--glass-success);
+  content: '';
+}
+.glass-workspace .glass-brand,
+.glass-health .glass-brand {
+  min-width: 0;
+}
+
+/* Loading: the launch page's mark and bar, inside the app. */
+.desktop-splash {
+  display: grid;
+  height: 100dvh;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  color: var(--glass-text);
+  font: 13px/1.5 var(--font-sans);
+  background:
+    radial-gradient(ellipse at 50% -25%, var(--glass-glow), transparent 65%),
+    radial-gradient(ellipse at 100% 85%, var(--glass-glow), transparent 60%),
+    linear-gradient(155deg, transparent 53%, var(--glass-ridge) 54%, transparent 58%),
+    var(--glass-bg);
+}
+.desktop-splash .dolphin-orb {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  place-items: center;
+  border: 1px solid var(--glass-edge);
+  border-radius: 50%;
+  background: var(--glass-orb);
+  box-shadow: var(--glass-icon-shadow);
+}
+.desktop-splash .dolphin-orb .dolphin-symbol {
+  width: 48px;
+  height: 48px;
+}
+.desktop-splash p {
+  margin: 0;
+  color: var(--glass-muted);
+}
+.desktop-splash-bar {
+  position: relative;
+  width: 160px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--glass-selection);
+}
+.desktop-splash-bar::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: var(--r-full);
+  background: linear-gradient(90deg, transparent, var(--glass-accent), transparent);
+  content: '';
+}
+
+/* New Session: each choice's icon on a small glass tile. */
+.new-session-panel .new-session-option > svg {
+  box-sizing: content-box;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+  padding: 8px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-bubble);
+  color: var(--glass-accent);
+}
+.new-session-option {
+  align-items: center;
+}

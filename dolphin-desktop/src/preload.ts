@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
     ipcRenderer.on('dolphin:fullscreen', (_event, fullscreen: boolean) => listener(Boolean(fullscreen)));
   },
   setBadge: (count: number) => ipcRenderer.send('dolphin:badge', count),
+  retry: () => ipcRenderer.send('dolphin:retry'),
+  openLogs: () => ipcRenderer.send('dolphin:open-logs'),
   sshHosts: (): Promise<string[]> => ipcRenderer.invoke('dolphin:ssh-hosts'),
   connect: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:connect', target),
 });

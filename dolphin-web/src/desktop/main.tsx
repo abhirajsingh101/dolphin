@@ -11,7 +11,9 @@ import ErrorBoundary from '../ErrorBoundary';
 import { applyTheme, readStoredTheme } from '../theme';
 import '../glass.css';
 import './glassHealth.css';
+import './glassDialogs.css';
 import './desktop.css';
+import './motion.css';
 
 const GlassWorkspace = React.lazy(() => import('../GlassWorkspace'));
 const SystemHealthView = React.lazy(() => import('../SystemHealthView'));
@@ -20,6 +22,17 @@ type Surface = 'workspace' | 'health';
 /** The machine this window works on (the preload hands it over). */
 const host = (window as { dolphinDesktop?: { config?: { host?: string } } }).dolphinDesktop?.config?.host;
 const surfaceOf = (hash: string): Surface => (hash === '#/health' ? 'health' : 'workspace');
+
+/** While a surface loads: the launch page's breathing mark and sweeping bar. */
+function DesktopSplash() {
+  return (
+    <div className="desktop-splash" role="status" aria-live="polite">
+      <span className="dolphin-orb"><DolphinIcon /></span>
+      <p>Opening Dolphin…</p>
+      <span className="desktop-splash-bar" aria-hidden="true" />
+    </div>
+  );
+}
 
 /* Dolphin Desktop shows two surfaces: the workspace, and System Health for the
    machine this window is connected to. Nothing else from the web app ships. */
@@ -31,7 +44,7 @@ function DesktopRouter() {
     return () => window.removeEventListener('hashchange', changed);
   }, []);
   return (
-    <React.Suspense fallback={<p className="desktop-loading">Opening Dolphin…</p>}>
+    <React.Suspense fallback={<DesktopSplash />}>
       {surface === 'health' ? (
         <div className="glass-health">
           <header className="glass-health-top">

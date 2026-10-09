@@ -1,9 +1,4 @@
-/* Dolphin Desktop chrome around System Health. Paint comes from tokens.css. */
-.desktop-loading {
-  margin: 0;
-  padding: var(--sp-6);
-  color: var(--text-2);
-}
+/* Dolphin Desktop's window chrome. Paint comes from tokens.css. */
 /* Integrated title bar (dolphin-desktop/src/main.ts, windowChrome). The page's
    header is the window's drag area; its controls stay clickable. macOS draws
    its traffic lights over the header's left end, Linux and Windows draw their
@@ -27,12 +22,3 @@ html[data-platform]:not([data-platform="darwin"]) :is(.glass-top, .glass-health-
   padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) - 18px));
 }
 
-/* Which machine this window works on: the title bar used to say so. */
-.glass-host {
-  overflow: hidden;
-  max-width: 180px;
-  color: var(--glass-muted);
-  font-size: var(--fs-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}

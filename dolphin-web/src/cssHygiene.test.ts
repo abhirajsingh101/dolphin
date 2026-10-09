@@ -33,7 +33,10 @@ const ALLOWED_RADII = ['var(--r-sm)', 'var(--r-md)', 'var(--r-lg)', 'var(--r-xl)
 // bounded panel-size transition, on #/workspace only. It is exempt from the two
 // motion guards below and nothing else is; in exchange the sheet must switch
 // all of it off under prefers-reduced-motion, which the last guard checks.
-const MOTION_EXCEPTIONS = new Set(['glass.css']);
+// desktop/motion.css carries the same exception to Dolphin Desktop, at the
+// owner's request (design contract, "Dolphin Desktop motion", 2026-10-09);
+// only the desktop entry loads it.
+const MOTION_EXCEPTIONS = new Set(['glass.css', 'desktop/motion.css']);
 
 // CSS named colors ("white", "black", …) are literal color values that dodge
 // both the hex guard and the rgb()/rgba() guard above — this is exactly how
