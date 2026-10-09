@@ -267,3 +267,33 @@ async def test_self_client_reaches_the_helper_through_its_socket(tmp_path, monke
         assert response.status_code == 200 and [p["name"] for p in response.json()] == ["Inbox"]
     finally:
         _helper(home, "stop")
+
+
+def test_a_newer_helper_replaces_an_older_running_one(tmp_path):
+    # After an app update, the new helper must take over from the old one,
+    # which is still running from before (it outlives the app on purpose).
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DOLPHIN_") and k != "DATABASE_URL"}
+    env.update(DOLPHIN_HOME=str(home), DOLPHIN_GBRAIN="off")
+    old = "import app.version as v; v.VERSION = '0.0.1'; from app.helper import main; raise SystemExit(main(['serve', '--port', '0', '--detach']))"
+    try:
+        subprocess.run([sys.executable, "-c", old], cwd=BACKEND, env=env, check=True, timeout=60)
+        before = _wait_server(home)
+        assert before["version"] == "0.0.1"
+
+        _helper(home, "serve", "--port", "0", "--detach", check=True)
+        for _ in range(150):
+            after = json.loads((home / "run" / "server.json").read_text()) if (home / "run" / "server.json").exists() else {}
+            if after.get("pid") not in (None, before["pid"]):
+                break
+            time.sleep(0.2)
+        from app.version import VERSION
+
+        assert after["version"] == VERSION and after["pid"] != before["pid"]
+        _wait_server(home)
+
+        # The same version, or a newer one, is reused rather than replaced.
+        again = json.loads(_helper(home, "serve", "--port", "0").stdout)
+        assert again["pid"] == after["pid"]
+    finally:
+        _helper(home, "stop")

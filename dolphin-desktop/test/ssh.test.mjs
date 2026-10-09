@@ -4,13 +4,14 @@
 // is not available with keys.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
 
 const root = path.resolve(import.meta.dirname, '..');
+const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
 const bundle = path.join(root, 'helper-bundles', `${process.platform}-${process.arch === 'arm64' ? 'arm64' : 'x64'}.tar.xz`);
 let canSsh = true;
@@ -44,14 +45,14 @@ test('Connect to Machine sets Dolphin up over SSH and opens its workspace', { ti
     await remote.getByText(/sessions in view/).waitFor({ timeout: 30_000 });
     const titles = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.getTitle()));
     assert.ok(titles.includes('Dolphin — localhost'), `window titles: ${titles}`);
-    assert.ok(existsSync(path.join(remoteHome, 'versions', '0.1.0', 'dolphin-helper', 'dolphin-helper')), 'helper installed on the remote');
+    assert.ok(existsSync(path.join(remoteHome, 'versions', version, 'dolphin-helper', 'dolphin-helper')), 'helper installed on the remote');
     assert.ok(existsSync(path.join(remoteHome, 'run', 'server.json')), 'remote helper running');
     await remote.screenshot({ path: path.join(shots, 'desktop-ssh.png') });
   } finally {
     const exited = new Promise((resolve) => app.process().once('exit', resolve));
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await exited;
-    const helper = path.join(remoteHome, 'versions', '0.1.0', 'dolphin-helper', 'dolphin-helper');
+    const helper = path.join(remoteHome, 'versions', version, 'dolphin-helper', 'dolphin-helper');
     for (const [binary, home] of [[helper, remoteHome], [path.join(root, 'helper-bundles', `${process.platform}-x64`, 'dolphin-helper', 'dolphin-helper'), localHome]]) {
       try { execFileSync(binary, ['stop'], { env: { ...process.env, DOLPHIN_HOME: home } }); } catch { /* not running */ }
     }
@@ -95,7 +96,7 @@ test('the first connection asks to trust the host key inside the app', { timeout
     const exited = new Promise((resolve) => app.process().once('exit', resolve));
     await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
     await exited;
-    const helper = path.join(remoteHome, 'versions', '0.1.0', 'dolphin-helper', 'dolphin-helper');
+    const helper = path.join(remoteHome, 'versions', version, 'dolphin-helper', 'dolphin-helper');
     try { execFileSync(helper, ['stop'], { env: { ...process.env, DOLPHIN_HOME: remoteHome } }); } catch { /* not running */ }
     try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env: { ...process.env, DOLPHIN_HOME: localHome } }); } catch { /* not running */ }
     rmSync(localHome, { recursive: true, force: true });

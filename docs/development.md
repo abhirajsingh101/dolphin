@@ -72,4 +72,6 @@ Bump `version` in `dolphin-desktop/package.json` and `VERSION` in
 a tag `desktop-vX.Y.Z`. The Desktop workflow builds the helper on Linux x64,
 macOS arm64 and macOS x64, smoke-tests each with the host's tmux and with the
 bundled one, packages each app with every helper, runs its first launch with an
-empty `HOME`, and drafts a GitHub release with the installers.
+empty `HOME`, and drafts a GitHub release with the installers and `latest-linux.yml`. Publish
+the draft to ship it: installed apps only see published releases
+(`src/updates.ts`).

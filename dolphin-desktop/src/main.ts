@@ -10,6 +10,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { startAskpass } from './askpass';
+import { checkFromMenu, startUpdateChecks } from './updates';
 import { connectLocal, connectSsh, Connection, helperDir, HostSpec, setSshEnv, sshConfigHosts } from './hosts';
 
 const APP_ORIGIN = 'app://dolphin';
@@ -130,7 +131,19 @@ ipcMain.on('dolphin:badge', (_event, count: unknown) => {
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    ...(process.platform === 'darwin' ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' as const },
+        { label: 'Check for Updates…', click: () => void checkFromMenu(BrowserWindow.getFocusedWindow() ?? undefined) },
+        { type: 'separator' as const },
+        { role: 'services' as const },
+        { type: 'separator' as const },
+        { role: 'hide' as const }, { role: 'hideOthers' as const }, { role: 'unhide' as const },
+        { type: 'separator' as const },
+        { role: 'quit' as const },
+      ],
+    }] : []),
     {
       label: 'File',
       submenu: [
@@ -143,7 +156,10 @@ function buildMenu(): void {
     { role: 'editMenu' },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [{ label: 'Dolphin Logs', click: () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')) }] },
+    { role: 'help', submenu: [
+      ...(process.platform === 'darwin' ? [] : [{ label: 'Check for Updates…', click: () => void checkFromMenu(BrowserWindow.getFocusedWindow() ?? undefined) }]),
+      { label: 'Dolphin Logs', click: () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')) },
+    ] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -161,6 +177,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     serveApp();
     setSshEnv(startAskpass());
+    startUpdateChecks();
     buildMenu();
     void openHost({ kind: 'local' });
     app.on('activate', () => {

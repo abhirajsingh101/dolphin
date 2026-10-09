@@ -140,10 +140,12 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: app-${{ matrix.target }}
+          # latest-linux.yml is what an installed AppImage reads to update itself.
           path: |
             dolphin-desktop/release/*.AppImage
             dolphin-desktop/release/*.deb
             dolphin-desktop/release/*.dmg
+            dolphin-desktop/release/latest-linux.yml
           if-no-files-found: error
 
   release:

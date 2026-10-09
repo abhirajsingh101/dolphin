@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   config: config ?? undefined,
   // Lets the page lay out its header around this platform's window controls.
   platform: process.platform,
+  // App updates (updates.ts): the current state, changes to it, and the button.
+  update: () => ipcRenderer.sendSync('dolphin:update-state'),
+  onUpdate: (listener: (state: unknown) => void) => {
+    ipcRenderer.on('dolphin:update', (_event, state: unknown) => listener(state));
+  },
+  applyUpdate: (): Promise<void> => ipcRenderer.invoke('dolphin:update-apply'),
   onFullscreen: (listener: (fullscreen: boolean) => void) => {
     ipcRenderer.on('dolphin:fullscreen', (_event, fullscreen: boolean) => listener(Boolean(fullscreen)));
   },

@@ -198,6 +198,11 @@ def serve(args: argparse.Namespace) -> int:
     os.chmod(base, 0o700)
 
     running = _running(base)
+    if running and _older(running.get("version")):
+        # The app was updated and brought a newer helper. Hand over: stop the
+        # old one (tmux sessions are untouched; they belong to the tmux server).
+        _stop_running(base)
+        running = _running(base)
     if running:
         print(json.dumps(running))
         return 0
@@ -284,19 +289,41 @@ def status(_args: argparse.Namespace) -> int:
     return 0 if running else 3
 
 
+def _version_key(version: object) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in str(version).split("."))
+    except ValueError:
+        return (0,)
+
+
+def _older(version: object) -> bool:
+    """A running helper older than this one (an unknown version counts as older)."""
+    return _version_key(version) < _version_key(VERSION)
+
+
+def _stop_running(base: Path) -> bool:
+    running = _running(base)
+    if not running or "pid" not in running:
+        return True
+    try:
+        os.kill(int(running["pid"]), signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    for _ in range(100):
+        if not _running(base):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def stop(_args: argparse.Namespace) -> int:
     running = _running(home())
     if not running or "pid" not in running:
         print(json.dumps({"running": False}))
         return 0
-    os.kill(int(running["pid"]), signal.SIGTERM)
-    for _ in range(100):
-        if not _running(home()):
-            print(json.dumps({"stopped": True}))
-            return 0
-        time.sleep(0.1)
-    print(json.dumps({"stopped": False}))
-    return 1
+    stopped = _stop_running(home())
+    print(json.dumps({"stopped": stopped}))
+    return 0 if stopped else 1
 
 
 def main(argv: list[str] | None = None) -> int:

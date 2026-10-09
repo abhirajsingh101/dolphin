@@ -48,6 +48,19 @@ Download the installer for your platform from
 macOS builds are not signed yet. On first open, right-click Dolphin in
 Applications and choose Open.
 
+## Updates
+
+Dolphin checks for a new release when it starts and every six hours, and from
+Check for Updates… in the Dolphin menu (Help on Linux).
+
+- **AppImage:** the update downloads in the background; choose Restart to
+  Update when it suits you.
+- **macOS and .deb:** Dolphin tells you a new version is out and opens the
+  right installer. macOS cannot update an unsigned app in place yet.
+
+Your terminals keep running through an update: they belong to tmux, and the new
+helper simply takes over from the old one, here and on your SSH machines.
+
 ## How it works
 
 The app starts a small helper process on the machine it is working with. The

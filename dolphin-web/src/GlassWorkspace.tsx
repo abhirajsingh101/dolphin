@@ -11,6 +11,7 @@ import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
 import AgentHooksPrompt from './AgentHooksPrompt';
 import BrainStatus from './BrainStatus';
+import UpdateNotice from './UpdateNotice';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const DesktopStart = lazy(() => import('./DesktopStart'));
@@ -964,6 +965,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 </>
               )}
             </div>
+            {desktop && <UpdateNotice />}
             <BrainStatus />
             {desktop && <AgentHooksPrompt />}
             {renderSignals?.((text) => { setDraft(text); composerInput.current?.focus(); })}
