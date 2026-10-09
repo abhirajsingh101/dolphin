@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Connect to Machine</title><link rel="stylesheet" href="style.css"></head>
+<body>
+  <main>
+    <h1>Connect to Machine</h1>
+    <p>Dolphin connects with your SSH keys and sets itself up on the machine. Your agents run there and keep running when you close Dolphin.</p>
+    <form id="form">
+      <label for="target" hidden>Host</label>
+      <input id="target" placeholder="gpu-box or user@10.0.0.5" autocomplete="off" autofocus aria-label="SSH host">
+      <button type="submit">Connect</button>
+    </form>
+    <p id="error" class="error" role="alert"></p>
+    <ul id="hosts" aria-label="Hosts from your SSH config"></ul>
+  </main>
+  <script>
+    const form = document.getElementById('form');
+    const input = document.getElementById('target');
+    const error = document.getElementById('error');
+    async function connect(target) {
+      error.textContent = '';
+      const result = await window.dolphinDesktop.connect(target.trim());
+      if (result && result.error) error.textContent = result.error;
+    }
+    form.addEventListener('submit', (event) => { event.preventDefault(); if (input.value.trim()) connect(input.value); });
+    window.dolphinDesktop.sshHosts().then((hosts) => {
+      const list = document.getElementById('hosts');
+      for (const host of hosts) {
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.className = 'host';
+        button.textContent = host;
+        button.addEventListener('click', () => connect(host));
+        item.append(button);
+        list.append(item);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+diff --git a/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts b/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
+index 9121eab..c03c14f 100644
+--- a/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
++++ b/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
+@@ -24,6 +24,7 @@ export interface TerminalPaneProps {
+     onSessionChanged: () => void;
+     dictationTargetId?: string;
+     enableWebgl?: boolean;
++    theme?: import("@xterm/xterm").ITheme;
+     workspaceControls?: TerminalWorkspaceControls;
+ }
+ export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId, enableWebgl, workspaceControls, }: TerminalPaneProps): import("react").JSX.Element;
+diff --git a/node_modules/@dolphin-terminal/react/dist/TerminalPane.js b/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
+index 510dee7..601e876 100644
+--- a/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
++++ b/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
+@@ -132,7 +132,7 @@ function terminalCopyScrollAnchor(terminal) {
+         rowsFromBottom: Math.max(0, buffer.baseY - buffer.viewportY),
+     };
+ }
+-export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId = 'dolphin-terminal-dictation-target', enableWebgl = true, workspaceControls, }) {
++export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId = 'dolphin-terminal-dictation-target', enableWebgl = true, workspaceControls, theme, }) {
+     const { automation, client, icons: { Maximize2, Minimize2, Paperclip, Power, RefreshCw, TerminalSquare, TextSelect, X, }, labels, slots, } = useTerminalRuntime();
+     const { activateTarget, clearTarget } = useDictation();
+     const closeSession = client.closeSession.bind(client);
+@@ -230,6 +230,9 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+         fullscreenStateRef.current = isFullscreen;
+         fullscreenChangeRef.current?.(isFullscreen);
+     }, [isFullscreen]);
++    useEffect(() => {
++        if (terminalRef.current && theme) terminalRef.current.options.theme = theme;
++    }, [theme]);
+     useEffect(() => () => {
+         if (fullscreenStateRef.current)
+             fullscreenChangeRef.current?.(false);
+@@ -298,6 +301,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+             return;
+         const terminal = new Terminal({
+             cursorBlink: true,
++            allowTransparency: true,
+             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+             fontSize: 13,
+             lineHeight: 1.2,
+@@ -315,6 +319,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+                 magenta: '#c678dd',
+                 cyan: '#56b6c2',
+                 white: '#dcdcdc',
++                ...theme,
+             },
+         });
+         const fit = new FitAddon();

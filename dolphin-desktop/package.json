@@ -1,0 +1,75 @@
+{
+  "name": "dolphin-desktop",
+  "productName": "Dolphin",
+  "version": "0.1.0",
+  "description": "Run Claude Code and Codex in tmux, on this computer or any machine over SSH.",
+  "main": "dist/main.js",
+  "private": true,
+  "license": "MIT",
+  "author": {
+    "name": "Abhiraj Singh",
+    "url": "https://github.com/abhirajsingh101"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "renderer": "cd ../dolphin-web && npx vite build --config vite.desktop.config.ts",
+    "start": "npm run build && electron .",
+    "test": "npm run build && xvfb-run -a node --test --test-concurrency=1 test/*.test.mjs",
+    "dist": "npm run renderer && npm run build && electron-builder --publish never"
+  },
+  "build": {
+    "appId": "dev.dolphin.desktop",
+    "productName": "Dolphin",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "static/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dolphin-web/dist-desktop",
+        "to": "renderer"
+      },
+      {
+        "from": "helper-bundles",
+        "to": "helper",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "../dolphin-web/public/brand/dolphin-icon.png",
+      "maintainer": "Abhiraj Singh <127468045+abhirajsingh101@users.noreply.github.com>",
+      "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "../dolphin-web/public/brand/dolphin-icon.png"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "playwright": "^1.64.0",
+    "typescript": "^7.0.2"
+  },
+  "homepage": "https://github.com/abhirajsingh101/dolphin",
+  "desktopName": "dolphin-desktop.desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abhirajsingh101/dolphin.git"
+  }
+}

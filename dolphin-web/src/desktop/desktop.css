@@ -1,0 +1,37 @@
+/* Dolphin Desktop chrome around System Health. Paint comes from tokens.css. */
+.desktop-loading {
+  margin: 0;
+  padding: var(--sp-6);
+  color: var(--text-2);
+}
+.desktop-health {
+  min-height: 100dvh;
+  background: var(--bg);
+}
+.desktop-health-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.desktop-health-bar a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+.desktop-health-bar a:hover {
+  background: var(--surface-2);
+}
+.desktop-health-bar a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

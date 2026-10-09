@@ -1,0 +1,271 @@
+/* Design tokens. Single source of truth.
+   No other stylesheet may declare a raw colour. */
+
+@font-face {
+  font-family: Geist;
+  src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+
+  --bg: #f4f2ef;
+  --surface: #ffffff;
+  --surface-2: #faf9f7;
+  --surface-3: #f0ede8;
+  --border: #e5e1da;
+  --border-interactive: #8e887e;
+  --text: #1a1816;
+  --text-2: #57524b;
+  --text-3: #716b62;
+  --accent: #1f6f70;
+  --accent-hover: #085859;
+  --accent-soft: #e4efee;
+  --accent-on: #ffffff;
+  --ok: #2f6f4e;
+  --ok-hover: #185837;
+  --ok-soft: #e6f1ea;
+  --ok-on: #ffffff;
+  --warn: #96601a;
+  --warn-hover: #7f4903;
+  --warn-soft: #f7eedf;
+  --warn-on: #ffffff;
+  --danger: #a93b2c;
+  --danger-hover: #912314;
+  --danger-soft: #f8eae7;
+  --danger-on: #ffffff;
+  --scrim: rgb(0 0 0 / 32%);
+
+  /* Per-project identity dots. Projects arrive from the backend carrying
+     Todoist-era hexes (#3B82F6, #246FE0, #D1453B) that read as three foreign
+     accents in a teal-locked palette. The dot is still a useful identity cue,
+     so stored colours are mapped onto these six slots (projectIdentity.ts):
+     identity survives, the palette stays one family. Four reuse the semantic
+     hues; two are their nearest harmonised neighbours. Each is >=3:1 against
+     --surface-2, the rail background — see tokens.test.ts. */
+  --proj-1: #1f6f70;
+  --proj-2: #8a5716;
+  --proj-3: #a93b2c;
+  --proj-4: #405c87;
+  --proj-5: #2f6f4e;
+  --proj-6: #6a4f8c;
+
+  /* Terminal chrome — a bezel, not a surface. It is intentionally ALWAYS
+     dark regardless of app theme (a real terminal doesn't turn white in
+     light mode), so these are theme-invariant: defined once here, and
+     deliberately NOT redeclared in :root[data-theme="dark"] below. Do not
+     substitute --surface-3/--text-3/--border/etc for this region — those
+     flip with the theme and were the root cause of the light-on-dark bug
+     this palette fixes. AA-verified: see tokens.test.ts. */
+  --term-bg: #111110;
+  --term-surface: #1c1b19;
+  --term-hover: #26241f;
+  --term-border: #3d3a36;
+  --term-text: #ededea;
+  --term-muted: #8a847b;
+  --term-live-bg: #123a22;
+  --term-live-text: #4fb37a;
+  --term-error-bg: #431813;
+  --term-error-text: #e0796a;
+  --term-idle-bg: #2b2723;
+  --term-idle-text: #9a948b;
+  --term-warn-bg: #3a2f12;
+  --term-warn-text: #f5dc74;
+  --term-warn-border: #72621f;
+  --term-link: #7cb7ef;
+
+  --sh-1: 0 1px 2px rgba(28, 24, 20, 0.05);
+  --sh-2: 0 2px 4px -1px rgba(28, 24, 20, 0.06), 0 4px 12px -2px rgba(28, 24, 20, 0.05);
+  --sh-3: 0 12px 32px -8px rgba(28, 24, 20, 0.16), 0 2px 6px rgba(28, 24, 20, 0.06);
+
+  --font-sans: Geist, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  --fs-display: 25px;
+  --fs-xl: 19px;
+  --fs-lg: 16px;
+  --fs-md: 14px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+  --fs-2xs: 11px;
+  --ls-display: -0.022em;
+  --ls-tight: -0.011em;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-strong: 530;
+  --fw-bold: 600;
+
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-full: 999px;
+
+  /* MOTION_INTENSITY 3 bounds every transition to 120-200ms, so the scale
+     stops at 200. A --d3: 320ms used to live here; its only consumer was the
+     board's card entrance animation, which the same dial forbids. Both are
+     gone — keeping an out-of-band duration around only invites the next
+     out-of-band transition. */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --d1: 120ms; --d2: 200ms;
+
+  --z-base: 0; --z-sticky: 10; --z-popover: 30; --z-dialog: 50; --z-toast: 70;
+}
+
+/* NOTE: the attribute selector must use DOUBLE quotes — tokens.test.ts locates
+   this block by the literal string `:root[data-theme="dark"] {`. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #131211;
+  --surface: #1c1a18;
+  --surface-2: #211f1c;
+  --surface-3: #2a2724;
+  --border: #302d29;
+  --border-interactive: #74706b;
+  --text: #edeae5;
+  --text-2: #ada69c;
+  --text-3: #948d83;
+  --accent: #4fb3ae;
+  --accent-hover: #69cdc8;
+  --accent-soft: #1b3634;
+  --accent-on: #0e1a19;
+  --ok: #5fbf8c;
+  --ok-hover: #79d9a6;
+  --ok-soft: #1a2e24;
+  --ok-on: #141210;
+  --warn: #d2a257;
+  --warn-hover: #ebbb70;
+  --warn-soft: #332818;
+  --warn-on: #141210;
+  --danger: #e0796a;
+  --danger-hover: #f99283;
+  --danger-soft: #361e1a;
+  --danger-on: #141210;
+
+  --proj-1: #4fb3ae;
+  --proj-2: #d2a257;
+  --proj-3: #e0796a;
+  --proj-4: #8aa6d4;
+  --proj-5: #5fbf8c;
+  --proj-6: #b096dc;
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-2: 0 2px 4px -1px rgba(0, 0, 0, 0.45), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+  --sh-3: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --d1: 0ms; --d2: 0ms; }
+}
+
+/* Typographic base. Every number in this app refreshes on a poll; proportional
+   figures make counts, percentages and timestamps jitter on each update. */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar chrome. Left unstyled, every scroll region in the app renders the
+   platform's light-grey bar — which is correct in light mode and a bright
+   stripe against a #131211 canvas in dark. Both engines are covered: Firefox
+   reads scrollbar-*, Chromium reads ::-webkit-scrollbar and ignores the
+   former. The thumb is a token, so it flips with the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-interactive) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track { background: transparent; }
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--r-full);
+  background: var(--border);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover { background: var(--border-interactive); background-clip: content-box; }
+
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Dolphin glass workspace: readable content over translucent chrome. */
+:root {
+ /* The glass terminal is smoked in both themes, so these are not themed. */
+ --glass-term-border: rgba(163,196,231,.16);
+ --glass-term-hover: rgba(139,188,243,.14);
+ --glass-term-text: #dce7f5;
+ --glass-term-muted: #a5b6ca;
+ --glass-term-live: #69c9a6;
+ --glass-term-link: #a8ceff;
+ --glass-term-surface: linear-gradient(145deg, rgba(27,49,73,.88), rgba(15,29,46,.94));
+ --glass-term-sheen: rgba(211,233,255,.05);
+ --glass-term-toolbar: rgba(144,187,232,.045);
+ --glass-term-fullscreen: linear-gradient(145deg,#20364d,#101e30);
+ --glass-term-copy: #172a3e;
+ --glass-float-shadow: rgba(10,25,45,.18);
+ --glass-dialog-shadow: rgba(10,25,45,.28);
+ --glass-scrim: rgba(12,25,42,.25);
+ --glass-bg: #cbdcf0;
+ --glass-text: #192943;
+ --glass-muted: #5b708d;
+ --glass-panel: rgba(242,248,255,.54);
+ --glass-edge: rgba(255,255,255,.88);
+ --glass-shadow: 0 16px 42px rgba(40,73,115,.1), 0 2px 6px rgba(40,73,115,.04), inset 0 1px 0 rgba(255,255,255,1), inset 0 -1px 0 rgba(255,255,255,.48);
+ --glass-accent: #2878ef;
+ --glass-selection: rgba(81,147,248,.15);
+ --glass-bubble: rgba(237,245,255,.66);
+ --glass-glow: rgba(255,255,255,.95);
+ --glass-ridge: rgba(255,255,255,.38);
+ --glass-success: #23aa83;
+ --glass-alert: #825011;
+ --glass-sheen: rgba(255,255,255,.65);
+ --glass-tint: rgba(94,154,227,.12);
+ --glass-solid: #eef5fc;
+ --glass-dock-fill: rgba(244,250,255,.72);
+ --glass-icon-shadow: 0 4px 14px rgba(52,133,243,.2);
+ --glass-accent-strong: #1671eb;
+ --glass-orb: linear-gradient(145deg,#f8fcff 5%,#b7dcff 50%,#72b8fb 100%);
+ --glass-icon-ink: #086bcb;
+}
+:root[data-theme='dark'] {
+ --glass-bg: #091421;
+ --glass-text: #e7effb;
+ --glass-muted: #a2b4cb;
+ --glass-panel: rgba(26,42,60,.68);
+ --glass-edge: rgba(157,197,231,.25);
+ --glass-shadow: 0 16px 48px rgba(0,0,0,.23), inset 0 1px 0 rgba(200,228,255,.07);
+ --glass-accent: #69adff;
+ --glass-selection: rgba(67,146,237,.18);
+ --glass-bubble: rgba(53,75,100,.46);
+ --glass-glow: rgba(75,121,165,.22);
+ --glass-ridge: rgba(147,195,232,.07);
+ --glass-success: #50d4b0;
+ --glass-alert: #f2c98b;
+ --glass-sheen: rgba(186,222,255,.1);
+ --glass-tint: rgba(54,128,205,.1);
+ --glass-solid: #17283b;
+ --glass-dock-fill: rgba(26,45,66,.87);
+ --glass-icon-shadow: 0 4px 18px rgba(16,118,242,.23);
+ --glass-accent-strong: #69b4ff;
+ --glass-orb: linear-gradient(145deg,#79bfff 0%,#277ace 48%,#153956 100%);
+ --glass-icon-ink: #b9e6ff;
+}

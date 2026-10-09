@@ -1,0 +1,244 @@
+/* Shared primitives. Consumes tokens.css only. */
+
+/* lucide-react defaults every icon to stroke-width 2, which reads heavy next
+   to Geist. Lucide emits stroke-width as an SVG presentation attribute, and
+   CSS beats presentation attributes at any specificity, so this one rule
+   restyles all ~279 call sites without touching a single .tsx file. Scoped
+   to .app-shell and excluded from xterm/CodeMirror, which render their own
+   SVGs and must not be restyled — see styles.css for the same technique
+   already in use on .health-chart-gridline. */
+.app-shell svg:not(.xterm svg):not(.cm-editor svg) {
+  stroke-width: 1.75;
+}
+
+.dt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--d1) var(--ease),
+    border-color var(--d1) var(--ease),
+    color var(--d1) var(--ease),
+    transform var(--d1) var(--ease);
+}
+
+.dt-btn:active:not(:disabled) { transform: translateY(0.5px) scale(0.985); }
+.dt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dt-btn--primary { background: var(--accent); color: var(--accent-on); box-shadow: var(--sh-1); }
+.dt-btn--primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.dt-btn--secondary { background: var(--surface); border-color: var(--border); color: var(--text-2); box-shadow: var(--sh-1); }
+.dt-btn--secondary:hover:not(:disabled) { border-color: var(--border-interactive); color: var(--text); }
+
+.dt-btn--ghost { background: none; color: var(--text-3); }
+.dt-btn--ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+
+.dt-btn--danger { background: var(--danger); color: var(--danger-on); }
+.dt-btn--danger:hover:not(:disabled) { background: var(--danger-hover); }
+
+.dt-btn--icon { width: 32px; padding: 0; }
+
+/* Focus rings are a state indicator, not decoration — never flatten this to
+   a neutral shadow. It is the only signal a keyboard user gets. */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dt-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border-interactive);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  transition: border-color var(--d1) var(--ease), box-shadow var(--d1) var(--ease);
+}
+
+.dt-input::placeholder { color: var(--text-3); }
+.dt-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dt-input[aria-invalid='true'] { border-color: var(--danger); }
+
+.dt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 19px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+.dt-chip--accent { background: var(--accent-soft); color: var(--accent); }
+.dt-chip--ok { background: var(--ok-soft); color: var(--ok); }
+.dt-chip--warn { background: var(--warn-soft); color: var(--warn); }
+.dt-chip--danger { background: var(--danger-soft); color: var(--danger); }
+
+.dt-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-3);
+  border: 1px dashed var(--border-interactive);
+  border-radius: var(--r-md);
+}
+
+.dt-empty > strong { color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-strong); }
+.dt-empty > span { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.45; }
+
+.dt-skeleton {
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--surface-2) 37%, var(--surface-3) 63%);
+  background-size: 400% 100%;
+  animation: dt-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes dt-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.dt-kbd {
+  padding: 1px var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+/* Visually-hidden utility for new code only. Uses the clip/clip-path
+   technique so content stays in the accessibility tree — do NOT swap for
+   display:none or visibility:hidden, which remove it. Do not consolidate
+   with the pre-existing .sr-only / .ak-visually-hidden / .cc-visually-hidden
+   utilities; those are referenced by shipped markup and tests. */
+.dt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt-skeleton { animation: none; }
+  .dt-btn:active:not(:disabled) { transform: none; }
+}
+
+/* Render-crash fallback (ErrorBoundary.tsx).
+
+   Lives in components.css, not styles.css: it is a shared primitive that any
+   surface sheet may sit above, and the load order documented in
+   styles/index.ts makes that intent explicit. */
+.crash-panel {
+  display: grid;
+  place-items: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-6);
+}
+
+.crash-panel-body {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 46ch;
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  box-shadow: var(--sh-1);
+}
+
+.crash-panel-body strong {
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.crash-panel-body p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.crash-panel-detail {
+  margin: 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 8lh;
+  overflow: auto;
+}
+
+.crash-panel-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* Skip link. Off-screen until focused, then a real, visible control.
+   Uses clip-path rather than display:none/visibility:hidden so it stays in
+   the tab order — the whole point is that Tab reaches it first. */
+.skip-link {
+  position: fixed;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: 100;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--sh-2);
+  display: flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-decoration: none;
+  /* Hidden without leaving the tab order or reserving layout. */
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.skip-link:focus-visible,
+.skip-link:focus {
+  clip-path: none;
+  opacity: 1;
+  pointer-events: auto;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Shared generated Dolphin identity. */
+.dolphin-symbol { display:block; width:28px; height:28px; object-fit:cover; border-radius:var(--r-md); flex-shrink:0; }

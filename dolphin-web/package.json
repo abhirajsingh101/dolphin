@@ -1,0 +1,40 @@
+{
+  "name": "dolphin-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build --config vite.desktop.config.ts",
+    "test": "vitest run",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@dolphin-terminal/core": "0.3.0",
+    "@dolphin-terminal/protocol": "0.3.0",
+    "@dolphin-terminal/react": "0.3.0",
+    "@vitejs/plugin-react": "latest",
+    "@xterm/addon-fit": "latest",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "latest",
+    "lucide-react": "latest",
+    "motion": "^13.4.0",
+    "react": "latest",
+    "react-arborist": "3.15.1",
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.12.0",
+    "remark-gfm": "^4.0.1",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "patch-package": "^8.0.1",
+    "vitest": "^4.1.9"
+  }
+}

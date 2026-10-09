@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dolphin — SSH</title><link rel="stylesheet" href="style.css"></head>
+<body>
+  <main>
+    <p id="question"></p>
+    <form id="form">
+      <label for="answer" hidden>Answer</label>
+      <input id="answer" autocomplete="off" aria-label="Answer">
+      <button type="submit" id="ok">Continue</button>
+    </form>
+    <div id="confirm" hidden>
+      <button type="button" id="yes">Trust and Connect</button>
+      <button type="button" id="no" class="host">Cancel</button>
+    </div>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    const mode = params.get('mode');
+    document.getElementById('question').textContent = params.get('question');
+    const send = (value) => window.dolphinAskpass.answer(id, value);
+    if (mode === 'confirm') {
+      document.getElementById('form').hidden = true;
+      document.getElementById('confirm').hidden = false;
+      document.getElementById('yes').addEventListener('click', () => send('yes'));
+      document.getElementById('no').addEventListener('click', () => send(null));
+      document.getElementById('yes').focus();
+    } else {
+      const input = document.getElementById('answer');
+      if (mode === 'secret') input.type = 'password';
+      input.focus();
+      document.getElementById('form').addEventListener('submit', (event) => { event.preventDefault(); send(input.value); });
+    }
+    addEventListener('keydown', (event) => { if (event.key === 'Escape') send(null); });
+  </script>
+</body>
+</html>

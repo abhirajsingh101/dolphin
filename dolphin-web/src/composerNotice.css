@@ -1,0 +1,68 @@
+/* The one-line notices above the chat composer: memory setup, agent
+ * notifications, and (in the web app) chat suggestions. */
+
+.signals-tray {
+  width: calc(100% - 64px);
+  max-width: 1040px;
+  margin: var(--sp-2) auto 0;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-lg);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+  font-size: var(--fs-sm);
+}
+.signals-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.signals-actions button {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-panel);
+  color: var(--glass-text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.signals-actions button:hover:not(:disabled) {
+  background: var(--glass-selection);
+}
+.signals-actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.signals-actions .signals-primary {
+  border-color: var(--glass-accent);
+}
+.signals-status {
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-2);
+  color: var(--glass-muted);
+  font-size: var(--fs-xs);
+}
+@media (max-width: 700px) {
+  .signals-tray {
+    width: calc(100% - 24px);
+  }
+}
+
+.agent-hooks-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+.agent-hooks-row > span {
+  flex: 1;
+  min-width: 0;
+}
+.agent-hooks-message {
+  padding-top: var(--sp-2);
+}
+.signals-actions button:focus-visible {
+  outline: 2px solid var(--glass-accent);
+  outline-offset: 1px;
+}

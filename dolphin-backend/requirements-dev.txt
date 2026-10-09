@@ -1,0 +1,20 @@
+# Test-only dependencies. Kept separate from requirements.txt so the runtime
+# install stays minimal — nothing here is imported by app/.
+-r requirements.txt
+
+pytest==9.0.2
+pytest-asyncio==1.3.0
+# Required by fastapi.testclient / starlette.testclient. Without it any
+# HTTP-level test fails at import, which is why the suite had none before.
+#
+# Must stay <0.28: httpx 0.28 removed the `app=` shortcut from Client.__init__,
+# and starlette 0.35.1 (pinned transitively by fastapi 0.109.0) still passes it.
+# 0.28 fails every TestClient construction with
+# "Client.__init__() got an unexpected keyword argument 'app'".
+httpx==0.27.2
+# The BMad sprint skills' scripts declare it inline (PEP 723); CI runs their
+# tests from this environment, so it has to be here too.
+ruamel.yaml==0.19.1
+# Those same skill tests run their scripts with `uv run` (the scripts carry their
+# own dependency metadata), so the runner needs uv on PATH.
+uv==0.11.1

@@ -1,0 +1,168 @@
+name: Desktop
+
+# Builds Dolphin Desktop for Linux and macOS, and smoke-tests each build the
+# way a new user meets it: a frozen helper in a scratch home, then the packaged
+# app's first run with an empty HOME and no repository on the machine.
+#
+# PyInstaller cannot cross-compile, so every helper is built on its own
+# platform. Each app then carries all of them: its own, unpacked, to run here,
+# and every .tar.xz, to upload to SSH hosts of any platform.
+#
+# Runs on a desktop-v* tag (and drafts a release) or by hand. macOS minutes
+# cost ten times Linux ones, so ordinary pushes do not run it; ci.yml covers
+# the code itself.
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helper:
+    name: Helper (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04's older glibc is what lets the Linux helper run on older hosts.
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: darwin-arm64, os: macos-15 }
+          - { target: darwin-x64, os: macos-15-intel }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: dolphin-desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Build the helper (and tmux for hosts without one)
+        env:
+          PYTHON: python
+        run: ./scripts/build-helper.sh
+
+      - name: Smoke-test the helper with the host's tmux, if it has one, and its memory
+        run: ./scripts/smoke-helper.sh helper-bundles/${{ matrix.target }}
+
+      - name: Smoke-test the helper with the bundled tmux
+        env:
+          DOLPHIN_FORCE_BUNDLED_TMUX: '1'
+          DOLPHIN_GBRAIN: 'off'  # memory was checked by the run above
+        run: ./scripts/smoke-helper.sh helper-bundles/${{ matrix.target }}
+
+      # Only the tarball: artifacts drop the executable bit, tar keeps it.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: helper-${{ matrix.target }}
+          path: dolphin-desktop/helper-bundles/${{ matrix.target }}.tar.xz
+          if-no-files-found: error
+
+  app:
+    name: App (${{ matrix.target }})
+    needs: helper
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: darwin-arm64, os: macos-15 }
+          - { target: darwin-x64, os: macos-15-intel }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            dolphin-web/package-lock.json
+            dolphin-desktop/package-lock.json
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: helper-*
+          merge-multiple: true
+          path: dolphin-desktop/helper-bundles
+
+      - name: Unpack this platform's helper
+        working-directory: dolphin-desktop/helper-bundles
+        run: |
+          mkdir -p ${{ matrix.target }}
+          tar -xJf ${{ matrix.target }}.tar.xz -C ${{ matrix.target }}
+          ls -la
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefix dolphin-web
+          npm ci --prefix dolphin-desktop
+
+      - name: Package
+        working-directory: dolphin-desktop
+        env:
+          # Unsigned until a Developer ID certificate is configured.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist
+
+      - name: First run on a clean machine (Linux)
+        if: runner.os == 'Linux'
+        working-directory: dolphin-desktop
+        env:
+          DOLPHIN_SHOTS: ${{ runner.temp }}/shots
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq xvfb
+          mkdir -p "$DOLPHIN_SHOTS"
+          DOLPHIN_DESKTOP_APP="$PWD/release/linux-unpacked/dolphin-desktop" xvfb-run -a node --test test/packaged.test.mjs
+
+      - name: First run on a clean machine (macOS)
+        if: runner.os == 'macOS'
+        working-directory: dolphin-desktop
+        env:
+          DOLPHIN_SHOTS: ${{ runner.temp }}/shots
+        run: |
+          mkdir -p "$DOLPHIN_SHOTS"
+          DOLPHIN_DESKTOP_APP="$(ls -d "$PWD"/release/mac*/Dolphin.app)/Contents/MacOS/Dolphin" node --test test/packaged.test.mjs
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: first-run-${{ matrix.target }}
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-${{ matrix.target }}
+          path: |
+            dolphin-desktop/release/*.AppImage
+            dolphin-desktop/release/*.deb
+            dolphin-desktop/release/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: app-*
+          merge-multiple: true
+          path: release
+
+      - name: Create a draft release with the installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" release/* \
+            --repo "${GITHUB_REPOSITORY}" --draft --title "Dolphin ${GITHUB_REF_NAME#desktop-v}" --generate-notes

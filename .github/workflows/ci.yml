@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Helper (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dolphin-backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: dolphin-backend/requirements-dev.txt
+      - run: sudo apt-get update -q && sudo apt-get install -yq tmux
+      - run: pip install -r requirements-dev.txt
+      - run: python -m compileall -q app
+      - run: python -m pytest tests -q
+
+  web:
+    name: Workspace UI (build + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dolphin-web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dolphin-web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run
+
+  desktop:
+    name: App (Electron tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            dolphin-web/package-lock.json
+            dolphin-desktop/package-lock.json
+      - run: sudo apt-get update -q && sudo apt-get install -yq tmux xvfb
+      - name: Helper venv
+        run: |
+          python -m venv dolphin-backend/venv
+          dolphin-backend/venv/bin/pip install -q -r dolphin-backend/requirements.txt
+      - run: npm ci --prefix dolphin-web && npm ci --prefix dolphin-desktop
+      - name: Electron tests
+        working-directory: dolphin-desktop
+        run: npm run renderer && npm test

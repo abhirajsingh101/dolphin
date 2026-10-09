@@ -1,0 +1,14 @@
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+dolphin-backend/venv/
+dolphin-backend/*.db
+dolphin-web/dist/
+dolphin-web/dist-desktop/
+dolphin-desktop/dist/
+dolphin-desktop/release/
+dolphin-desktop/helper-bundles/
+dolphin-desktop/.helper-build/
+test-results/
+.DS_Store

@@ -1,0 +1,87 @@
+/* Dolphin Desktop's first-run panel in the glass project list. */
+
+.desktop-start {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  color: var(--glass-muted);
+  font-size: var(--fs-xs);
+}
+
+.desktop-start p {
+  margin: 0;
+}
+
+.desktop-start h3 {
+  margin: var(--sp-2) 0 0;
+  color: var(--glass-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.desktop-start ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.desktop-start button {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--glass-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+
+.desktop-start .desktop-start-open {
+  justify-content: center;
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  font-weight: var(--fw-strong);
+}
+
+.desktop-start button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.desktop-start button small {
+  overflow: hidden;
+  color: var(--glass-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-start button:hover:not(:disabled),
+.desktop-start button:focus-visible {
+  border-color: var(--glass-edge);
+  background: var(--glass-selection);
+}
+
+.desktop-start button:focus-visible {
+  outline: 2px solid var(--glass-accent);
+  outline-offset: 1px;
+}
+
+.desktop-start button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-start button {
+    transition: none;
+  }
+}
