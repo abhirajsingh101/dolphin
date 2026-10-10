@@ -9,20 +9,20 @@
       </span>
       <div>
         <h2>Connect to Machine</h2>
-        <p>Uses your SSH keys. Dolphin sets itself up there, and your agents keep running after you close it.</p>
+        <p>Pick a machine or type its address. Dolphin uses your SSH keys, sets itself up there, and stays connected.</p>
       </div>
     </div>
     <form id="form">
       <label for="target" hidden>Host</label>
       <div class="field">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
-        <input id="target" placeholder="gpu-box or user@10.0.0.5" autocomplete="off" autofocus aria-label="SSH host">
+        <input id="target" placeholder="gpu-box, user@10.0.0.5 or ssh://user@host:2222" autocomplete="off" autofocus aria-label="SSH host">
       </div>
       <button type="submit" id="connect">Connect</button>
     </form>
     <p id="error" class="error" role="alert"></p>
-    <p class="hosts-title" id="hosts-title" hidden>From your SSH config</p>
-    <ul id="hosts" aria-label="Hosts from your SSH config"></ul>
+    <p class="hosts-title" id="hosts-title" hidden>Found on this computer</p>
+    <ul id="hosts" aria-label="Machines found on this computer"></ul>
   </main>
   <script>
     const form = document.getElementById('form');
@@ -47,16 +47,30 @@
       }
     }
     form.addEventListener('submit', (event) => { event.preventDefault(); if (input.value.trim()) connect(input.value); });
-    window.dolphinDesktop.sshHosts().then((hosts) => {
+    // Recent machines, ~/.ssh/config, shell history, network devices, known_hosts (machines.ts).
+    const where = { recent: 'Recent', config: 'SSH config', history: 'Shell history', network: 'Network', known: 'Known host' };
+    window.dolphinDesktop.machines().then((machines) => {
       const list = document.getElementById('hosts');
-      document.getElementById('hosts-title').hidden = hosts.length === 0;
-      for (const host of hosts) {
+      document.getElementById('hosts-title').hidden = machines.length === 0;
+      for (const machine of machines.slice(0, 8)) {
         const item = document.createElement('li');
         const choice = document.createElement('button');
         choice.className = 'host';
         choice.innerHTML = serverIcon;
-        choice.append(document.createTextNode(host));
-        choice.addEventListener('click', () => connect(host));
+        const text = document.createElement('span');
+        const name = document.createElement('strong');
+        name.textContent = machine.label;
+        const detail = document.createElement('small');
+        detail.textContent = machine.source === 'network' ? machine.detail : [where[machine.source], machine.detail].filter(Boolean).join(' · ');
+        text.append(name, detail);
+        choice.append(text);
+        if (machine.online !== undefined) {
+          const dot = document.createElement('i');
+          dot.className = machine.online ? 'dot on' : 'dot';
+          dot.title = machine.online ? 'Online' : 'Offline';
+          choice.append(dot);
+        }
+        choice.addEventListener('click', () => connect(machine.target));
         item.append(choice);
         list.append(item);
       }

@@ -12,9 +12,12 @@ import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatT
 import AgentSetupPrompt from './AgentSetupPrompt';
 import BrainStatus from './BrainStatus';
 import UpdateControl, { canUpdate, type AboutAnchor } from './UpdateControl';
+import MachineSwitcher from './MachineSwitcher';
+import { canConnect, machineBridge } from './machines';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
+const ConnectMachineDialog = lazy(() => import('./ConnectMachineDialog'));
 const DesktopStart = lazy(() => import('./DesktopStart'));
 import NotificationBell from './NotificationBell';
 import {
@@ -81,6 +84,9 @@ function FocusItem({ id, selected, activity, label, onOpen, onUnpin, children }:
 }
 /** `desktop`: Dolphin Desktop's build, which has no Missions or legacy views
     but does have System Health. */
+/** What fetch says when the backend can't be reached at all (Chromium, Firefox, Safari). */
+const NETWORK_ERROR = /Failed to fetch|NetworkError|Load failed/i;
+
 /** Dolphin Desktop: the machine this window is connected to. */
 const desktopHost = typeof window === 'undefined'
   ? undefined
@@ -227,6 +233,9 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   }
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState<AboutAnchor | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  // Connect to Machine… in the menu opens this window's dialog.
+  useEffect(() => (desktop ? machineBridge()?.onConnectOpen?.(() => setConnecting(true)) ?? undefined : undefined), [desktop]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sessionTargets = projects.flatMap((p) =>
@@ -243,6 +252,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       label: 'Open Dolphin chat',
       hint: 'Your assistant',
     },
+    ...(desktop && canConnect() ? [{ id: 'connect-machine', kind: 'action' as const, label: 'Connect to a Machine…', hint: 'Work on another computer over SSH' }] : []),
     ...(desktop && canUpdate() ? [{ id: 'check-updates', kind: 'action' as const, label: 'Check for Updates', hint: 'About Dolphin' }] : []),
     ...sessionTargets.map((t) => ({
       id: key(t),
@@ -405,6 +415,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       .then((s) => {
         setProjects(s.projects);
         setInventoryAvailable(true);
+        // The backend answers again: a banner that only said it couldn't be reached is stale.
+        setError((current) => (NETWORK_ERROR.test(current) ? '' : current));
       })
       .catch((e) => {
         setInventoryAvailable(false);
@@ -413,7 +425,9 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   useEffect(() => {
     void refresh();
     const timer = setInterval(refresh, 15000);
-    return () => clearInterval(timer);
+    // Dolphin Desktop: the SSH link came back, so load now rather than at the next tick.
+    const stop = desktop ? machineBridge()?.onConnection?.((link) => { if (link.state === 'connected') void refresh(); }) : undefined;
+    return () => { clearInterval(timer); stop?.(); };
   }, []);
   useEffect(() => {
     request<Thread[]>('/api/chief/threads')
@@ -634,6 +648,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         onClose={() => setPaletteOpen(false)}
         onSelect={(item) => {
           if (item.id === 'dolphin') focusChat();
+          else if (item.id === 'connect-machine') setConnecting(true);
           else if (item.id === 'check-updates') {
             setAboutOpen('brand');
             void (window as { dolphinDesktop?: { checkUpdates?: () => Promise<unknown> } }).dolphinDesktop?.checkUpdates?.();
@@ -655,6 +670,11 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
             }}
           />
+        </Suspense>
+      )}
+      {connecting && (
+        <Suspense fallback={null}>
+          <ConnectMachineDialog onClose={() => setConnecting(false)} currentTarget={machineBridge()?.connection?.()?.target ?? null} />
         </Suspense>
       )}
       {removingProject && (
@@ -721,7 +741,9 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             Dolphin
           </a>
         )}
-        {desktop && desktopHost && <span className="glass-host" title={`Working on ${desktopHost}`}>{desktopHost}</span>}
+        {desktop && desktopHost && (canConnect()
+          ? <MachineSwitcher label={desktopHost} onConnect={() => setConnecting(true)} />
+          : <span className="glass-host" title={`Working on ${desktopHost}`}>{desktopHost}</span>)}
         {!desktop && <a className="glass-fleet-link" href="#/fleet">Missions</a>}
         <button
           className="glass-global-search"
@@ -822,6 +844,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             <Suspense fallback={null}>
               <DesktopStart
                 onOpenFolder={() => setPickingProject(true)}
+                onConnect={canConnect() ? () => setConnecting(true) : undefined}
                 onLink={(repo) => createProject({ name: repo.name, path: repo.path })
                   .then(() => refresh())
                   .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))}

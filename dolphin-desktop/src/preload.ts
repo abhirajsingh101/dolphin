@@ -34,5 +34,24 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   retry: () => ipcRenderer.send('dolphin:retry'),
   openLogs: () => ipcRenderer.send('dolphin:open-logs'),
   sshHosts: (): Promise<string[]> => ipcRenderer.invoke('dolphin:ssh-hosts'),
+  // Machines (main.ts, machines.ts): what can be connected to, and this window's link.
+  machines: (): Promise<unknown[]> => ipcRenderer.invoke('dolphin:machines'),
+  openMachine: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:open-machine', target),
+  forgetMachine: (target: string): Promise<void> => ipcRenderer.invoke('dolphin:forget-machine', target),
+  connection: () => ipcRenderer.sendSync('dolphin:connection-state'),
+  onConnection: (listener: (state: unknown) => void) => {
+    const heard = (_event: unknown, state: unknown) => listener(state);
+    ipcRenderer.on('dolphin:connection', heard);
+    return () => { ipcRenderer.removeListener('dolphin:connection', heard); };
+  },
+  reconnect: () => ipcRenderer.send('dolphin:reconnect'),
+  setupKey: (): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:setup-key'),
+  dismissKey: () => ipcRenderer.send('dolphin:dismiss-key'),
+  // Connect to Machine… in the menu opens the window's own dialog.
+  onConnectOpen: (listener: () => void) => {
+    const heard = () => listener();
+    ipcRenderer.on('dolphin:connect-open', heard);
+    return () => { ipcRenderer.removeListener('dolphin:connect-open', heard); };
+  },
   connect: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:connect', target),
 });

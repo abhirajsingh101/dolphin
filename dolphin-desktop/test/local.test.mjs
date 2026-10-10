@@ -14,7 +14,7 @@ const shots = process.env.DOLPHIN_SHOTS || tmpdir();
 test('this computer opens the workspace and System Health', { timeout: 120_000 }, async () => {
   const home = mkdtempSync(path.join(tmpdir(), 'dh-'));
   const app = await electron.launch({
-    args: ['--no-sandbox', root],
+    args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
     env: { ...process.env, DOLPHIN_HOME: home, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
   });
   try {
@@ -99,7 +99,7 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
 test('without netdata, System Health uses the built-in monitor; + opens the folder picker', { timeout: 120_000 }, async () => {
   const home = mkdtempSync(path.join(tmpdir(), 'dh-'));
   const app = await electron.launch({
-    args: ['--no-sandbox', root],
+    args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
     env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_SYSTEM_HEALTH_SOURCE: 'native', ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
   });
   try {

@@ -30,7 +30,7 @@ test('first run links a recent repo; New Session installs a missing agent and st
   };
   const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, 'default');
   const tmux = (...args) => execFileSync('tmux', ['-S', socket, ...args], { env, encoding: 'utf8' });
-  const app = await electron.launch({ args: ['--no-sandbox', root], env });
+  const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
   try {
     const window = await app.firstWindow();
     await window.waitForURL(/desktop\.html/, { timeout: 90_000 });

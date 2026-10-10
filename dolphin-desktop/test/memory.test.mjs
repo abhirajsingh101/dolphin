@@ -19,7 +19,7 @@ test('one Turn On gives the installed agents notifications and Dolphin\'s memory
   const dolphinHome = path.join(home, '.dolphin-server');
   const { TMUX: _t, TMUX_PANE: _p, ...inherited } = process.env;
   const env = { ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, DOLPHIN_GBRAIN: 'auto', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
-  const app = await electron.launch({ args: ['--no-sandbox', root], env });
+  const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
   try {
     const window = await app.firstWindow();
     await window.waitForURL(/desktop\.html/, { timeout: 90_000 });

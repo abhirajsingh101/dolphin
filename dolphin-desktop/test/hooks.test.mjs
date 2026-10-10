@@ -16,7 +16,7 @@ test('Turn On adds Dolphin\'s hook for the agents installed here', { timeout: 12
   const home = mkdtempSync(path.join(tmpdir(), 'dhome-'));
   const dolphinHome = path.join(home, '.dolphin-server');
   const app = await electron.launch({
-    args: ['--no-sandbox', root],
+    args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
     env: { ...process.env, HOME: home, DOLPHIN_HOME: dolphinHome, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
   });
   try {

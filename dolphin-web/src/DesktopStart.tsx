@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderGit2, FolderOpen } from 'lucide-react';
+import { FolderGit2, FolderOpen, Server } from 'lucide-react';
 import { request } from './api';
 import './desktopStart.css';
 
@@ -12,8 +12,9 @@ function shortPath(path: string) {
   return path.replace(/^\/(home|Users)\/[^/]+/, '~');
 }
 
-export default function DesktopStart({ onOpenFolder, onLink }: {
+export default function DesktopStart({ onOpenFolder, onLink, onConnect }: {
   onOpenFolder: () => void;
+  onConnect?: () => void;
   onLink: (repo: Repo) => Promise<void>;
 }) {
   const [repos, setRepos] = useState<Repo[] | null>(null);
@@ -30,6 +31,12 @@ export default function DesktopStart({ onOpenFolder, onLink }: {
         <FolderOpen size={14} aria-hidden="true" />
         Open Folder
       </button>
+      {onConnect && (
+        <button type="button" className="desktop-start-connect" onClick={onConnect}>
+          <Server size={14} aria-hidden="true" />
+          Work on Another Machine
+        </button>
+      )}
       {repos === null && <p className="desktop-start-note" role="status">Looking for your repositories…</p>}
       {repos && repos.length > 0 && (
         <>

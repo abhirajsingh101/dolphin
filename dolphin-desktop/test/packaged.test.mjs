@@ -27,7 +27,7 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
   assert.ok(existsSync(helper), `no bundled helper at ${helper}`);
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DOLPHIN_') && key !== 'TMUX' && key !== 'TMUX_PANE'));
   const env = { ...clean, HOME: home, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
-  const app = await electron.launch({ executablePath: executable, args: process.platform === 'linux' ? ['--no-sandbox'] : [], env });
+  const app = await electron.launch({ executablePath: executable, args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--user-data-dir=${path.join(home, 'profile')}`], env });
   try {
     const window = await app.firstWindow();
     await window.waitForURL(/app:\/\/dolphin\/desktop\.html/, { timeout: 120_000 });

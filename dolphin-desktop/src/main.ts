@@ -1,17 +1,21 @@
 /* Dolphin Desktop's main process.
  *
- * Opens straight into this computer's workspace on launch. Connect to Machine
- * (menu, ⌘/Ctrl+Shift+O) opens another window for an SSH host. Each window
+ * Opens the machines that were open when Dolphin last quit (this computer the
+ * first time). Connect to a Machine (the machine chip in the header, ⌘K, the
+ * menu, ⌘/Ctrl+Shift+O) opens a window per SSH host, which stays connected:
+ * a dropped link comes back by itself (hosts.ts). Each window
  * gets the address and token of its own helper through the preload; the
  * renderer is served from the app:// origin, which the helper's CORS allows. */
 
-import { app, BrowserWindow, BrowserWindowConstructorOptions, ipcMain, Menu, nativeTheme, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, BrowserWindowConstructorOptions, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { startAskpass } from './askpass';
 import { checkFromMenu, startUpdateChecks } from './updates';
-import { connectLocal, connectSsh, Connection, helperDir, HostSpec, setSshEnv, sshConfigHosts } from './hosts';
+import { connectLocal, connectSsh, Connection, helperDir, HostSpec, installKey, LinkState, setSshEnv, sshConfigHosts } from './hosts';
+import { detectMachines, forgetMachine, rememberMachine, validTarget } from './machines';
 
 const APP_ORIGIN = 'app://dolphin';
 const rendererRoot = app.isPackaged
@@ -23,7 +27,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ]);
 
-type WindowState = { connection?: Connection; host: HostSpec; title: string };
+type WindowState = { connection?: Connection; host: HostSpec; title: string; link: LinkState | 'connecting'; reason?: string; offerKey?: boolean };
 const windows = new Map<number, WindowState>();
 
 function serveApp(): void {
@@ -77,7 +81,7 @@ async function openHost(host: HostSpec, from?: BrowserWindow, bounds?: Electron.
   // macOS hides the traffic lights in full screen; the page then reclaims their space.
   window.on('enter-full-screen', () => window.webContents.send('dolphin:fullscreen', true));
   window.on('leave-full-screen', () => window.webContents.send('dolphin:fullscreen', false));
-  const state: WindowState = { host, title };
+  const state: WindowState = { host, title, link: 'connecting' };
   // Read the id now: by 'closed', webContents is destroyed and touching it throws,
   // which stalled the app's quit.
   const id = window.webContents.id;
@@ -85,7 +89,9 @@ async function openHost(host: HostSpec, from?: BrowserWindow, bounds?: Electron.
   window.on('closed', () => {
     state.connection?.close();
     windows.delete(id);
+    saveSession();
   });
+  saveSession();
   if (!from) {
     await window.loadURL(`app://connect/status.html#${encodeURIComponent(`Opening ${title}…`)}`);
     window.show();
@@ -96,13 +102,41 @@ async function openHost(host: HostSpec, from?: BrowserWindow, bounds?: Electron.
       ? await connectLocal(app.isPackaged ? process.resourcesPath : undefined, path.resolve(__dirname, '..'))
       : await connectSsh(host.target, helperDir(app.isPackaged ? process.resourcesPath : undefined, path.resolve(__dirname, '..')), status);
     window.setTitle(`Dolphin — ${state.connection.label}`);
+    state.link = 'connected';
+    if (host.kind === 'ssh') {
+      rememberMachine(app.getPath('userData'), host.target);
+      state.offerKey = state.connection.usedPassword;
+      state.connection.watch?.((link, info) => {
+        state.link = link;
+        state.reason = info.reason;
+        if (window.isDestroyed()) return;
+        // The helper restarted with a new token: the page reads it at load.
+        if (link === 'connected' && info.tokenChanged) window.reload();
+        else window.webContents.send('dolphin:connection', linkOf(state));
+      });
+    }
     await window.loadURL(`${APP_ORIGIN}/desktop.html#/workspace`);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = host.kind === 'ssh' ? explainSsh(host.target, error) : error instanceof Error ? error.message : String(error);
     void window.webContents.executeJavaScript(
       `window.setError ? window.setError(${JSON.stringify(`Could not open ${title}`)}, ${JSON.stringify(detail)}) : window.setStatus(${JSON.stringify(detail)})`,
     ).catch(() => undefined);
   }
+}
+
+/** What went wrong reaching a machine, said plainly, with ssh's own words after it. */
+function explainSsh(target: string, error: unknown): string {
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  const plain = /could not resolve hostname|name or service not known|nodename nor servname/i.test(raw)
+    ? `No machine named ${target} was found. Check the name, or use its IP address.`
+    : /connection refused/i.test(raw)
+      ? `${target} is reachable, but SSH isn't running there. On a Mac, turn on Remote Login in System Settings › General › Sharing.`
+      : /timed out|no route to host|network is unreachable/i.test(raw)
+        ? `${target} didn't answer. Check that it is on and reachable from here (same network or VPN).`
+        : /permission denied/i.test(raw)
+          ? `${target} didn't accept your SSH key or password.`
+          : '';
+  return plain ? `${plain}\n\n${raw}` : raw;
 }
 
 // The launch page's buttons after a failure: start this window's host again,
@@ -116,6 +150,94 @@ ipcMain.on('dolphin:retry', (event) => {
   window.close();
 });
 ipcMain.on('dolphin:open-logs', () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')));
+
+/* --- machines ------------------------------------------------------------- */
+
+const linkOf = (state: WindowState) => ({
+  kind: state.host.kind, target: state.host.kind === 'ssh' ? state.host.target : null, label: state.connection?.label ?? state.title,
+  state: state.link, reason: state.reason ?? null, offerKey: Boolean(state.offerKey),
+});
+const targetOf = (host: HostSpec) => (host.kind === 'local' ? 'local' : host.target);
+
+/** Bring the window for a machine forward, or open one. */
+function openMachine(target: string): void {
+  for (const [id, state] of windows) {
+    if (targetOf(state.host) === target) {
+      const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed() && item.webContents.id === id);
+      if (window) {
+        if (window.isMinimized()) window.restore();
+        window.focus();
+        return;
+      }
+    }
+  }
+  void openHost(target === 'local' ? { kind: 'local' } : { kind: 'ssh', target });
+}
+
+/* The machines open when Dolphin quits come back at the next launch, each in
+   its own window where it was. Saved on every open and close, but not while
+   quitting closes them all. */
+let quitting = false;
+const sessionFile = () => path.join(app.getPath('userData'), 'session.json');
+type Saved = { target: string; bounds?: Electron.Rectangle };
+function saveSession(): void {
+  if (quitting) return;
+  const open: Saved[] = [];
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    const state = windows.get(window.webContents.id);
+    if (state) open.push({ target: targetOf(state.host), bounds: window.getNormalBounds() });
+  }
+  try { writeFileSync(sessionFile(), JSON.stringify({ open }, null, 2)); } catch { /* restoring is a convenience */ }
+}
+function restoreSession(): void {
+  let saved: Saved[] = [];
+  try { saved = (JSON.parse(readFileSync(sessionFile(), 'utf8')) as { open?: Saved[] }).open ?? []; } catch { /* first launch */ }
+  saved = saved.filter((item) => item.target === 'local' || validTarget(item.target));
+  if (saved.length === 0) saved = [{ target: 'local' }];
+  for (const item of saved) void openHost(item.target === 'local' ? { kind: 'local' } : { kind: 'ssh', target: item.target }, undefined, item.bounds);
+}
+
+ipcMain.on('dolphin:connection-state', (event) => {
+  const state = windows.get(event.sender.id);
+  event.returnValue = state ? linkOf(state) : null;
+});
+ipcMain.handle('dolphin:machines', async () => {
+  const open = new Set([...windows.values()].map((state) => targetOf(state.host)));
+  return (await detectMachines(app.getPath('userData'))).map((machine) => ({ ...machine, open: open.has(machine.target) }));
+});
+ipcMain.handle('dolphin:open-machine', (_event, target: unknown) => {
+  if (typeof target !== 'string' || (target !== 'local' && !validTarget(target))) return { error: 'Enter a machine like gpu-box, user@10.0.0.5 or ssh://user@host:2222.' };
+  openMachine(target);
+  return { ok: true };
+});
+ipcMain.handle('dolphin:forget-machine', (_event, target: unknown) => {
+  if (typeof target === 'string') forgetMachine(app.getPath('userData'), target);
+});
+ipcMain.on('dolphin:reconnect', (event) => windows.get(event.sender.id)?.connection?.reconnectNow?.(true));
+ipcMain.handle('dolphin:setup-key', async (event) => {
+  const state = windows.get(event.sender.id);
+  if (!state || state.host.kind !== 'ssh') return { error: 'Only machines reached over SSH sign in.' };
+  try {
+    await installKey(state.host.target);
+    state.offerKey = false;
+    return { ok: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+});
+ipcMain.on('dolphin:dismiss-key', (event) => {
+  const state = windows.get(event.sender.id);
+  if (state) state.offerKey = false;
+});
+
+/** Connect to a Machine… : the focused window's own dialog, or a small window when none is open. */
+function connectFromMenu(): void {
+  const focused = BrowserWindow.getFocusedWindow();
+  const state = focused ? windows.get(focused.webContents.id) : undefined;
+  if (focused && state?.connection) focused.webContents.send('dolphin:connect-open');
+  else openConnectWindow();
+}
 
 function openConnectWindow(): void {
   const window = new BrowserWindow({
@@ -135,9 +257,9 @@ ipcMain.on('dolphin:config', (event) => {
 });
 ipcMain.handle('dolphin:ssh-hosts', () => sshConfigHosts());
 ipcMain.handle('dolphin:connect', async (event, target: unknown) => {
-  if (typeof target !== 'string' || !/^[A-Za-z0-9._@:-]{1,253}$/.test(target)) return { error: 'Enter a host like gpu-box or user@10.0.0.5.' };
+  if (typeof target !== 'string' || !validTarget(target.trim())) return { error: 'Enter a machine like gpu-box, user@10.0.0.5 or ssh://user@host:2222.' };
   BrowserWindow.fromWebContents(event.sender)?.close();
-  await openHost({ kind: 'ssh', target });
+  openMachine(target.trim());
   return { ok: true };
 });
 ipcMain.on('dolphin:badge', (_event, count: unknown) => {
@@ -163,7 +285,7 @@ function buildMenu(): void {
       label: 'File',
       submenu: [
         { label: 'New Window for This Computer', accelerator: 'CmdOrCtrl+Shift+N', click: () => void openHost({ kind: 'local' }) },
-        { label: 'Connect to Machine…', accelerator: 'CmdOrCtrl+Shift+O', click: openConnectWindow },
+        { label: 'Connect to Machine…', accelerator: 'CmdOrCtrl+Shift+O', click: connectFromMenu },
         { type: 'separator' },
         process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
       ],
@@ -194,12 +316,15 @@ if (!app.requestSingleInstanceLock()) {
     setSshEnv(startAskpass());
     startUpdateChecks();
     buildMenu();
-    void openHost({ kind: 'local' });
+    restoreSession();
+    // Back from sleep: every machine link tries again at once.
+    powerMonitor.on('resume', () => { for (const state of windows.values()) state.connection?.reconnectNow?.(false); });
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void openHost({ kind: 'local' });
     });
   });
   // Drop every relay and SSH forward on quit; open connections must not hold the app open.
+  app.on('before-quit', () => { saveSession(); quitting = true; });
   app.on('will-quit', () => {
     for (const state of windows.values()) state.connection?.close();
     // Nothing in this process needs flushing: helpers and tmux are detached and

@@ -11,6 +11,7 @@
       <div class="error-box" id="error" role="alert"></div>
       <div class="actions">
         <button type="button" id="retry">Try Again</button>
+        <button type="button" class="secondary" id="local" hidden>Open This Computer</button>
         <button type="button" class="secondary" id="logs">Show Logs</button>
       </div>
     </div>
@@ -33,9 +34,13 @@
       document.getElementById('progress').hidden = true;
       document.getElementById('error').textContent = detail;
       document.getElementById('failure').hidden = false;
+      // A machine that can't be reached shouldn't leave you with nothing open.
+      const link = window.dolphinDesktop?.connection?.();
+      document.getElementById('local').hidden = !(link && link.kind === 'ssh');
       document.getElementById('retry').focus();
     };
     document.getElementById('retry').addEventListener('click', () => window.dolphinDesktop?.retry?.());
+    document.getElementById('local').addEventListener('click', () => window.dolphinDesktop?.openMachine?.('local'));
     document.getElementById('logs').addEventListener('click', () => window.dolphinDesktop?.openLogs?.());
     if (location.hash) status.textContent = decodeURIComponent(location.hash.slice(1));
   </script>

@@ -13,9 +13,14 @@ is doing.
 - **Projects and terminals:** open a folder, then start Claude Code, Codex or a
   shell in it. Every session is a real tmux session, so it outlives the app and
   your network connection.
-- **This computer or SSH:** connect to a server the way you would with `ssh`.
-  Dolphin installs a small helper there on first connect, over your existing
-  SSH access. Passwords, key passphrases and host-key prompts appear in the app.
+- **This computer or SSH:** click the machine name next to the Dolphin logo
+  and choose Connect to a Machine. Dolphin lists the machines it finds on this
+  computer (your SSH config and the servers you ssh into), or you type
+  `user@host`. It installs a small helper there on first connect,
+  over your existing SSH access, then stays connected: after a network change
+  or sleep it reconnects by itself, and the machine opens again the next time
+  you start Dolphin. Passwords, key passphrases and host-key prompts appear in
+  the app, and a machine that asked for a password can be set up to skip it.
 - **Agent setup:** if Claude Code or Codex is missing, New Session offers to
   install it in a terminal you can watch. Nothing installs without your click.
 - **Connect your agents:** one click gives Claude Code and Codex Dolphin's

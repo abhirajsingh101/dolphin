@@ -15,6 +15,9 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 let socketPath = '';
+let passwords = 0;
+/** How many password prompts the user has answered; a connection compares before and after. */
+export const passwordPrompts = () => passwords;
 let scriptPath = '';
 
 type Pending = { resolve: (answer: string | null) => void };
@@ -57,7 +60,10 @@ export function startAskpass(): NodeJS.ProcessEnv {
         text += chunk.toString();
         if (!text.includes('\n')) return;
         const question = text.split('\n')[0].slice(0, 2000);
-        void prompt(question).then((answer) => connection.end(answer === null ? '\u0000' : `${answer}\n`));
+        void prompt(question).then((answer) => {
+          if (answer !== null && /password/i.test(question)) passwords += 1;
+          connection.end(answer === null ? '\u0000' : `${answer}\n`);
+        });
       });
       connection.on('error', () => undefined);
     });

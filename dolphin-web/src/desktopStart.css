@@ -85,3 +85,9 @@
     transition: none;
   }
 }
+
+.desktop-start .desktop-start-connect {
+  justify-content: center;
+  color: var(--glass-accent);
+  font-weight: 500;
+}
