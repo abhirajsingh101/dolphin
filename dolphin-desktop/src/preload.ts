@@ -13,9 +13,20 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   // App updates (updates.ts): the current state, changes to it, and the button.
   update: () => ipcRenderer.sendSync('dolphin:update-state'),
   onUpdate: (listener: (state: unknown) => void) => {
-    ipcRenderer.on('dolphin:update', (_event, state: unknown) => listener(state));
+    const heard = (_event: unknown, state: unknown) => listener(state);
+    ipcRenderer.on('dolphin:update', heard);
+    return () => { ipcRenderer.removeListener('dolphin:update', heard); };
   },
   applyUpdate: (): Promise<void> => ipcRenderer.invoke('dolphin:update-apply'),
+  checkUpdates: (): Promise<unknown> => ipcRenderer.invoke('dolphin:update-check'),
+  // Check for Updates… in the menu opens the window's About panel.
+  onOpenUpdates: (listener: () => void) => {
+    const heard = () => listener();
+    ipcRenderer.on('dolphin:update-open', heard);
+    return () => { ipcRenderer.removeListener('dolphin:update-open', heard); };
+  },
+  whatsNew: () => ipcRenderer.sendSync('dolphin:whats-new'),
+  whatsNewSeen: () => ipcRenderer.send('dolphin:whats-new-seen'),
   onFullscreen: (listener: (fullscreen: boolean) => void) => {
     ipcRenderer.on('dolphin:fullscreen', (_event, fullscreen: boolean) => listener(Boolean(fullscreen)));
   },

@@ -1,7 +1,7 @@
 {
   "name": "dolphin-desktop",
   "productName": "Dolphin",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Run Claude Code and Codex in tmux, on this computer or any machine over SSH.",
   "main": "dist/main.js",
   "private": true,

@@ -52,11 +52,15 @@ Applications and choose Open.
 
 ## Updates
 
-Dolphin checks for a new release when it starts and every six hours, and from
-Check for Updates… in the Dolphin menu (Help on Linux).
+Dolphin checks for a new release quietly: when it starts, every hour, and
+when your computer wakes. When there is one, an Update pill appears in the
+header. To check yourself, click the Dolphin logo (or press ⌘K and choose
+Check for Updates): the About panel shows your version, when Dolphin last
+checked, and a Check for Updates button.
 
 - **AppImage:** the update downloads in the background; choose Restart to
-  Update when it suits you.
+  Update when it suits you, or it installs the next time you quit. Your
+  terminal sessions keep running.
 - **macOS and .deb:** Dolphin tells you a new version is out and opens the
   right installer. macOS cannot update an unsigned app in place yet.
 

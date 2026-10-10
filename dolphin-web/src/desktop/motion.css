@@ -102,15 +102,28 @@
 /* Entrances hold only their first frame (backwards), so hover can still move them. */
 .desktop-splash .dolphin-orb { animation: dd-rise 420ms var(--ease) backwards, dd-breathe 2.2s ease-in-out 420ms infinite; }
 
+/* Updates: the pill arrives, the About panel drops from the header, the toast pops. */
+.update-pill { animation: dd-pop 320ms var(--ease) backwards; }
+.update-panel { animation: dd-drop 240ms var(--ease) backwards; transform-origin: top right; }
+.update-panel[data-anchor='brand'] { transform-origin: top left; }
+.update-toast { animation: dd-rise 360ms var(--ease) backwards; }
+.glass-workspace .update-pill { transition: background 160ms, box-shadow 160ms, transform 160ms var(--ease); }
+.glass-workspace .update-pill:hover { transform: translateY(-1px); }
+.glass-brand-button .dolphin-mark { transition: transform 200ms var(--ease); }
+.glass-brand-button:hover .dolphin-mark { transform: scale(1.06); }
+
 @media (prefers-reduced-motion: reduce) {
   .glass-workspace, .glass-health, .glass-health-stage, .glass-welcome > *,
   .new-session-scrim, .picker-scrim, .cp-scrim, .new-session-panel, .picker-panel, .cp-panel,
   .new-session-option, .signals-tray, .glass-notification-panel, .desktop-start > *, .desktop-start li,
   .glass-health .health-overview-grid > *, .glass-health :is(.health-chart-card, .health-panel, .gpu-health-card),
-  .desktop-splash > *, .desktop-splash .dolphin-orb, .desktop-splash-bar::after {
+  .desktop-splash > *, .desktop-splash .dolphin-orb, .desktop-splash-bar::after,
+  .update-pill, .update-panel, .update-toast {
     animation: none;
   }
-  .glass-health :is(.health-card, .health-chart-card), .new-session-option, .desktop-start button {
+  .glass-health :is(.health-card, .health-chart-card), .new-session-option, .desktop-start button,
+  .glass-workspace .update-pill {
     transition: none;
   }
+  .glass-workspace .update-pill:hover, .glass-brand-button:hover .dolphin-mark { transform: none; }
 }

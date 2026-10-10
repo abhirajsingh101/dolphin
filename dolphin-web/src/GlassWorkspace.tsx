@@ -11,7 +11,7 @@ import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
 import AgentSetupPrompt from './AgentSetupPrompt';
 import BrainStatus from './BrainStatus';
-import UpdateNotice from './UpdateNotice';
+import UpdateControl, { canUpdate, type AboutAnchor } from './UpdateControl';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
@@ -226,6 +226,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     composerInput.current?.focus();
   }
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState<AboutAnchor | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sessionTargets = projects.flatMap((p) =>
@@ -242,6 +243,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       label: 'Open Dolphin chat',
       hint: 'Your assistant',
     },
+    ...(desktop && canUpdate() ? [{ id: 'check-updates', kind: 'action' as const, label: 'Check for Updates', hint: 'About Dolphin' }] : []),
     ...sessionTargets.map((t) => ({
       id: key(t),
       kind: 'session' as const,
@@ -632,7 +634,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         onClose={() => setPaletteOpen(false)}
         onSelect={(item) => {
           if (item.id === 'dolphin') focusChat();
-          else {
+          else if (item.id === 'check-updates') {
+            setAboutOpen('brand');
+            void (window as { dolphinDesktop?: { checkUpdates?: () => Promise<unknown> } }).dolphinDesktop?.checkUpdates?.();
+          } else {
             const t = sessionTargets.find((t) => key(t) === item.id);
             if (t) open(t);
           }
@@ -693,12 +698,29 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         >
           <PanelLeft size={19} />
         </button>
-        <a className="glass-brand" href="#/workspace">
-          <span className="dolphin-mark">
-            <DolphinIcon />
-          </span>
-          Dolphin
-        </a>
+        {desktop && canUpdate() ? (
+          <button
+            type="button"
+            className="glass-brand glass-brand-button"
+            aria-label="About Dolphin"
+            aria-haspopup="dialog"
+            aria-expanded={aboutOpen === 'brand'}
+            onClick={(event) => { event.stopPropagation(); setAboutOpen((value) => (value ? null : 'brand')); }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <span className="dolphin-mark">
+              <DolphinIcon />
+            </span>
+            Dolphin
+          </button>
+        ) : (
+          <a className="glass-brand" href="#/workspace">
+            <span className="dolphin-mark">
+              <DolphinIcon />
+            </span>
+            Dolphin
+          </a>
+        )}
         {desktop && desktopHost && <span className="glass-host" title={`Working on ${desktopHost}`}>{desktopHost}</span>}
         {!desktop && <a className="glass-fleet-link" href="#/fleet">Missions</a>}
         <button
@@ -718,6 +740,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               ? 'Backend unavailable'
               : 'Connecting…'}
         </span>
+        {desktop && <UpdateControl open={aboutOpen} onOpenChange={setAboutOpen} />}
         <NotificationBell onOpen={open} />
         <button
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
@@ -996,7 +1019,6 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 </>
               )}
             </div>
-            {desktop && <UpdateNotice />}
             <BrainStatus />
             {desktop && <AgentSetupPrompt />}
             {renderSignals?.((text) => { setDraft(text); composerInput.current?.focus(); })}
