@@ -4,17 +4,18 @@
  * - recent:    machines Dolphin connected to before (machines.json in the profile)
  * - config:    Host entries in ~/.ssh/config, following Include
  * - history:   `ssh …` commands in the shell history, most used first
- * - network:   devices an optional detector finds (peers.ts, when present),
- *              with whether they are online
+ * - tailscale: the tailnet's Mac and Linux devices, with whether they are
+ *              online and whether Tailscale SSH is on
  * - known:     unhashed names in ~/.ssh/known_hosts
  * Everything is read locally and nothing is contacted until the user picks one.
  * This module has no Electron imports, so its parsers are tested directly. */
 
+import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export type MachineSource = 'recent' | 'config' | 'history' | 'network' | 'known';
+export type MachineSource = 'recent' | 'config' | 'history' | 'tailscale' | 'known';
 export type Machine = { target: string; label: string; detail?: string; source: MachineSource; online?: boolean; lastUsed?: number };
 
 /** What ssh accepts as a destination from Dolphin: a name, user@host, or ssh://user@host:port. Never an option. */
@@ -171,18 +172,49 @@ export function forgetMachine(dataDir: string, target: string): void {
   try { writeFileSync(path.join(dataDir, 'machines.json'), JSON.stringify(recents, null, 2)); } catch { /* as above */ }
 }
 
-/* --- devices on the network ---------------------------------------------------- */
+/* --- Tailscale ------------------------------------------------------------------- */
 
-/** An optional detector for devices on the user's network. Builds without
- *  peers.ts simply list no such devices. */
-function networkMachines(): Promise<Machine[]> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const detector = require('./peers') as { networkMachines?: () => Promise<Machine[]> };
-    return detector.networkMachines?.() ?? Promise.resolve([]);
-  } catch {
-    return Promise.resolve([]);
-  }
+type TailscalePeer = { HostName?: string; DNSName?: string; OS?: string; Online?: boolean; TailscaleIPs?: string[]; sshHostKeys?: string[] };
+type TailscaleStatus = { Peer?: Record<string, TailscalePeer>; CurrentTailnet?: { MagicDNSEnabled?: boolean } | null };
+
+/** The tailnet's Mac and Linux devices; phones, Windows and Funnel relays can't
+ *  run the helper. Reached by MagicDNS name, or by Tailscale IP when MagicDNS
+ *  is off. Online ones first. */
+export function parseTailscale(status: TailscaleStatus): Machine[] {
+  const magicDns = status.CurrentTailnet?.MagicDNSEnabled !== false;
+  return Object.values(status.Peer ?? {})
+    .filter((peer) => (peer.OS === 'linux' || peer.OS === 'macOS') && peer.HostName !== 'funnel-ingress-node')
+    .map((peer) => {
+      const name = peer.DNSName?.replace(/\.$/, '') ?? '';
+      const ip = peer.TailscaleIPs?.find((address) => address.includes('.')) ?? peer.TailscaleIPs?.[0] ?? '';
+      const target = magicDns && name ? name : ip;
+      const facts = [peer.OS === 'macOS' ? 'Mac' : 'Linux', peer.sshHostKeys?.length ? 'Tailscale SSH' : '', peer.Online ? '' : 'offline'];
+      return {
+        target,
+        label: peer.HostName || name.split('.')[0] || ip,
+        detail: [target, ...facts].filter(Boolean).join(' · '),
+        source: 'tailscale' as const,
+        online: Boolean(peer.Online),
+      };
+    })
+    .filter((machine) => machine.target && validTarget(machine.target))
+    .sort((a, b) => Number(b.online) - Number(a.online) || a.label.localeCompare(b.label));
+}
+
+/** `tailscale status --json`, wherever the CLI is: on PATH, or where the Mac
+ *  app and Homebrew put it (an app opened from the Dock has a short PATH). */
+function tailscale(): Promise<Machine[]> {
+  const candidates = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale', '/opt/homebrew/bin/tailscale', '/usr/local/bin/tailscale'];
+  return new Promise((resolve) => {
+    const next = (index: number) => {
+      if (index >= candidates.length) return resolve([]);
+      execFile(candidates[index], ['status', '--json'], { timeout: 2500, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+        if (error) return next(index + 1);
+        try { resolve(parseTailscale(JSON.parse(stdout))); } catch { resolve([]); }
+      });
+    };
+    next(0);
+  });
 }
 
 /* --- all together ------------------------------------------------------------------ */
@@ -192,18 +224,18 @@ const read = (file: string) => { try { return readFileSync(file, 'utf8'); } catc
 /** Every machine Dolphin can suggest, each once, in source order. */
 export async function detectMachines(dataDir: string, home = os.homedir()): Promise<Machine[]> {
   const sshDir = path.join(home, '.ssh');
-  const network = networkMachines();
+  const tailnet = tailscale();
   const histories = ['.zsh_history', '.bash_history'].map((name) => path.join(home, name)).filter(existsSync);
   const config = parseSshConfig(read(path.join(sshDir, 'config')), includeFiles(sshDir));
   const all: Machine[] = [
     ...readRecents(dataDir).recent.map((item) => ({ target: item.target, label: hostOf(item.target), detail: item.target.replace(/^ssh:\/\//, ''), source: 'recent' as const, lastUsed: item.lastUsed })),
     ...config,
     ...parseHistory(histories.map(read).join('\n')),
-    ...(await network),
+    ...(await tailnet),
     ...parseKnownHosts(read(path.join(sshDir, 'known_hosts'))),
   ];
   const seen = new Set<string>();
-  const online = new Map(all.filter((item) => item.source === 'network').map((item) => [item.target.toLowerCase(), item.online]));
+  const online = new Map(all.filter((item) => item.source === 'tailscale').map((item) => [item.target.toLowerCase(), item.online]));
   return all.filter((item) => {
     const key = item.target.toLowerCase();
     if (seen.has(key) || isLocal(item.target)) return false;

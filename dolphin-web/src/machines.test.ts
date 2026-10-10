@@ -3,7 +3,7 @@ import { filterMachines, validTarget, type Machine } from './machines';
 
 const machines: Machine[] = [
   { target: 'gpu-box', label: 'gpu-box', detail: 'dev@10.0.0.7', source: 'config' },
-  { target: 'studio.local', label: 'studio', detail: 'Mac', source: 'network', online: true },
+  { target: 'studio.example.ts.net', label: 'studio', detail: 'studio.example.ts.net · Mac', source: 'tailscale', online: true },
   { target: 'me@build-01', label: 'build-01', source: 'history' },
 ];
 

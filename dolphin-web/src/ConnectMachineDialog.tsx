@@ -5,7 +5,7 @@ import './newSession.css';
 import './connectMachine.css';
 
 /* Connect to a Machine: everything Dolphin found on this computer (recent
-   machines, ~/.ssh/config, shell history, network devices, known_hosts), a search
+   machines, ~/.ssh/config, shell history, the tailnet, known_hosts), a search
    that doubles as the address field, and one click or Enter to connect. The
    machine opens in its own window, which shows the setup and stays connected. */
 

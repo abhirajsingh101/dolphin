@@ -47,8 +47,8 @@
       }
     }
     form.addEventListener('submit', (event) => { event.preventDefault(); if (input.value.trim()) connect(input.value); });
-    // Recent machines, ~/.ssh/config, shell history, network devices, known_hosts (machines.ts).
-    const where = { recent: 'Recent', config: 'SSH config', history: 'Shell history', network: 'Network', known: 'Known host' };
+    // Recent machines, ~/.ssh/config, shell history, the tailnet, known_hosts (machines.ts).
+    const where = { recent: 'Recent', config: 'SSH config', history: 'Shell history', tailscale: 'Tailscale', known: 'Known host' };
     window.dolphinDesktop.machines().then((machines) => {
       const list = document.getElementById('hosts');
       document.getElementById('hosts-title').hidden = machines.length === 0;
@@ -61,7 +61,7 @@
         const name = document.createElement('strong');
         name.textContent = machine.label;
         const detail = document.createElement('small');
-        detail.textContent = machine.source === 'network' ? machine.detail : [where[machine.source], machine.detail].filter(Boolean).join(' · ');
+        detail.textContent = machine.source === 'tailscale' ? `Tailscale · ${machine.detail}` : machine.detail : [where[machine.source], machine.detail].filter(Boolean).join(' · ');
         text.append(name, detail);
         choice.append(text);
         if (machine.online !== undefined) {

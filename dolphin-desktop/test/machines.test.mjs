@@ -1,11 +1,11 @@
-// Finding machines to connect to without asking: ~/.ssh/config, shell history
-// and known_hosts, each read locally.
+// Finding machines to connect to without asking: ~/.ssh/config, shell history,
+// known_hosts and Tailscale, each read locally.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { detectMachines, parseHistory, parseKnownHosts, parseSshConfig, rememberMachine, validTarget } from '../dist/machines.js';
+import { detectMachines, parseHistory, parseKnownHosts, parseSshConfig, parseTailscale, rememberMachine, validTarget } from '../dist/machines.js';
 
 test('ssh config: named hosts with their user@hostname, wildcards and Match skipped, Include followed', () => {
   const config = `
@@ -56,6 +56,23 @@ test('known_hosts: plain names only; hashed, bracketed-port and local entries sk
     '@cert-authority *.example ssh-ed25519 AAAA',
   ].join('\n');
   assert.deepEqual(parseKnownHosts(text).map((m) => m.target), ['gpu-box', '10.0.0.7']);
+});
+
+test('tailscale: Mac and Linux peers by MagicDNS name, online first; phones, Windows and relays skipped', () => {
+  const status = { Peer: {
+    a: { HostName: 'studio', DNSName: 'studio.example.ts.net.', OS: 'macOS', Online: false, TailscaleIPs: ['100.0.0.2'] },
+    b: { HostName: 'gpu', DNSName: 'gpu.example.ts.net.', OS: 'linux', Online: true, TailscaleIPs: ['100.0.0.3', 'fd00::3'], sshHostKeys: ['ssh-ed25519 AAAA'] },
+    c: { HostName: 'phone', DNSName: 'phone.example.ts.net.', OS: 'iOS', Online: true },
+    d: { HostName: 'pc', DNSName: 'pc.example.ts.net.', OS: 'windows', Online: true },
+    e: { HostName: 'funnel-ingress-node', DNSName: '', OS: '', Online: false },
+  } };
+  const found = parseTailscale(status);
+  assert.deepEqual(found.map((m) => [m.target, m.online]), [['gpu.example.ts.net', true], ['studio.example.ts.net', false]]);
+  assert.equal(found[0].detail, 'gpu.example.ts.net · Linux · Tailscale SSH');
+  assert.equal(found[1].detail, 'studio.example.ts.net · Mac · offline');
+  // Without MagicDNS the names don't resolve, so the Tailscale IP is used.
+  const plain = parseTailscale({ ...status, CurrentTailnet: { MagicDNSEnabled: false } });
+  assert.deepEqual(plain.map((m) => m.target), ['100.0.0.3', '100.0.0.2']);
 });
 
 test('targets are names, user@host or ssh:// addresses, never options', () => {

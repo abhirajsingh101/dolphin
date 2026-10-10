@@ -1,7 +1,7 @@
 /* Dolphin Desktop's machines, as the page sees them through the preload
    bridge (dolphin-desktop/src/main.ts and machines.ts). */
 
-export type MachineSource = 'recent' | 'config' | 'history' | 'network' | 'known';
+export type MachineSource = 'recent' | 'config' | 'history' | 'tailscale' | 'known';
 export type Machine = { target: string; label: string; detail?: string; source: MachineSource; online?: boolean; lastUsed?: number; open?: boolean };
 export type Link = { kind: 'local' | 'ssh'; target: string | null; label: string; state: 'connecting' | 'connected' | 'reconnecting' | 'offline'; reason: string | null; offerKey: boolean };
 
@@ -31,7 +31,7 @@ export const SOURCE_LABEL: Record<MachineSource, string> = {
   recent: 'Recent',
   config: 'From your SSH config',
   history: 'From your shell history',
-  network: 'On your network',
+  tailscale: 'On your tailnet',
   known: 'Known hosts',
 };
 

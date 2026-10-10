@@ -15,8 +15,8 @@ is doing.
   your network connection.
 - **This computer or SSH:** click the machine name next to the Dolphin logo
   and choose Connect to a Machine. Dolphin lists the machines it finds on this
-  computer (your SSH config and the servers you ssh into), or you type
-  `user@host`. It installs a small helper there on first connect,
+  computer (your SSH config, the servers you ssh into, your Tailscale
+  devices), or you type `user@host`. It installs a small helper there on first connect,
   over your existing SSH access, then stays connected: after a network change
   or sleep it reconnects by itself, and the machine opens again the next time
   you start Dolphin. Passwords, key passphrases and host-key prompts appear in

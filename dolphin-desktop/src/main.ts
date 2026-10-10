@@ -132,7 +132,7 @@ function explainSsh(target: string, error: unknown): string {
     : /connection refused/i.test(raw)
       ? `${target} is reachable, but SSH isn't running there. On a Mac, turn on Remote Login in System Settings › General › Sharing.`
       : /timed out|no route to host|network is unreachable/i.test(raw)
-        ? `${target} didn't answer. Check that it is on and reachable from here (same network or VPN).`
+        ? `${target} didn't answer. Check that it is on and reachable from here (same network, VPN or tailnet).`
         : /permission denied/i.test(raw)
           ? `${target} didn't accept your SSH key or password.`
           : '';
