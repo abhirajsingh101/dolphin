@@ -36,8 +36,24 @@ async def test_a_new_inbox_works_in_the_brains_home(factory, tmp_path, monkeypat
     async with factory() as db:
         await seed_projects(db)
         await link_inbox(db)
-    home = brain.base() / "home"
-    assert (await _inbox(factory)).path == str(home) and home.is_dir()
+    folder = brain.base() / "dolphin-inbox"
+    assert (await _inbox(factory)).path == str(folder) and folder.is_dir()
+    assert folder.parent == brain.base()  # beside the brain's data, not inside it
+
+
+@pytest.mark.asyncio
+async def test_an_inbox_on_the_old_default_moves_to_its_own_folder(factory, tmp_path, monkeypatch):
+    monkeypatch.setenv("DOLPHIN_HOME", str(tmp_path / "dolphin"))
+    monkeypatch.setenv("DOLPHIN_GBRAIN", "auto")
+    monkeypatch.delenv("DOLPHIN_GBRAIN_COMMAND", raising=False)
+    monkeypatch.delenv("DOLPHIN_INBOX_PATH", raising=False)
+    async with factory() as db:
+        await seed_projects(db)
+        inbox = await db.scalar(select(Project).where(Project.is_inbox.is_(True)))
+        inbox.path = str(brain.base() / "home")  # where 0.1.3-0.1.5 linked it
+        await db.commit()
+        await link_inbox(db)
+    assert (await _inbox(factory)).path == str(brain.base() / "dolphin-inbox")
 
 
 @pytest.mark.asyncio

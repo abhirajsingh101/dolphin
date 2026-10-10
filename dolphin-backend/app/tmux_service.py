@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -221,7 +222,59 @@ def make_session_name(project_name: str, requested_name: str | None = None) -> s
     return f"{_slugify(project_name)}-{uuid.uuid4().hex[:6]}{suffix}"
 
 
+# --- Processes without /proc ---------------------------------------------------
+# Linux exposes processes in /proc; macOS does not. There, the same facts come
+# from psutil (and `ps` for the terminal's foreground group). Without this every
+# pane on a Mac read as "Status unavailable" and agents never looked started.
+# DOLPHIN_PROC_FALLBACK=1 forces this path, so the Linux suite covers it.
+
+def _has_proc() -> bool:
+    return os.path.isdir("/proc/self") and not os.getenv("DOLPHIN_PROC_FALLBACK")
+
+
+def _ps_process(pid: int):
+    import psutil
+
+    try:
+        return psutil.Process(pid)
+    except (psutil.Error, ValueError):
+        return None
+
+
+def _ps_call(pid: int, method: str, default):
+    import psutil
+
+    process = _ps_process(pid)
+    if process is None:
+        return default
+    try:
+        return getattr(process, method)()
+    except (psutil.Error, OSError):
+        return default
+
+
+def _ps_start_ticks(pid: int) -> int | None:
+    created = _ps_call(pid, "create_time", None)
+    return int(created * 100) if created is not None else None
+
+
+def _ps_identity(pid: int) -> tuple[int, int, int] | None:
+    """Process group, the terminal's foreground group, and start, from `ps`."""
+    start = _ps_start_ticks(pid)
+    if start is None:
+        return None
+    try:
+        out = subprocess.run(["ps", "-o", "pgid=,tpgid=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout.split()
+        return int(out[0]), int(out[1]), start
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return None
+
+
 def _read_proc_command_text(pid: int) -> str:
+    if not _has_proc():
+        command = _ps_call(pid, "cmdline", [])
+        return " ".join(command) if command else _ps_call(pid, "name", "")
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
@@ -237,6 +290,9 @@ def _read_proc_command_text(pid: int) -> str:
 
 
 def _read_proc_executable_basename(pid: int) -> str:
+    if not _has_proc():
+        executable = _ps_call(pid, "exe", "")
+        return Path(executable).name if executable else ""
     try:
         executable_path = os.readlink(f"/proc/{pid}/exe")
     except OSError:
@@ -245,6 +301,8 @@ def _read_proc_executable_basename(pid: int) -> str:
 
 
 def _read_proc_process_name(pid: int) -> str:
+    if not _has_proc():
+        return _ps_call(pid, "name", "")
     try:
         return Path(f"/proc/{pid}/comm").read_text(errors="replace").strip()
     except OSError:
@@ -258,6 +316,8 @@ def _read_proc_stat_text(pid: int) -> str:
 def _read_proc_start_ticks(pid: int) -> int | None:
     """Read Linux proc field 22 without being confused by spaces in comm."""
 
+    if not _has_proc():
+        return _ps_start_ticks(pid)
     try:
         raw = _read_proc_stat_text(pid)
         close = raw.rfind(")")
@@ -281,6 +341,25 @@ def _read_proc_fd_identities(
 
     identities: set[tuple[int, int]] = set()
     truncated = False
+    if not _has_proc():
+        import psutil
+
+        process = _ps_process(pid)
+        if process is None:
+            raise OSError(f"process {pid} is not readable")
+        try:
+            files = process.open_files()
+        except psutil.Error as error:
+            raise OSError(str(error)) from error
+        for index, opened in enumerate(files):
+            if index >= limit:
+                return identities, True
+            try:
+                stat = os.stat(opened.path)
+            except OSError:
+                continue
+            identities.add((stat.st_dev, stat.st_ino))
+        return identities, False
     with os.scandir(f"/proc/{pid}/fd") as entries:
         for index, entry in enumerate(entries):
             if index >= limit:
@@ -295,6 +374,8 @@ def _read_proc_fd_identities(
 
 
 def _read_proc_child_pids(pid: int) -> list[int]:
+    if not _has_proc():
+        return [child.pid for child in _ps_call(pid, "children", [])]
     try:
         child_text = Path(f"/proc/{pid}/task/{pid}/children").read_text()
     except OSError:
@@ -442,6 +523,8 @@ def _is_supported_agent_process(pid: int) -> bool:
 def _proc_identity(pid: int) -> tuple[int, int, int] | None:
     """Return process group, foreground group, and start ticks atomically."""
 
+    if not _has_proc():
+        return _ps_identity(pid)
     try:
         raw = _read_proc_stat_text(pid)
     except OSError:
@@ -476,6 +559,8 @@ def _bounded_thread_children(
     child_bytes_per_file: int,
     remaining_bytes: list[int],
 ) -> tuple[list[int], str | None]:
+    if not _has_proc():
+        return _read_proc_child_pids(pid), None
     task_root = f"/proc/{pid}/task"
     try:
         with os.scandir(task_root) as entries:

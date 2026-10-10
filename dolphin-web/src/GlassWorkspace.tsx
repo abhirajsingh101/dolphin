@@ -14,12 +14,14 @@ import BrainStatus from './BrainStatus';
 import UpdateNotice from './UpdateNotice';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
+const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
 const DesktopStart = lazy(() => import('./DesktopStart'));
 import NotificationBell from './NotificationBell';
 import {
   ArrowUp,
   ChevronDown,
   Folder,
+  FolderMinus,
   Search,
   Plus,
   Sun,
@@ -93,6 +95,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   // here. It browses the connected machine, which works for SSH hosts too.
   const [pickingProject, setPickingProject] = useState(false);
   const [choosingSession, setChoosingSession] = useState<ControlCenterProject | null>(null);
+  const [removingProject, setRemovingProject] = useState<ControlCenterProject | null>(null);
   const [restored] = useState(() => {
     const empty = { windows: [] as Target[], minimized: [] as string[], active: null as Target | null };
     try {
@@ -649,6 +652,23 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           />
         </Suspense>
       )}
+      {removingProject && (
+        <Suspense fallback={null}>
+          <RemoveProjectDialog
+            project={removingProject}
+            onClose={() => setRemovingProject(null)}
+            onRemoved={() => {
+              const removed = removingProject.id;
+              setRemovingProject(null);
+              // Its windows and dock shortcuts go with it; the tmux sessions stay.
+              setWindows((items) => items.filter((item) => item.projectId !== removed));
+              setFocus((items) => items.filter((item) => item.projectId !== removed));
+              setMinimized((ids) => ids.filter((id) => (JSON.parse(id) as string[])[0] !== removed));
+              void refresh();
+            }}
+          />
+        </Suspense>
+      )}
       {choosingSession && (
         <Suspense fallback={null}>
           <NewSessionDialog
@@ -814,6 +834,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                   <Folder size={16} />
                   <strong>{p.name}</strong>
                   <small>{p.sessions.length}</small>
+                  {!p.is_inbox && (
+                    <button
+                      type="button"
+                      className="glass-project-remove"
+                      aria-label={`Remove ${p.name} from Dolphin`}
+                      title="Remove from Dolphin (the folder stays)"
+                      onClick={(event) => { event.preventDefault(); event.stopPropagation(); setRemovingProject(p); }}
+                    >
+                      <FolderMinus size={14} />
+                    </button>
+                  )}
                 </summary>
                 <div className="glass-sessions">
                   {p.sessions.map((s) => (

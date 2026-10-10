@@ -156,13 +156,41 @@
 }
 .glass-section-title {
   display: flex;
-  justify-content: space-between;
-  padding: 0 12px 22px;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 14px 6px 12px 12px;
   font-weight: 600;
 }
-.glass-section-title span {
+/* The count sits beside the title as a chip; whatever follows it goes right. */
+.glass-section-title > span {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  margin-right: auto;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--glass-bubble);
   color: var(--glass-muted);
-  font-weight: 400;
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.glass-section-title > button,
+.glass-section-title > a {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--r-md);
+  color: var(--glass-muted);
+}
+.glass-section-title > a:hover,
+.glass-section-title > button:hover {
+  color: inherit;
 }
 .glass-tree {
   overflow: auto;
@@ -410,10 +438,14 @@
   gap: 8px;
   padding: 10px;
   overflow-x: auto;
+  scrollbar-width: none;
   background:
     linear-gradient(135deg, var(--glass-sheen), transparent 40%),
     var(--glass-dock-fill);
   position: relative;
+}
+.glass-dock::-webkit-scrollbar {
+  display: none;
 }
 .glass-home {
   min-width: 143px;
@@ -920,9 +952,7 @@
 }
 @media (max-width: 650px) {
   .glass-workspace .glass-close-projects {
-    display: inline-flex;
-    margin-left: auto;
-    padding: 3px;
+    display: inline-grid;
   }
 }
 
@@ -1189,6 +1219,25 @@
 @keyframes glass-content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .glass-tree summary { border-radius: var(--r-md); transition: background 160ms, color 160ms; }
 .glass-tree summary:hover { background: var(--glass-bubble); }
+/* Remove sits where the count is and appears when the row is pointed at. */
+.glass-workspace .glass-project-remove {
+  display: none;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  margin: -4px -4px -4px 0;
+  padding: 0;
+  color: var(--glass-muted);
+}
+.glass-workspace .glass-project-remove:hover { background: var(--glass-selection); color: var(--danger); }
+.glass-tree summary:hover .glass-project-remove,
+.glass-tree summary:focus-within .glass-project-remove { display: inline-grid; }
+.glass-tree summary:hover > small:has(+ .glass-project-remove),
+.glass-tree summary:focus-within > small:has(+ .glass-project-remove) { display: none; }
+@media (hover: none) {
+  .glass-workspace .glass-project-remove { display: inline-grid; }
+}
 .glass-tree summary > svg:first-child { transition: transform 180ms var(--glass-ease); }
 .glass-tree details:not([open]) summary > svg:first-child { transform: rotate(-90deg); }
 .glass-tree details[open] > .glass-sessions,
