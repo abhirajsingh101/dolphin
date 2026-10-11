@@ -61,7 +61,7 @@
         const name = document.createElement('strong');
         name.textContent = machine.label;
         const detail = document.createElement('small');
-        detail.textContent = machine.source === 'tailscale' ? `Tailscale · ${machine.detail}` : machine.detail : [where[machine.source], machine.detail].filter(Boolean).join(' · ');
+        detail.textContent = [where[machine.source], machine.detail].filter(Boolean).join(' · ');
         text.append(name, detail);
         choice.append(text);
         if (machine.online !== undefined) {

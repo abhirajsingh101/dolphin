@@ -321,3 +321,66 @@ async def test_a_new_turn_marks_the_projects_earlier_turns_read(factory, monkeyp
     async with factory() as db:
         unread = set((await db.scalars(select(Notification.turn_id).where(Notification.read_at.is_(None)))).all())
     assert unread == {"a3", "d1", "s2"}
+
+
+# --- Background work ---------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+
+from app import agent_hook
+
+
+def _iso(minutes_ago: float = 0) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
+
+
+def _launch(tool_use_id: str, text: str, minutes_ago: float = 1) -> dict:
+    return {"type": "user", "timestamp": _iso(minutes_ago), "message": {"role": "user", "content": [
+        {"tool_use_id": tool_use_id, "type": "tool_result", "content": [{"type": "text", "text": text}]}]}}
+
+
+def _finished(tool_use_id: str, *, queued: bool = False) -> dict:
+    note = (f"<task-notification>\n<task-id>x</task-id>\n<tool-use-id>{tool_use_id}</tool-use-id>\n"
+            "<status>completed</status>\n</task-notification>")
+    if queued:
+        return {"type": "queue-operation", "operation": "enqueue", "timestamp": _iso(), "content": note}
+    return {"type": "user", "timestamp": _iso(), "message": {"role": "user", "content": note}}
+
+
+def _transcript(tmp_path: Path, *rows: dict) -> Path:
+    path = tmp_path / f"{uuid4().hex[:6]}.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    return path
+
+
+AGENT = "Async agent launched successfully. (internal metadata)"
+SHELL = "Command running in background with ID: b123. Output is being written to: /tmp/x"
+
+
+def test_pending_background_counts_launches_without_a_completion(tmp_path):
+    talk = {"type": "assistant", "timestamp": _iso(), "message": {"role": "assistant", "content": [
+        {"type": "text", "text": f"Earlier I saw '{AGENT}' and <tool-use-id>toolu_9</tool-use-id> in a doc."}]}}
+    assert agent_hook.pending_background(str(_transcript(tmp_path, _launch("toolu_1", AGENT), talk))) == 1
+    assert agent_hook.pending_background(str(_transcript(
+        tmp_path, _launch("toolu_1", AGENT), _launch("toolu_2", SHELL), _finished("toolu_1"),
+        _finished("toolu_2", queued=True)))) == 0
+    # A launch left running for hours (a dev server, say) stops holding the bell.
+    assert agent_hook.pending_background(str(_transcript(tmp_path, _launch("toolu_3", SHELL, minutes_ago=180)))) == 0
+    assert agent_hook.pending_background(str(tmp_path / "missing.jsonl")) == 0
+    assert agent_hook.pending_background(None) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_claude_turn_with_background_work_pending_is_not_a_finished_turn(tmp_path):
+    name, pane = await _disposable_session()
+    try:
+        waiting = _transcript(tmp_path, _launch("toolu_1", AGENT))
+        await _agent_turn(pane, "claude", {"session_id": "s", "cwd": "/tmp", "transcript_path": str(waiting),
+                                            "last_assistant_message": "Five boards are still running."}, tmp_path)
+        assert await _turn_option(pane) == ""
+        done = _transcript(tmp_path, _launch("toolu_1", AGENT), _finished("toolu_1"))
+        await _agent_turn(pane, "claude", {"session_id": "s", "cwd": "/tmp", "transcript_path": str(done),
+                                            "last_assistant_message": "All boards are ported."}, tmp_path)
+        assert json.loads(await _turn_option(pane))["summary"] == "All boards are ported."
+    finally:
+        await _run_tmux("kill-session", "-t", name, check=False)

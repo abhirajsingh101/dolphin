@@ -8,6 +8,12 @@ also marks the pane working on prompt submit and finished on Stop, keeping the
 agent's final reply as the result. It reads no transcript and sends nothing
 over the network. Any failure exits zero and can never block Codex or Claude.
 
+A Claude turn that ends while its background agents or commands are still
+running is not finished work: Claude ends its reply, then wakes when they
+report back. Claude's Stop input does not say so, so ``pending_background``
+counts unfinished launches in the transcript (structure only, never content)
+and such a turn is neither recorded nor marked finished.
+
 Standard library only: it runs from scripts/dolphin-automation-hook under the
 system Python on this server, and as ``dolphin-helper hook`` in Dolphin Desktop.
 """
@@ -16,9 +22,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 
@@ -27,6 +34,12 @@ MAX_SUMMARY_CHARS = 300
 TIMEOUT_SECONDS = 0.7
 SUPPORTED_PROVIDERS = {"codex", "claude"}
 SUPPORTED_EVENTS = {"user_prompt_submit", "stop"}
+# How Claude Code's transcript records a background launch (the tool result's
+# opening words) and its completion (a task notification naming the launch).
+BACKGROUND_LAUNCHES = ("Async agent launched successfully", "Command running in background with ID")
+NOTIFIED = re.compile(r"<tool-use-id>([^<]+)</tool-use-id>")
+# A launch still unreported after this long (a dev server, say) stops holding back the turn.
+PENDING_FOR = timedelta(hours=2)
 
 
 def _argument_value(argv: list[str], option: str) -> str | None:
@@ -143,6 +156,49 @@ def owns_pane(tmux_pane: str) -> bool:
     return False
 
 
+def _text_of(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(block.get("text", "") for block in content if isinstance(block, dict))
+    return ""
+
+
+def pending_background(transcript_path, now: datetime | None = None) -> int:
+    """Background agents and commands launched in this session that have not
+    reported back yet. Reads the transcript's structure only; 0 when unsure."""
+    if not transcript_path:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    launched: dict[str, datetime] = {}
+    done: set[str] = set()
+    try:
+        with open(transcript_path, encoding="utf-8", errors="replace") as transcript:
+            for line in transcript:
+                launch = any(marker in line for marker in BACKGROUND_LAUNCHES)
+                if not launch and "<task-notification>" not in line:
+                    continue
+                row = json.loads(line)
+                if row.get("type") == "queue-operation":
+                    content = row.get("content")
+                elif row.get("type") == "user":
+                    content = (row.get("message") or {}).get("content")
+                else:
+                    continue  # assistant text that merely mentions the words
+                if isinstance(content, str) and content.lstrip().startswith("<task-notification>"):
+                    done.update(NOTIFIED.findall(content))
+                elif launch and isinstance(content, list):
+                    at = datetime.fromisoformat(row.get("timestamp", "").replace("Z", "+00:00"))
+                    for block in content:
+                        if (isinstance(block, dict) and block.get("type") == "tool_result"
+                                and _text_of(block.get("content")).startswith(BACKGROUND_LAUNCHES)):
+                            launched[block.get("tool_use_id", "")] = at
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for tool_use_id, at in launched.items()
+               if tool_use_id not in done and now - at < PENDING_FOR)
+
+
 def record_turn(envelope: dict, last_message=None) -> None:
     """Leave the finished turn on the pane for the notification collector."""
     try:
@@ -206,9 +262,13 @@ def main(argv: list[str] | None = None) -> int:
             environ=os.environ,
         )
         if envelope is not None and owns_pane(envelope["tmux_pane"]):
-            last_message = json.loads(raw).get('last_assistant_message')
-            record_turn(envelope, last_message)
-            track_chat_work(envelope, last_message)
+            payload = json.loads(raw)
+            still_working = (provider == "claude" and envelope["event_name"] == "stop"
+                             and pending_background(payload.get("transcript_path")) > 0)
+            if not still_working:
+                last_message = payload.get('last_assistant_message')
+                record_turn(envelope, last_message)
+                track_chat_work(envelope, last_message)
     except BaseException:
         pass
     # Current Codex Stop hooks require JSON when they write stdout. An empty

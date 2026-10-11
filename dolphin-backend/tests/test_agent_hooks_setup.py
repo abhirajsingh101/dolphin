@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -85,6 +86,10 @@ def test_install_refuses_unknown_agents_and_a_missing_shim(home):
 
 
 def test_shim_runs_the_helper_hook():
+    # Without TMUX_PANE: run by an agent inside tmux, the hook would otherwise
+    # record this fake turn on that agent's real pane and raise a notification.
+    environ = {key: value for key, value in os.environ.items() if key != "TMUX_PANE"}
     result = subprocess.run([sys.executable, "-m", "app.helper", "hook", "--provider", "codex", "--event", "stop"],
-                            cwd=BACKEND, input=b'{"last_assistant_message":"x"}', capture_output=True, timeout=30)
+                            cwd=BACKEND, input=b'{"last_assistant_message":"x"}', capture_output=True, timeout=30,
+                            env=environ)
     assert result.returncode == 0 and result.stdout == b"{}\n"
