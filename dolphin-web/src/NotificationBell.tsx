@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, Terminal, X } from 'lucide-react';
-import { fetchNotifications, markNotificationsRead, notificationStreamUrl } from './api';
+import { api, type Api } from './api';
 import type { AppNotification } from './types';
 
 const TOAST_MS = 8_000;
 const MAX_TOASTS = 3;
 
-export type NotificationTarget = { projectId: string; projectName: string; sessionName: string };
+export type NotificationTarget = { projectId: string; projectName: string; sessionName: string; machine?: string };
+/** A backend whose finished turns the bell shows. Dolphin Desktop passes one
+    per machine in the window; `label` names any but this computer. */
+export type NotificationSource = { id: string; label?: string; api: Api };
+type Item = AppNotification & { machine: string; machineLabel?: string; uid: string };
 
 function ago(iso: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
@@ -17,102 +21,123 @@ function ago(iso: string): string {
   return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-function label(item: AppNotification): string {
-  return `${item.project_name ?? 'No project'} / ${item.session_name}`;
+function label(item: Item): string {
+  return `${item.machineLabel ? `${item.machineLabel} · ` : ''}${item.project_name ?? 'No project'} / ${item.session_name}`;
 }
 
-function targetOf(item: AppNotification): NotificationTarget | null {
+function targetOf(item: Item): NotificationTarget | null {
   return item.project_id && item.project_name
-    ? { projectId: item.project_id, projectName: item.project_name, sessionName: item.session_name }
+    ? { projectId: item.project_id, projectName: item.project_name, sessionName: item.session_name, machine: item.machine }
     : null;
 }
 
+const LOCAL_SOURCES: NotificationSource[] = [{ id: 'local', api }];
+
 /** Every finished agent turn, pushed by the backend; a click opens its session. */
 /** Turns from one project (or, with no project, one session) replace each other. */
-function sameOrigin(a: AppNotification, b: AppNotification): boolean {
+function sameOrigin(a: Item, b: Item): boolean {
+  if (a.machine !== b.machine) return false;
   return a.project_id ? a.project_id === b.project_id : !b.project_id && a.session_name === b.session_name;
 }
 
-export default function NotificationBell({ onOpen }: { onOpen: (target: NotificationTarget) => void }) {
-  const [items, setItems] = useState<AppNotification[]>([]);
-  const [unread, setUnread] = useState(0);
+export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { onOpen: (target: NotificationTarget) => void; sources?: NotificationSource[] }) {
+  // Each machine's list and unread count, merged for display.
+  const [itemsBy, setItemsBy] = useState<Record<string, Item[]>>({});
+  const [unreadBy, setUnreadBy] = useState<Record<string, number>>({});
+  const live = sources.map((source) => source.id);
+  const items = live.flatMap((id) => itemsBy[id] ?? []).sort((a, b) => b.finished_at.localeCompare(a.finished_at));
+  const unread = live.reduce((sum, id) => sum + (unreadBy[id] ?? 0), 0);
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+  const sourceOf = (machine: string) => sourcesRef.current.find((source) => source.id === machine);
+  const setItems = (machine: string, change: (current: Item[]) => Item[]) => setItemsBy((all) => ({ ...all, [machine]: change(all[machine] ?? []) }));
+  const setUnread = (machine: string, change: number | ((current: number) => number)) =>
+    setUnreadBy((all) => ({ ...all, [machine]: typeof change === 'function' ? change(all[machine] ?? 0) : change }));
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState(
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );
-  const [toasts, setToasts] = useState<AppNotification[]>([]);
+  const [toasts, setToasts] = useState<Item[]>([]);
   const [holding, setHolding] = useState(false);
   const [anchor, setAnchor] = useState({ top: 0, right: 0 });
   const root = useRef<HTMLDivElement>(null);
   const known = useRef(new Set<string>());
   const openRef = useRef(open);
   openRef.current = open;
-  const dismiss = useCallback((id: string) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
+  const dismiss = useCallback((uid: string) => setToasts((current) => current.filter((toast) => toast.uid !== uid)), []);
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
 
-  const load = useCallback(async () => {
+  const tag = (source: NotificationSource, item: AppNotification): Item => ({ ...item, machine: source.id, machineLabel: source.label, uid: `${source.id} ${item.id}` });
+
+  const load = useCallback(async (source: NotificationSource) => {
     try {
-      const list = await fetchNotifications();
-      known.current = new Set(list.items.map((item) => item.id));
-      setItems(list.items);
-      setUnread(list.unread_count);
+      const list = await source.api.fetchNotifications();
+      for (const item of list.items) known.current.add(`${source.id} ${item.id}`);
+      setItems(source.id, () => list.items.map((item) => tag(source, item)));
+      setUnread(source.id, list.unread_count);
     } catch {
       /* The stream's reconnect retries; a stale list is better than an error badge. */
     }
   }, []);
 
-  const read = useCallback((item: AppNotification) => {
+  const read = useCallback((item: Item) => {
     if (item.read) return;
-    setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: true } : entry)));
-    setUnread((count) => Math.max(0, count - 1));
-    void markNotificationsRead({ ids: [item.id] }).then((result) => setUnread(result.unread_count), () => undefined);
+    const source = sourceOf(item.machine);
+    setItems(item.machine, (current) => current.map((entry) => (entry.id === item.id ? { ...entry, read: true } : entry)));
+    setUnread(item.machine, (count) => Math.max(0, count - 1));
+    void source?.api.markNotificationsRead({ ids: [item.id] }).then((result) => setUnread(item.machine, result.unread_count), () => undefined);
   }, []);
 
+  const sourcesKey = sources.map((source) => `${source.id} ${source.api.API_BASE} ${source.api.API_TOKEN}`).join('|');
   useEffect(() => {
-    void load();
-    const stream = new EventSource(notificationStreamUrl);
-    // Every (re)connect resynchronises, so nothing missed while offline is lost.
-    stream.onopen = () => void load();
-    stream.addEventListener('notification', (event) => {
-      let item: AppNotification;
-      try {
-        item = JSON.parse((event as MessageEvent).data);
-      } catch {
-        return;
-      }
-      if (known.current.has(item.id)) return;
-      known.current.add(item.id);
-      // A project's newest turn replaces its earlier ones: the backend has
-      // marked those read, so they leave the count and their pop-ups go.
-      setItems((current) => [item, ...current.map((entry) => (
-        !entry.read && sameOrigin(entry, item) ? { ...entry, read: true } : entry))].slice(0, 100));
-      setToasts((current) => current.filter((toast) => !sameOrigin(toast, item)));
-      if (item.read) return;
-      void fetchNotifications(1).then((list) => setUnread(list.unread_count), () => setUnread((count) => count + 1));
-      // In view, show it beside the bell; the open list already shows it.
-      if (document.visibilityState === 'visible' && !openRef.current) {
-        setToasts((current) => [item, ...current.filter((toast) => toast.id !== item.id)].slice(0, MAX_TOASTS));
-      }
-      if (document.visibilityState === 'hidden' && typeof Notification !== 'undefined'
-          && Notification.permission === 'granted') {
-        const popup = new Notification(`${label(item)} finished a turn`, {
-          body: item.summary || `${item.provider === 'claude' ? 'Claude Code' : 'Codex'} is waiting for you.`,
-          tag: item.id,
-        });
-        popup.onclick = () => {
-          window.focus();
-          popup.close();
-          const target = targetOf(item);
-          if (target) {
-            read(item);
-            onOpenRef.current(target);
-          }
-        };
-      }
+    const streams = sourcesRef.current.map((source) => {
+      void load(source);
+      const stream = new EventSource(source.api.notificationStreamUrl);
+      // Every (re)connect resynchronises, so nothing missed while offline is lost.
+      stream.onopen = () => void load(source);
+      stream.addEventListener('notification', (event) => {
+        let raw: AppNotification;
+        try {
+          raw = JSON.parse((event as MessageEvent).data);
+        } catch {
+          return;
+        }
+        const item = tag(source, raw);
+        if (known.current.has(item.uid)) return;
+        known.current.add(item.uid);
+        // A project's newest turn replaces its earlier ones: the backend has
+        // marked those read, so they leave the count and their pop-ups go.
+        setItems(source.id, (current) => [item, ...current.map((entry) => (
+          !entry.read && sameOrigin(entry, item) ? { ...entry, read: true } : entry))].slice(0, 100));
+        setToasts((current) => current.filter((toast) => !sameOrigin(toast, item)));
+        if (item.read) return;
+        void source.api.fetchNotifications(1).then((list) => setUnread(source.id, list.unread_count), () => setUnread(source.id, (count) => count + 1));
+        // In view, show it beside the bell; the open list already shows it.
+        if (document.visibilityState === 'visible' && !openRef.current) {
+          setToasts((current) => [item, ...current.filter((toast) => toast.uid !== item.uid)].slice(0, MAX_TOASTS));
+        }
+        if (document.visibilityState === 'hidden' && typeof Notification !== 'undefined'
+            && Notification.permission === 'granted') {
+          const popup = new Notification(`${label(item)} finished a turn`, {
+            body: item.summary || `${item.provider === 'claude' ? 'Claude Code' : 'Codex'} is waiting for you.`,
+            tag: item.uid,
+          });
+          popup.onclick = () => {
+            window.focus();
+            popup.close();
+            const target = targetOf(item);
+            if (target) {
+              read(item);
+              onOpenRef.current(target);
+            }
+          };
+        }
+      });
+      return stream;
     });
-    return () => stream.close();
-  }, [load, read]);
+    return () => streams.forEach((stream) => stream.close());
+  }, [load, read, sourcesKey]);
 
   // Dolphin Desktop mirrors the unread count on the dock or taskbar icon.
   useEffect(() => {
@@ -175,7 +200,7 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
           {toasts.map((item) => {
             const target = targetOf(item);
             return (
-              <li key={item.id}>
+              <li key={item.uid}>
                 <button
                   className="glass-toast-open"
                   disabled={!target}
@@ -183,7 +208,7 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
                   onClick={() => {
                     if (!target) return;
                     read(item);
-                    dismiss(item.id);
+                    dismiss(item.uid);
                     onOpen(target);
                   }}
                 >
@@ -194,7 +219,7 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
                     <small>{item.provider === 'claude' ? 'Claude Code' : 'Codex'} · {ago(item.finished_at)}</small>
                   </span>
                 </button>
-                <button className="glass-toast-dismiss" aria-label={`Dismiss ${label(item)}`} onClick={() => dismiss(item.id)}>
+                <button className="glass-toast-dismiss" aria-label={`Dismiss ${label(item)}`} onClick={() => dismiss(item.uid)}>
                   <X size={13} />
                 </button>
               </li>
@@ -208,9 +233,11 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
           <header>
             <strong>Notifications</strong>
             <button disabled={!unread} onClick={() => {
-              setItems((current) => current.map((entry) => ({ ...entry, read: true })));
-              setUnread(0);
-              void markNotificationsRead({ all: true }).then((result) => setUnread(result.unread_count), () => undefined);
+              for (const source of sourcesRef.current) {
+                setItems(source.id, (current) => current.map((entry) => ({ ...entry, read: true })));
+                setUnread(source.id, 0);
+                void source.api.markNotificationsRead({ all: true }).then((result) => setUnread(source.id, result.unread_count), () => undefined);
+              }
             }}>Mark all read</button>
           </header>
           {items.length === 0 ? (
@@ -220,7 +247,7 @@ export default function NotificationBell({ onOpen }: { onOpen: (target: Notifica
               {items.map((item) => {
                 const target = targetOf(item);
                 return (
-                  <li key={item.id} data-read={item.read}>
+                  <li key={item.uid} data-read={item.read}>
                     <button
                       disabled={!target}
                       title={target ? `Open ${label(item)}` : 'This session is outside every project.'}

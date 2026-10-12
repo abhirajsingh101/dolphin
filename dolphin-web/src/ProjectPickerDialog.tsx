@@ -8,11 +8,7 @@ import {
 } from 'react';
 import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
 
-import {
-  createWorkspaceDirectory,
-  fetchWorkspaceDirectories,
-  fetchWorkspaceRoots,
-} from './api';
+import { useApi } from './apiContext';
 import {
   directoryNodes,
   groupResultsByRoot,
@@ -119,6 +115,7 @@ export default function ProjectPickerDialog({
   /** Dolphin Desktop: whose folders these are ("this computer", or a host). */
   machine?: string;
 }) {
+  const { createWorkspaceDirectory, fetchWorkspaceDirectories, fetchWorkspaceRoots } = useApi();
   const [roots, setRoots] = useState<WorkspaceRoot[]>([]);
   const [rootsState, setRootsState] = useState<'loading' | 'ready' | 'failed'>(
     'loading',

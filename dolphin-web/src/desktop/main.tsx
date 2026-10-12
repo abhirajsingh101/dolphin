@@ -9,6 +9,9 @@ import DictationProvider from '../DictationProvider';
 import DolphinIcon from '../DolphinIcon';
 import ErrorBoundary from '../ErrorBoundary';
 import { applyTheme, readStoredTheme } from '../theme';
+import { api, apiFor } from '../api';
+import { ApiContext } from '../apiContext';
+import { useMachineLinks } from '../machines';
 import '../glass.css';
 import './glassHealth.css';
 import './glassDialogs.css';
@@ -18,10 +21,14 @@ import './motion.css';
 const GlassWorkspace = React.lazy(() => import('../GlassWorkspace'));
 const SystemHealthView = React.lazy(() => import('../SystemHealthView'));
 
-type Surface = 'workspace' | 'health';
-/** The machine this window works on (the preload hands it over). */
+/** The workspace, or System Health for one machine (`#/health/<id>`; this computer without one). */
+type Surface = { kind: 'workspace' } | { kind: 'health'; machine: string };
+/** This computer's name (the preload hands it over). */
 const host = (window as { dolphinDesktop?: { config?: { host?: string } } }).dolphinDesktop?.config?.host;
-const surfaceOf = (hash: string): Surface => (hash === '#/health' ? 'health' : 'workspace');
+const surfaceOf = (hash: string): Surface => {
+  const health = /^#\/health(?:\/(.+))?$/.exec(hash);
+  return health ? { kind: 'health', machine: health[1] ? decodeURIComponent(health[1]) : 'local' } : { kind: 'workspace' };
+};
 
 /** While a surface loads: the launch page's breathing mark and sweeping bar. */
 function DesktopSplash() {
@@ -34,10 +41,14 @@ function DesktopSplash() {
   );
 }
 
-/* Dolphin Desktop shows two surfaces: the workspace, and System Health for the
-   machine this window is connected to. Nothing else from the web app ships. */
+/* Dolphin Desktop shows two surfaces: the workspace, and System Health for one
+   of the machines in it. Nothing else from the web app ships. */
 function DesktopRouter() {
   const [surface, setSurface] = React.useState<Surface>(() => surfaceOf(window.location.hash));
+  const links = useMachineLinks(true);
+  const machine = surface.kind === 'health' && surface.machine !== 'local' ? links.find((link) => link.id === surface.machine) : undefined;
+  const healthApi = machine?.apiBase && machine.token !== null ? apiFor({ base: machine.apiBase, token: machine.token }) : api;
+  const healthHost = surface.kind === 'health' && surface.machine !== 'local' ? machine?.label ?? surface.machine : host;
   React.useEffect(() => {
     const changed = () => setSurface(surfaceOf(window.location.hash));
     window.addEventListener('hashchange', changed);
@@ -45,21 +56,23 @@ function DesktopRouter() {
   }, []);
   return (
     <React.Suspense fallback={<DesktopSplash />}>
-      {surface === 'health' ? (
+      {surface.kind === 'health' ? (
         <div className="glass-health">
           <header className="glass-health-top">
             <a className="glass-brand" href="#/workspace" aria-label="Dolphin workspace">
               <span className="dolphin-mark"><DolphinIcon /></span>
               Dolphin
             </a>
-            {host && <span className="glass-host" title={`Working on ${host}`}>{host}</span>}
+            {healthHost && <span className="glass-host" title={`Health of ${healthHost}`}>{healthHost}</span>}
             <span className="glass-health-crumb">System Health</span>
             <a className="glass-health-back" href="#/workspace">
               <ArrowLeft size={15} aria-hidden="true" /> Back to Workspace
             </a>
           </header>
           <main className="glass-health-stage">
-            <SystemHealthView />
+            <ApiContext.Provider value={healthApi}>
+              <SystemHealthView key={surface.machine} />
+            </ApiContext.Provider>
           </main>
         </div>
       ) : (

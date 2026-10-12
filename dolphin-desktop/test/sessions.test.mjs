@@ -97,7 +97,7 @@ test('tmux sessions already running become projects; the folder picker names the
     const project = window.locator('details', { hasText: 'api' });
     await project.getByText('api-work').waitFor({ timeout: 30_000 });
 
-    await window.getByRole('button', { name: 'Add a project' }).click();
+    await window.getByRole('button', { name: 'Add a project on This Computer' }).click();
     const picker = window.getByRole('dialog', { name: 'Link a project' });
     await picker.getByText('Folders on this computer').waitFor({ timeout: 15_000 });
     await window.keyboard.press('Escape');

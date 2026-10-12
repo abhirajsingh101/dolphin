@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Plus, RefreshCw, Copy, Check } from 'lucide-react';
-import { createTask, fetchTasks, updateTask } from './api';
+import { useApi } from './apiContext';
 import type { Task } from './types';
 
 export default function GlassProjectTasks({ projectId, projectName, sessionName }: { projectId: string; projectName: string; sessionName: string }) {
+  const { createTask, fetchTasks, updateTask } = useApi();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   useEffect(() => {

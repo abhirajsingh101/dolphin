@@ -105,7 +105,7 @@ test('without netdata, System Health uses the built-in monitor; + opens the fold
   try {
     const window = await app.firstWindow();
     await window.waitForURL(/app:\/\/dolphin\/desktop\.html/, { timeout: 90_000 });
-    await window.getByRole('button', { name: 'Add a project' }).click();
+    await window.getByRole('button', { name: 'Add a project on This Computer' }).click();
     const picker = window.getByRole('dialog');
     await picker.waitFor({ timeout: 15_000 });
     await window.screenshot({ path: path.join(shots, 'desktop-picker.png') });

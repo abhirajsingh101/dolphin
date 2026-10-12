@@ -12,8 +12,9 @@ import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatT
 import AgentSetupPrompt from './AgentSetupPrompt';
 import BrainStatus from './BrainStatus';
 import UpdateControl, { canUpdate, type AboutAnchor } from './UpdateControl';
-import MachineSwitcher from './MachineSwitcher';
-import { canConnect, machineBridge } from './machines';
+import MachineSection from './MachineSection';
+import { canConnect, machineBridge, useMachineLinks, type MachineLink } from './machines';
+import { ApiContext } from './apiContext';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
@@ -32,17 +33,16 @@ import {
   Terminal,
   X,
   Activity,
+  Server,
   ArrowUpRight,
   PanelLeft,
 } from 'lucide-react';
 import {
-  fetchControlCenter,
-  createProject,
-  createTmuxSession,
-  sendTmuxInput,
+  api,
+  apiFor,
   request,
   DolphinApiError,
-  importTmuxProjects,
+  type Api,
 } from './api';
 import type { SessionChoice } from './NewSessionDialog';
 import { applyTheme, persistTheme, readStoredTheme } from './theme';
@@ -58,7 +58,10 @@ import DolphinIcon from './DolphinIcon';
 import type { PaletteItem } from './commandPaletteModel';
 import { isTerminalLikeTarget } from './shortcutTarget';
 type DashboardContext = { open_windows: { project_id: string; session_name: string; minimized: boolean; tab_hidden?: boolean }[]; pinned_sessions: { project_id: string; session_name: string }[]; focused_session: { project_id: string; session_name: string } | null };
-type Target = { projectId: string; projectName: string; sessionName: string };
+/** A session on a machine. `machine` is the machine's id (`local` for this
+    computer); targets saved before it existed find theirs by project. */
+type Target = { projectId: string; projectName: string; sessionName: string; machine?: string };
+type MachineProject = ControlCenterProject & { machine: string };
 type ToolActivity = { id: string; tool: string; status: string; arguments: Record<string, unknown>; result: unknown };
 type Message = { id: string; created_at?: string; role: 'user' | 'assistant'; text: string; payload?: { work_summary_receipt?: string; engine?: { provider: string; model: string; fallback: boolean } | null; uncertainty_note?: string | null; tool_activity?: ToolActivity[] } };
 type TrackedWork = { id: string; project_id: string; session_name: string; state: string; finished_at: string | null; summary_status?: string | null };
@@ -88,10 +91,11 @@ function FocusItem({ id, selected, activity, label, onOpen, onUnpin, children }:
 /** What fetch says when the backend can't be reached at all (Chromium, Firefox, Safari). */
 const NETWORK_ERROR = /Failed to fetch|NetworkError|Load failed/i;
 
-/** Dolphin Desktop: the machine this window is connected to. */
-const desktopHost = typeof window === 'undefined'
-  ? undefined
-  : (window as { dolphinDesktop?: { config?: { host?: string } } }).dolphinDesktop?.config?.host;
+/** The web app's one backend, as a machine, so both builds list projects the same way. */
+const LOCAL: MachineLink = {
+  id: 'local', kind: 'local', target: null, label: 'This Computer', hostname: null, state: 'connected',
+  status: null, error: null, reason: null, offerKey: false, apiBase: null, token: null,
+};
 
 export default function GlassWorkspace({ desktop = false, renderSignals }: {
   desktop?: boolean;
@@ -100,9 +104,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
 } = {}) {
   // Dolphin Desktop has no legacy project page, so + opens the folder picker
   // here. It browses the connected machine, which works for SSH hosts too.
-  const [pickingProject, setPickingProject] = useState(false);
-  const [choosingSession, setChoosingSession] = useState<ControlCenterProject | null>(null);
-  const [removingProject, setRemovingProject] = useState<ControlCenterProject | null>(null);
+  // Each holds the machine (or that machine's project) it was opened for.
+  const [pickingProject, setPickingProject] = useState<string | null>(null);
+  const [choosingSession, setChoosingSession] = useState<MachineProject | null>(null);
+  const [removingProject, setRemovingProject] = useState<MachineProject | null>(null);
   const [restored] = useState(() => {
     const empty = { windows: [] as Target[], minimized: [] as string[], active: null as Target | null };
     try {
@@ -111,7 +116,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       const seen = new Set<string>();
       const windows: Target[] = saved.windows.filter((t: Target) => {
         if (!t || !['projectId', 'projectName', 'sessionName'].every(k =>
-          typeof t[k as keyof Target] === 'string' && t[k as keyof Target].trim())) return false;
+          typeof t[k as keyof Target] === 'string' && (t[k as keyof Target] as string).trim())) return false;
         if (seen.has(key(t))) return false;
         seen.add(key(t));
         return true;
@@ -123,8 +128,26 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   });
 
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-  const [projects, setProjects] = useState<ControlCenterProject[]>([]),
-    [query, setQuery] = useState(''),
+  // Dolphin Desktop: every machine in this window, this computer first. Each
+  // one's projects come from its own helper, through its own client.
+  const links = useMachineLinks(desktop);
+  const sections: MachineLink[] = desktop && links.length ? links : [LOCAL];
+  const clientOf = (link: MachineLink | undefined): Api | null => {
+    if (!link) return null;
+    if (link.id === 'local') return api;
+    return link.apiBase && link.token !== null && link.state !== 'failed' ? apiFor({ base: link.apiBase, token: link.token }) : null;
+  };
+  const apiOf = (machine: string | undefined) => (machine === 'local' ? api : clientOf(sections.find((link) => link.id === machine)));
+  const labelOf = (machine: string | undefined) => sections.find((link) => link.id === machine)?.label ?? '';
+  const [projectsBy, setProjectsBy] = useState<Record<string, ControlCenterProject[]>>({});
+  const projects: MachineProject[] = sections.flatMap((link) => (projectsBy[link.id] ?? []).map((project) => ({ ...project, machine: link.id })));
+  const machineOfTarget = (target: Target) => target.machine ?? projects.find((project) => project.id === target.projectId)?.machine ?? (desktop ? undefined : 'local');
+  const [collapsedMachines, setCollapsedMachines] = useState<string[]>(() => {
+    try { const saved: unknown = JSON.parse(localStorage.getItem('dolphin.glass.collapsed-machines') ?? '[]'); return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; }
+    catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem('dolphin.glass.collapsed-machines', JSON.stringify(collapsedMachines)); } catch { /* Storage is optional. */ } }, [collapsedMachines]);
+  const [query, setQuery] = useState(''),
     [focus, setFocus] = useState<Target[]>(() => {
       try {
         const saved: unknown = JSON.parse(
@@ -144,8 +167,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       } catch {
         return [];
       }
-    }),
-    [active, setActive] = useState<Target | null>(restored.active);
+    });
+  const [active, setActive] = useState<Target | null>(restored.active);
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'tasks'>('projects');
   const [windows, setWindows] = useState<Target[]>(restored.windows);
   const [minimized, setMinimized] = useState<string[]>(restored.minimized);
@@ -156,8 +179,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   });
   useEffect(() => { if (active) setProjectTabs(old => ({ ...old, [active.projectId]: active.sessionName })); }, [active]);
   useEffect(() => { try { localStorage.setItem('dolphin.glass.project-tabs', JSON.stringify(projectTabs)); } catch { /* Storage is optional. */ } }, [projectTabs]);
-  const projectWindows = Array.from(new Set(windows.map(target => target.projectId))).map(projectId => {
-    const sessions = windows.filter(target => target.projectId === projectId);
+  // A window shows once its machine is connected; until then it waits, saved.
+  const shownWindows = windows.filter((target) => apiOf(machineOfTarget(target)));
+  const projectWindows = Array.from(new Set(shownWindows.map(target => target.projectId))).map(projectId => {
+    const sessions = shownWindows.filter(target => target.projectId === projectId);
     const selected = sessions.find(target => target.sessionName === (active?.projectId === projectId ? active.sessionName : projectTabs[projectId])) || sessions[0];
     return { projectId, sessions, selected, collapsed: sessions.every(target => minimized.includes(key(target))) };
   });
@@ -209,7 +234,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     media.addEventListener('change', change);
     return () => media.removeEventListener('change', change);
   }, []);
-  const hasWindows = windows.some((target) => !minimized.includes(key(target)));
+  const hasWindows = shownWindows.some((target) => !minimized.includes(key(target)));
   useEffect(() => {
     const panel = rightPanel.current;
     if (!panel) return;
@@ -239,13 +264,19 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   useEffect(() => (desktop ? machineBridge()?.onConnectOpen?.(() => setConnecting(true)) ?? undefined : undefined), [desktop]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const sessionTargets = projects.flatMap((p) =>
+  const sessionTargets: Target[] = projects.flatMap((p) =>
     p.sessions.map((s) => ({
       projectId: p.id,
       projectName: p.name,
       sessionName: s.name,
+      machine: p.machine,
     })),
   );
+  // Another machine's name goes before its sessions wherever they are listed together.
+  const onMachine = (target: Target) => {
+    const machine = machineOfTarget(target);
+    return desktop && machine && machine !== 'local' ? `${labelOf(machine)} · ` : '';
+  };
   const paletteItems: PaletteItem[] = [
     {
       id: 'dolphin',
@@ -258,7 +289,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     ...sessionTargets.map((t) => ({
       id: key(t),
       kind: 'session' as const,
-      label: `${t.projectName} / ${t.sessionName}`,
+      label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`,
       hint: focus.some((f) => key(f) === key(t)) ? 'In Focus' : 'Open and pin',
     })),
   ];
@@ -320,7 +351,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     try {
       await request(`/api/dolphin/threads/${encodeURIComponent(thread)}/work/${encodeURIComponent(work.id)}/close`, { method: 'POST' });
       setTrackedWork(items => items.map(item => item.id === work.id ? { ...item, state: 'closed' } : item));
-      const target = { projectId: work.project_id, projectName: '', sessionName: work.session_name };
+      const target = { projectId: work.project_id, projectName: '', sessionName: work.session_name, machine: 'local' };
       closeWindow(target);
       setFocus(items => items.filter(item => key(item) !== key(target)));
       void refresh();
@@ -359,7 +390,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   }, [tabId, thread, busy, pending]);
   function renderActivity(items: ToolActivity[]) {
     return <div className="glass-tool-activity" aria-label="Dolphin tool activity">{items.map(item => {
-      const project = projects.find(p => p.id === item.arguments.project_id);
+      // The chat runs on this computer, so the projects it names are this computer's.
+      const project = projects.find(p => p.machine === 'local' && p.id === item.arguments.project_id);
       const result = item.result as { result?: { name?: string; session_name?: string; engine?: string } } | null;
       const sessionName = result?.result?.name || result?.result?.session_name || item.arguments.session_name;
       const tracked = trackedWork.find(work => work.id === item.id);
@@ -369,11 +401,11 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         {sessionAction && <div className="glass-session-receipt">
           <Terminal size={18} aria-hidden="true" />
           <span><strong>{project.name}</strong><span>{sessionName}</span><small>{tracked?.state === 'closed' ? 'Session closed' : tracked?.finished_at ? 'Agent finished its turn · work not independently verified' : tracked ? 'Tracking agent · no model tokens' : item.status === 'submitted' ? 'Task submitted · completion not yet verified' : item.status === 'unknown' ? 'Inspect session · startup not confirmed' : 'Session ready'}</small></span>
-          <button disabled={tracked?.state === 'closed'} aria-label={`Open session ${project.name} / ${sessionName}`} onClick={() => open({ projectId: project.id, projectName: project.name, sessionName })}>Open session <ArrowUpRight size={14} /></button>
+          <button disabled={tracked?.state === 'closed'} aria-label={`Open session ${project.name} / ${sessionName}`} onClick={() => open({ projectId: project.id, projectName: project.name, sessionName, machine: project.machine })}>Open session <ArrowUpRight size={14} /></button>
         </div>}
         <details>
         <summary><span>{item.tool.replace(/_/g, ' ')}</span><small data-status={item.status}>{item.status}</small></summary>
-        {!sessionAction && project && typeof sessionName === 'string' && <button onClick={() => open({ projectId: project.id, projectName: project.name, sessionName })}>Open session</button>}
+        {!sessionAction && project && typeof sessionName === 'string' && <button onClick={() => open({ projectId: project.id, projectName: project.name, sessionName, machine: project.machine })}>Open session</button>}
         <pre>{JSON.stringify(item.result, null, 2)}</pre>
       </details></div>;
     })}</div>;
@@ -411,35 +443,65 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [inventoryAvailable, setInventoryAvailable] = useState<boolean | null>(
     null,
   );
-  const refresh = () =>
-    fetchControlCenter()
-      .then((s) => {
-        setProjects(s.projects);
+  const linksRef = useRef(sections);
+  linksRef.current = sections;
+  const refreshMachine = (link: MachineLink) => {
+    const client = clientOf(link);
+    if (!client) return Promise.resolve();
+    return client.fetchControlCenter()
+      .then((snapshot) => {
+        setProjectsBy((current) => ({ ...current, [link.id]: snapshot.projects }));
+        if (link.id !== 'local') return;
         setInventoryAvailable(true);
         // The backend answers again: a banner that only said it couldn't be reached is stale.
         setError((current) => (NETWORK_ERROR.test(current) ? '' : current));
       })
       .catch((e) => {
+        // Another machine's link has its own state in its section; this
+        // computer's backend failing is the workspace's problem.
+        if (link.id !== 'local') return;
         setInventoryAvailable(false);
         setError(String(e));
       });
-  // Dolphin Desktop: the folders of tmux sessions already running on this
+  };
+  const refresh = () => Promise.all(linksRef.current.map(refreshMachine)).then(() => undefined);
+  // Dolphin Desktop: the folders of tmux sessions already running on a
   // machine become projects (once each), so their sessions show up too.
-  const importSessions = () => importTmuxProjects().then((added) => { if (added.length) void refresh(); }).catch(() => undefined);
+  const importSessions = (link: MachineLink) => clientOf(link)?.importTmuxProjects()
+    .then((added) => { if (added.length) void refreshMachine(link); })
+    .catch(() => undefined);
   useEffect(() => {
-    void refresh();
-    if (desktop) void importSessions();
     let tick = 0;
     const timer = setInterval(() => {
       void refresh();
-      if (desktop && ++tick % 4 === 0) void importSessions();
+      if (desktop && ++tick % 4 === 0) linksRef.current.forEach((link) => void importSessions(link));
     }, 15000);
-    // Dolphin Desktop: the SSH link came back, so load now rather than at the next tick.
-    const stop = desktop ? machineBridge()?.onConnection?.((link) => {
-      if (link.state === 'connected') { void refresh(); void importSessions(); }
-    }) : undefined;
-    return () => { clearInterval(timer); stop?.(); };
+    return () => clearInterval(timer);
   }, []);
+  // A machine just added comes into view in the projects list.
+  const seenMachines = useRef(new Set(sections.map((link) => link.id)));
+  const machineIds = sections.map((link) => link.id).join('|');
+  useEffect(() => {
+    const added = sections.find((link) => !seenMachines.current.has(link.id));
+    sections.forEach((link) => seenMachines.current.add(link.id));
+    if (!added) return;
+    setSidebarTab('projects');
+    setCollapsedMachines((ids) => ids.filter((id) => id !== added.id));
+    requestAnimationFrame(() => document.querySelector(`[data-machine="${window.CSS.escape(added.id)}"]`)
+      ?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'instant' : 'smooth' }));
+  }, [machineIds]);
+  // A machine that connects, comes back, or gets a new token loads at once.
+  const loaded = useRef(new Set<string>());
+  const linkKeys = sections.map((link) => `${link.id} ${link.state} ${link.apiBase} ${link.token}`).join('|');
+  useEffect(() => {
+    for (const link of sections) {
+      const id = `${link.id} ${link.state} ${link.apiBase} ${link.token}`;
+      if (link.state !== 'connected' || loaded.current.has(id)) continue;
+      loaded.current.add(id);
+      void refreshMachine(link);
+      if (desktop) void importSessions(link);
+    }
+  }, [linkKeys]);
   useEffect(() => {
     request<Thread[]>('/api/chief/threads')
       .then((ts) => {
@@ -525,22 +587,25 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     setMinimized(ids => ids.filter(id => !windows.some(item => item.projectId === t.projectId && key(item) === id) && id !== key(t)));
     setWindows((old) => old.some((item) => key(item) === key(t)) ? old : [...old, t]);
   }
-  async function create(project: ControlCenterProject, choice?: SessionChoice) {
+  async function create(project: MachineProject, choice?: SessionChoice) {
     // Dolphin Desktop asks what to run first: an agent, an install, or a shell.
     if (desktop && !choice) {
       setChoosingSession(project);
       return;
     }
+    const client = apiOf(project.machine);
+    if (!client) return;
     setCreating(true);
     setError('');
     try {
-      const s = await createTmuxSession(project.id, undefined, choice?.mode ?? 'shell');
-      if (choice?.startup) await sendTmuxInput(project.id, s.name, choice.startup);
+      const s = await client.createTmuxSession(project.id, undefined, choice?.mode ?? 'shell');
+      if (choice?.startup) await client.sendTmuxInput(project.id, s.name, choice.startup);
       await refresh();
       open({
         projectId: project.id,
         projectName: project.name,
         sessionName: s.name,
+        machine: project.machine,
       });
     } catch (e) {
       setError(String(e));
@@ -558,10 +623,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     setBusy(true);
     setError('');
     const identity = (target: Target) => ({ project_id: target.projectId, session_name: target.sessionName });
+    // The chat runs on this computer and knows only its projects.
+    const here = (target: Target) => machineOfTarget(target) === 'local';
     const dashboard_context: DashboardContext = {
-      open_windows: windows.map((target) => ({ ...identity(target), minimized: minimized.includes(key(target)), ...(projectWindows.find(group => group.projectId === target.projectId)?.selected.sessionName !== target.sessionName ? { tab_hidden: true } : {}) })),
-      pinned_sessions: focus.map(identity),
-      focused_session: active ? identity(active) : null,
+      open_windows: windows.filter(here).map((target) => ({ ...identity(target), minimized: minimized.includes(key(target)), ...(projectWindows.find(group => group.projectId === target.projectId)?.selected.sessionName !== target.sessionName ? { tab_hidden: true } : {}) })),
+      pinned_sessions: focus.filter(here).map(identity),
+      focused_session: active && here(active) ? identity(active) : null,
     };
     try {
       let id = thread;
@@ -634,7 +701,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     return (
               <div aria-live="polite" aria-label="Delegated work updates">
                 {items.map(work => {
-                  const project = projects.find(item => item.id === work.project_id);
+                  const project = projects.find(item => item.machine === 'local' && item.id === work.project_id);
                   return <div className="glass-session-receipt glass-work-update" key={work.id}>
                     <Terminal size={18} aria-hidden="true" />
                     <span><strong>{work.state === 'closed' ? 'Session closed' : work.finished_at ? 'Agent finished its turn' : 'Session unavailable'}</strong>
@@ -642,7 +709,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                       <small>{work.summary_status === 'running' ? 'Preparing a short summary…' : work.summary_status === 'failed' || work.summary_status === 'unknown' ? 'Summary unavailable. Open the session to review its result.' : work.summary_status === 'completed' ? 'Summary added to this conversation.' : work.state === 'closed' ? 'Completion record kept.' : work.state === 'working' ? 'New work is running in this session.' : work.state === 'unavailable' ? 'No live session found. Completion cannot be verified.' : 'Review the result in the terminal. Work is not independently verified.'}</small>
                     </span>
                     {work.state !== 'closed' && work.state !== 'unavailable' && <>
-                      <button onClick={() => open({ projectId: work.project_id, projectName: project?.name || 'Project', sessionName: work.session_name })}>Open session <ArrowUpRight size={14} /></button>
+                      <button onClick={() => open({ projectId: work.project_id, projectName: project?.name || 'Project', sessionName: work.session_name, machine: 'local' })}>Open session <ArrowUpRight size={14} /></button>
                       <button disabled={work.state !== 'stopped' || !!closingWork || trackingError} title="Terminate this completed agent session. Leave it open by taking no action." onClick={() => void closeTrackedWork(work)}>{closingWork === work.id ? 'Closing…' : 'Close session'}</button>
                     </>}
                   </div>;
@@ -651,6 +718,79 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     );
   }
   const count = projects.reduce((n, p) => n + p.sessions.length, 0);
+  const matches = (p: MachineProject) => `${p.name} ${p.sessions.map((s) => s.name).join(' ')}`
+    .toLowerCase()
+    .includes(query.toLowerCase());
+  function linkProject(machine: string, path: string, name = path.replace(/\/+$/, '').split('/').pop() || path) {
+    const client = apiOf(machine);
+    if (!client) return Promise.resolve();
+    return client.createProject({ name, path })
+      .then(() => refresh())
+      .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }
+  function renderProject(p: MachineProject) {
+    return (
+      <details key={`${p.machine} ${p.id}`} open>
+        <summary>
+          <ChevronDown size={13} />
+          <Folder size={16} />
+          <strong>{p.name}</strong>
+          <small>{p.sessions.length}</small>
+          {!p.is_inbox && (
+            <button
+              type="button"
+              className="glass-project-remove"
+              aria-label={`Remove ${p.name} from Dolphin`}
+              title="Remove from Dolphin (the folder stays)"
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); setRemovingProject(p); }}
+            >
+              <FolderMinus size={14} />
+            </button>
+          )}
+        </summary>
+        <div className="glass-sessions">
+          {p.sessions.map((s) => (
+            <button
+              className={
+                active?.projectId === p.id &&
+                active.sessionName === s.name
+                  ? 'selected'
+                  : ''
+              }
+              key={s.name}
+              data-activity={s.observation_state !== 'degraded' && s.has_recent_activity}
+              aria-label={`Open ${p.name} / ${s.name}`}
+              onClick={() =>
+                open({
+                  projectId: p.id,
+                  projectName: p.name,
+                  sessionName: s.name,
+                  machine: p.machine,
+                })
+              }
+            >
+              <Terminal size={15} />
+              <span>
+                {s.name}
+                <small>
+                  <i className={s.has_recent_activity ? 'live' : ''} />
+                  {status(s)}
+                </small>
+              </span>
+            </button>
+          ))}
+          <button
+            className="glass-new-session"
+            disabled={creating}
+            onClick={() => void create(p)}
+          >
+            <Plus size={13} />
+            New session
+          </button>
+        </div>
+      </details>
+    );
+  }
   return (
     <MotionConfig reducedMotion="user"><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed}>
       <CommandPalette
@@ -669,28 +809,29 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           }
         }}
       />
-      {pickingProject && (
+      {pickingProject && apiOf(pickingProject) && (
         <Suspense fallback={null}>
-          <ProjectPickerDialog
-            machine={desktop ? (machineBridge()?.connection?.()?.kind === 'local' ? 'this computer' : desktopHost) : undefined}
-            onClose={() => setPickingProject(false)}
-            onPick={(path) => {
-              setPickingProject(false);
-              const name = path.replace(/\/+$/, '').split('/').pop() || path;
-              createProject({ name, path })
-                .then(() => refresh())
-                .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
-            }}
-          />
+          <ApiContext.Provider value={apiOf(pickingProject) ?? api}>
+            <ProjectPickerDialog
+              machine={desktop ? (pickingProject === 'local' ? 'this computer' : labelOf(pickingProject)) : undefined}
+              onClose={() => setPickingProject(null)}
+              onPick={(path) => {
+                const machine = pickingProject;
+                setPickingProject(null);
+                linkProject(machine, path);
+              }}
+            />
+          </ApiContext.Provider>
         </Suspense>
       )}
       {connecting && (
         <Suspense fallback={null}>
-          <ConnectMachineDialog onClose={() => setConnecting(false)} currentTarget={machineBridge()?.connection?.()?.target ?? null} />
+          <ConnectMachineDialog onClose={() => setConnecting(false)} currentTarget={null} />
         </Suspense>
       )}
       {removingProject && (
         <Suspense fallback={null}>
+          <ApiContext.Provider value={apiOf(removingProject.machine) ?? api}>
           <RemoveProjectDialog
             project={removingProject}
             onClose={() => setRemovingProject(null)}
@@ -704,10 +845,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               void refresh();
             }}
           />
+          </ApiContext.Provider>
         </Suspense>
       )}
       {choosingSession && (
         <Suspense fallback={null}>
+          <ApiContext.Provider value={apiOf(choosingSession.machine) ?? api}>
           <NewSessionDialog
             projectName={choosingSession.name}
             onClose={() => setChoosingSession(null)}
@@ -717,6 +860,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               void create(project, choice);
             }}
           />
+          </ApiContext.Provider>
         </Suspense>
       )}
       <header className="glass-top">
@@ -753,9 +897,6 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             Dolphin
           </a>
         )}
-        {desktop && desktopHost && (canConnect()
-          ? <MachineSwitcher label={desktopHost} onConnect={() => setConnecting(true)} />
-          : <span className="glass-host" title={`Working on ${desktopHost}`}>{desktopHost}</span>)}
         {!desktop && <a className="glass-fleet-link" href="#/fleet">Missions</a>}
         <button
           className="glass-global-search"
@@ -775,7 +916,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               : 'Connecting…'}
         </span>
         {desktop && <UpdateControl open={aboutOpen} onOpenChange={setAboutOpen} />}
-        <NotificationBell onOpen={open} />
+        <NotificationBell onOpen={open} sources={desktop ? sections.flatMap((link) => {
+          const client = clientOf(link);
+          return client ? [{ id: link.id, label: link.id === 'local' ? undefined : link.label, api: client }] : [];
+        }) : undefined} />
         <button
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
           onClick={() => {
@@ -815,7 +959,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           <button role="tab" id="glass-tasks-tab" tabIndex={sidebarTab === 'tasks' ? 0 : -1} aria-selected={sidebarTab === 'tasks'} aria-controls="glass-tasks-panel" onClick={() => setSidebarTab('tasks')}>Tasks</button>
         </div>
         {sidebarTab === 'tasks' ? <div key="tasks" id="glass-tasks-panel" role="tabpanel" aria-labelledby="glass-tasks-tab" className="glass-sidebar-panel">
-          {active ? <GlassProjectTasks key={active.projectId} projectId={active.projectId} projectName={active.projectName} sessionName={active.sessionName} /> : <p className="glass-task-empty">Select an open terminal window to see its project’s tasks.</p>}
+          {active && apiOf(machineOfTarget(active)) ? <ApiContext.Provider value={apiOf(machineOfTarget(active)) ?? api}><GlassProjectTasks key={active.projectId} projectId={active.projectId} projectName={active.projectName} sessionName={active.sessionName} /></ApiContext.Provider> : <p className="glass-task-empty">Select an open terminal window to see its project’s tasks.</p>}
         </div> : <div key="projects" id="glass-projects-panel" role="tabpanel" aria-labelledby="glass-projects-tab" className="glass-sidebar-panel">
         <div className="glass-section-title">
           Projects <span>{projects.length}</span>
@@ -826,11 +970,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           >
             <X size={15} />
           </button>
-          {desktop ? (
-            <button aria-label="Add a project" title="Open a folder as a project" onClick={() => setPickingProject(true)}>
-              <Plus size={15} />
-            </button>
-          ) : (
+          {!desktop && (
             <a href="#/" aria-label="Manage projects">
               <Plus size={15} />
             </a>
@@ -852,99 +992,57 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               <button onClick={() => void refresh()}>Retry connection</button>
             </div>
           )}
-          {desktop && inventoryAvailable && !projects.some((p) => p.path && !p.is_inbox) && (
-            <Suspense fallback={null}>
-              <DesktopStart
-                onOpenFolder={() => setPickingProject(true)}
-                onConnect={canConnect() ? () => setConnecting(true) : undefined}
-                onLink={(repo) => createProject({ name: repo.name, path: repo.path })
-                  .then(() => refresh())
-                  .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))}
-              />
-            </Suspense>
-          )}
-          {inventoryAvailable && projects.length === 0 && (
+          {inventoryAvailable && projects.length > 0 && query && !projects.some(matches) && (
             <p className="glass-inventory-error">
-              No projects yet. Use + to open your first project.
+              No sessions or projects match “{query}”.
             </p>
           )}
-          {inventoryAvailable &&
-            projects.length > 0 &&
-            !projects.some((p) =>
-              `${p.name} ${p.sessions.map((s) => s.name).join(' ')}`
-                .toLowerCase()
-                .includes(query.toLowerCase()),
-            ) && (
-              <p className="glass-inventory-error">
-                No sessions or projects match “{query}”.
-              </p>
-            )}
-          {projects
-            .filter((p) =>
-              `${p.name} ${p.sessions.map((s) => s.name).join(' ')}`
-                .toLowerCase()
-                .includes(query.toLowerCase()),
-            )
-            .map((p) => (
-              <details key={p.id} open>
-                <summary>
-                  <ChevronDown size={13} />
-                  <Folder size={16} />
-                  <strong>{p.name}</strong>
-                  <small>{p.sessions.length}</small>
-                  {!p.is_inbox && (
-                    <button
-                      type="button"
-                      className="glass-project-remove"
-                      aria-label={`Remove ${p.name} from Dolphin`}
-                      title="Remove from Dolphin (the folder stays)"
-                      onClick={(event) => { event.preventDefault(); event.stopPropagation(); setRemovingProject(p); }}
-                    >
-                      <FolderMinus size={14} />
-                    </button>
-                  )}
-                </summary>
-                <div className="glass-sessions">
-                  {p.sessions.map((s) => (
-                    <button
-                      className={
-                        active?.projectId === p.id &&
-                        active.sessionName === s.name
-                          ? 'selected'
-                          : ''
-                      }
-                      key={s.name}
-                      data-activity={s.observation_state !== 'degraded' && s.has_recent_activity}
-                      aria-label={`Open ${p.name} / ${s.name}`}
-                      onClick={() =>
-                        open({
-                          projectId: p.id,
-                          projectName: p.name,
-                          sessionName: s.name,
-                        })
-                      }
-                    >
-                      <Terminal size={15} />
-                      <span>
-                        {s.name}
-                        <small>
-                          <i className={s.has_recent_activity ? 'live' : ''} />
-                          {status(s)}
-                        </small>
-                      </span>
-                    </button>
-                  ))}
-                  <button
-                    className="glass-new-session"
-                    disabled={creating}
-                    onClick={() => void create(p)}
-                  >
-                    <Plus size={13} />
-                    New session
-                  </button>
-                </div>
-              </details>
-            ))}
+          {sections.map((link) => {
+            const own = projects.filter((p) => p.machine === link.id);
+            const list = own.filter(matches).map(renderProject);
+            if (!desktop) {
+              return <Fragment key={link.id}>
+                {inventoryAvailable && own.length === 0 && (
+                  <p className="glass-inventory-error">
+                    No projects yet. Use + to open your first project.
+                  </p>
+                )}
+                {list}
+              </Fragment>;
+            }
+            const collapsed = collapsedMachines.includes(link.id);
+            const loadedHere = link.id in projectsBy;
+            return (
+              <MachineSection
+                key={link.id}
+                link={link}
+                count={own.length}
+                collapsed={collapsed}
+                onToggle={() => setCollapsedMachines((ids) => collapsed ? ids.filter((id) => id !== link.id) : [...ids, link.id])}
+                onAddProject={() => setPickingProject(link.id)}
+              >
+                {link.state === 'connected' && loadedHere && !own.some((p) => p.path && !p.is_inbox) && !query && (
+                  <Suspense fallback={null}>
+                    <ApiContext.Provider value={clientOf(link) ?? api}>
+                      <DesktopStart
+                        machine={link.id === 'local' ? undefined : link.label}
+                        onOpenFolder={() => setPickingProject(link.id)}
+                        onConnect={link.id === 'local' && canConnect() ? () => setConnecting(true) : undefined}
+                        onLink={(repo) => linkProject(link.id, repo.path, repo.name)}
+                      />
+                    </ApiContext.Provider>
+                  </Suspense>
+                )}
+                {list}
+              </MachineSection>
+            );
+          })}
+          {desktop && canConnect() && (
+            <button type="button" className="glass-connect-machine" onClick={() => setConnecting(true)}>
+              <Server size={15} aria-hidden="true" />
+              <span>Connect to a Machine…</span>
+            </button>
+          )}
         </div>
         </div>}
         <footer>
@@ -1101,7 +1199,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           <AnimatePresence initial={false}>
             {projectWindows.map(group => <motion.section layout="position" key={group.projectId} className="glass-session-window glass-surface" data-session-key={key(group.selected)} data-project-id={group.projectId} data-active={active?.projectId === group.projectId} data-fullscreen={fullscreenProject === group.projectId || undefined} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.22 }}>
               {group.sessions.map(target => <div key={key(target)} className="glass-project-terminal" hidden={key(target) !== key(group.selected)}>
-                <GlassSessionWindow target={target} visible={key(target) === key(group.selected)} collapsed={group.collapsed}
+                <ApiContext.Provider value={apiOf(machineOfTarget(target)) ?? api}>
+                <GlassSessionWindow target={target} machine={desktop && machineOfTarget(target) !== 'local' ? labelOf(machineOfTarget(target)) : undefined} visible={key(target) === key(group.selected)} collapsed={group.collapsed}
                   fullscreen={fullscreenProject === group.projectId} onToggleFullscreen={() => setFullscreenProject(current => current === group.projectId ? null : group.projectId)}
                   creating={creating} onNewSession={() => { const project = projects.find(item => item.id === group.projectId); if (project) void create(project); }}
                   tabs={group.sessions.length > 1 ? <div className="glass-terminal-tabs" role="tablist" aria-label={`Terminal tabs for ${target.projectName}`} onKeyDown={event => {
@@ -1116,6 +1215,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                   </div> : undefined}
                   onToggleCollapsed={() => setMinimized(ids => group.collapsed ? ids.filter(id => !group.sessions.some(session => key(session) === id)) : [...new Set([...ids, ...group.sessions.map(key)])])}
                   onClose={() => closeWindow(target)} onTerminated={() => { closeWindow(target); setFocus(items => items.filter(item => key(item) !== key(target))); }} onFocus={() => setActive(target)} onChanged={() => void refresh()} />
+                </ApiContext.Provider>
               </div>)}
             </motion.section>)}
           </AnimatePresence>
@@ -1143,10 +1243,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           }
         }}><SortableContext items={focus.map(key)} strategy={horizontalListSortingStrategy}>
         {focus.map((t) => (
-          <FocusItem id={key(t)} activity={projects.find((p) => p.id === t.projectId)?.sessions.some((s) => s.name === t.sessionName && s.observation_state !== 'degraded' && s.has_recent_activity) ?? false} selected={windows.some((item) => key(item) === key(t))} key={key(t)} label={`${t.projectName} / ${t.sessionName}`} onOpen={() => open(t)} onUnpin={() => { closeWindow(t); setFocus((xs) => xs.filter((x) => key(x) !== key(t))); }}>
+          <FocusItem id={key(t)} activity={projects.find((p) => p.id === t.projectId)?.sessions.some((s) => s.name === t.sessionName && s.observation_state !== 'degraded' && s.has_recent_activity) ?? false} selected={windows.some((item) => key(item) === key(t))} key={key(t)} label={`${onMachine(t)}${t.projectName} / ${t.sessionName}`} onOpen={() => open(t)} onUnpin={() => { closeWindow(t); setFocus((xs) => xs.filter((x) => key(x) !== key(t))); }}>
               <Terminal size={19} />
               <span className="glass-dock-copy">
-                <span className="glass-dock-project">{t.projectName}</span>
+                <span className="glass-dock-project">{onMachine(t)}{t.projectName}</span>
                 <span className="glass-dock-session">{t.sessionName}</span>
               </span>
               <span className="glass-dock-status" title={status(projects.find((p) => p.id === t.projectId)?.sessions.find((s) => s.name === t.sessionName) ?? ({ observation_state: 'degraded' } as ControlCenterSession))}>

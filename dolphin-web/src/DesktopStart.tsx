@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { FolderGit2, FolderOpen, Server } from 'lucide-react';
-import { request } from './api';
+import { useApi } from './apiContext';
 import './desktopStart.css';
 
-/* Dolphin Desktop's first run, in the project list: open a folder, or pick one
-   of the git repositories used most recently on this machine. */
+/* Dolphin Desktop's first run, in a machine's part of the project list: open a
+   folder, or pick one of the git repositories used most recently on that
+   machine. */
 
 type Repo = { name: string; path: string };
 
@@ -12,11 +13,14 @@ function shortPath(path: string) {
   return path.replace(/^\/(home|Users)\/[^/]+/, '~');
 }
 
-export default function DesktopStart({ onOpenFolder, onLink, onConnect }: {
+export default function DesktopStart({ machine, onOpenFolder, onLink, onConnect }: {
+  /** Another machine's name; this computer's start says nothing about where. */
+  machine?: string;
   onOpenFolder: () => void;
   onConnect?: () => void;
   onLink: (repo: Repo) => Promise<void>;
 }) {
+  const { request } = useApi();
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [linking, setLinking] = useState('');
 
@@ -25,8 +29,8 @@ export default function DesktopStart({ onOpenFolder, onLink, onConnect }: {
   }, []);
 
   return (
-    <section className="desktop-start" aria-label="Get started">
-      <p>Open a folder to start. Each project gets its own terminals and tasks.</p>
+    <section className="desktop-start" aria-label={machine ? `Get started on ${machine}` : 'Get started'}>
+      <p>{machine ? `Open a folder on ${machine} to start.` : 'Open a folder to start.'} Each project gets its own terminals and tasks.</p>
       <button type="button" className="desktop-start-open" onClick={onOpenFolder}>
         <FolderOpen size={14} aria-hidden="true" />
         Open Folder

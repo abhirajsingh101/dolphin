@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, SquareTerminal, X } from 'lucide-react';
-import { getAgentClis, type AgentCli } from './api';
+import type { AgentCli } from './api';
+import { useApi } from './apiContext';
 import './newSession.css';
 
 /* Dolphin Desktop: New Session asks what to run. An agent this host lacks is
@@ -14,6 +15,7 @@ export default function NewSessionDialog({ projectName, onChoose, onClose }: {
   onChoose: (choice: SessionChoice) => void;
   onClose: () => void;
 }) {
+  const { getAgentClis } = useApi();
   const [agents, setAgents] = useState<AgentCli[] | null>(null);
   const [failed, setFailed] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);

@@ -1,11 +1,12 @@
 /* Dolphin Desktop's main process.
  *
- * Opens the machines that were open when Dolphin last quit (this computer the
- * first time). Connect to a Machine (the machine chip in the header, ⌘K, the
- * menu, ⌘/Ctrl+Shift+O) opens a window per SSH host, which stays connected:
- * a dropped link comes back by itself (hosts.ts). Each window
- * gets the address and token of its own helper through the preload; the
- * renderer is served from the app:// origin, which the helper's CORS allows. */
+ * One window holds every machine Dolphin works on: this computer, and any
+ * machine added from Connect to a Machine (the projects list, ⌘K, the menu,
+ * ⌘/Ctrl+Shift+O), which stays connected: a dropped link comes back by itself
+ * (hosts.ts). The machines open when Dolphin last quit come back at launch.
+ * The page gets this computer's helper through the preload, and every
+ * machine's address and token in the machine list; it is served from the
+ * app:// origin, which the helpers' CORS allows. */
 
 import { app, BrowserWindow, BrowserWindowConstructorOptions, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -26,9 +27,6 @@ const staticRoot = path.resolve(__dirname, '..', 'static');
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
 ]);
-
-type WindowState = { connection?: Connection; host: HostSpec; title: string; link: LinkState | 'connecting'; reason?: string; offerKey?: boolean };
-const windows = new Map<number, WindowState>();
 
 function serveApp(): void {
   protocol.handle('app', (request) => {
@@ -68,60 +66,123 @@ function windowChrome(): BrowserWindowConstructorOptions {
   return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', height: HEADER_HEIGHT }, backgroundColor: background };
 }
 
-async function openHost(host: HostSpec, from?: BrowserWindow, bounds?: Electron.Rectangle): Promise<void> {
-  const title = host.kind === 'local' ? 'This Computer' : host.target;
-  const window = from ?? new BrowserWindow({
-    width: 1440, height: 900, ...bounds, minWidth: 720, minHeight: 480, show: false, title: `Dolphin — ${title}`,
-    ...windowChrome(),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
-  });
-  hardenWindow(window);
-  // The title names the machine this window works on; pages don't override it.
-  window.on('page-title-updated', (event) => event.preventDefault());
-  // macOS hides the traffic lights in full screen; the page then reclaims their space.
-  window.on('enter-full-screen', () => window.webContents.send('dolphin:fullscreen', true));
-  window.on('leave-full-screen', () => window.webContents.send('dolphin:fullscreen', false));
-  const state: WindowState = { host, title, link: 'connecting' };
-  // Read the id now: by 'closed', webContents is destroyed and touching it throws,
-  // which stalled the app's quit.
-  const id = window.webContents.id;
-  windows.set(id, state);
-  window.on('closed', () => {
-    state.connection?.close();
-    windows.delete(id);
-    saveSession();
-  });
-  saveSession();
-  if (!from) {
-    await window.loadURL(`app://connect/status.html#${encodeURIComponent(`Opening ${title}…`)}`);
-    window.show();
+/* --- machines ------------------------------------------------------------- */
+
+/* Every machine Dolphin works on lives in one window. This computer always
+   comes first; machines reached over SSH are added from Connect to a Machine,
+   stay connected (hosts.ts brings a dropped link back), and each shows as its
+   own section of the window's projects list. The page gets the list, with each
+   machine's address and token, through the preload. */
+type MachineState = {
+  host: HostSpec; id: string; title: string; connection?: Connection;
+  link: LinkState | 'connecting' | 'failed'; status?: string; error?: string; reason?: string; offerKey?: boolean;
+  attempt: number;
+};
+const machines = new Map<string, MachineState>();
+let mainWindow: BrowserWindow | null = null;
+let workspaceShown = false;
+
+const idOf = (host: HostSpec) => (host.kind === 'local' ? 'local' : host.target);
+const infoOf = (machine: MachineState) => ({
+  id: machine.id, kind: machine.host.kind, target: machine.host.kind === 'ssh' ? machine.host.target : null,
+  label: machine.host.kind === 'local' ? 'This Computer' : machine.title,
+  hostname: machine.connection?.label ?? null,
+  state: machine.link, status: machine.status ?? null, error: machine.error ?? null,
+  reason: machine.reason ?? null, offerKey: Boolean(machine.offerKey),
+  apiBase: machine.link === 'failed' ? null : machine.connection?.apiBase ?? null,
+  token: machine.link === 'failed' ? null : machine.connection?.token ?? null,
+});
+const machineList = () => [...machines.values()].map(infoOf);
+
+function broadcast(): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+  if (workspaceShown) window.webContents.send('dolphin:machines', machineList());
+  else {
+    // Still on the launch page: it shows this computer's progress.
+    const local = machines.get('local');
+    if (local?.status) void window.webContents.executeJavaScript(`window.setStatus && window.setStatus(${JSON.stringify(local.status)})`).catch(() => undefined);
   }
-  const status = (text: string) => void window.webContents.executeJavaScript(`window.setStatus && window.setStatus(${JSON.stringify(text)})`).catch(() => undefined);
+}
+
+function machineFor(host: HostSpec): MachineState {
+  const id = idOf(host);
+  let machine = machines.get(id);
+  if (!machine) {
+    machine = { host, id, title: host.kind === 'local' ? 'This Computer' : host.target, link: 'connecting', attempt: 0 };
+    machines.set(id, machine);
+  }
+  return machine;
+}
+
+/** Connect (or connect again) to one machine, telling the page each step. */
+async function connect(machine: MachineState): Promise<void> {
+  const attempt = ++machine.attempt;
+  machine.connection?.close();
+  machine.connection = undefined;
+  machine.link = 'connecting';
+  machine.error = undefined;
+  machine.reason = undefined;
+  machine.status = `Connecting to ${machine.title}…`;
+  broadcast();
+  const current = () => attempt === machine.attempt && machines.get(machine.id) === machine;
   try {
-    state.connection = host.kind === 'local'
+    const connection = machine.host.kind === 'local'
       ? await connectLocal(app.isPackaged ? process.resourcesPath : undefined, path.resolve(__dirname, '..'))
-      : await connectSsh(host.target, helperDir(app.isPackaged ? process.resourcesPath : undefined, path.resolve(__dirname, '..')), status);
-    window.setTitle(`Dolphin — ${state.connection.label}`);
-    state.link = 'connected';
-    if (host.kind === 'ssh') {
-      rememberMachine(app.getPath('userData'), host.target);
-      state.offerKey = state.connection.usedPassword;
-      state.connection.watch?.((link, info) => {
-        state.link = link;
-        state.reason = info.reason;
-        if (window.isDestroyed()) return;
-        // The helper restarted with a new token: the page reads it at load.
-        if (link === 'connected' && info.tokenChanged) window.reload();
-        else window.webContents.send('dolphin:connection', linkOf(state));
+      : await connectSsh(machine.host.target, helperDir(app.isPackaged ? process.resourcesPath : undefined, path.resolve(__dirname, '..')), (text) => {
+        if (!current()) return;
+        machine.status = text;
+        broadcast();
+      });
+    if (!current()) { connection.close(); return; }
+    machine.connection = connection;
+    machine.link = 'connected';
+    machine.status = undefined;
+    if (machine.host.kind === 'ssh') {
+      rememberMachine(app.getPath('userData'), machine.host.target);
+      machine.offerKey = connection.usedPassword;
+      // A helper that restarted with a new token reaches the page as a new
+      // token in the list; the page makes a new client for it.
+      connection.watch?.((link, info) => {
+        if (!current()) return;
+        machine.link = link;
+        machine.reason = info.reason;
+        broadcast();
       });
     }
-    await window.loadURL(`${APP_ORIGIN}/desktop.html#/workspace`);
   } catch (error) {
-    const detail = host.kind === 'ssh' ? explainSsh(host.target, error) : error instanceof Error ? error.message : String(error);
-    void window.webContents.executeJavaScript(
-      `window.setError ? window.setError(${JSON.stringify(`Could not open ${title}`)}, ${JSON.stringify(detail)}) : window.setStatus(${JSON.stringify(detail)})`,
-    ).catch(() => undefined);
+    if (!current()) return;
+    machine.link = 'failed';
+    machine.status = undefined;
+    machine.error = machine.host.kind === 'ssh' ? explainSsh(machine.host.target, error) : error instanceof Error ? error.message : String(error);
   }
+  broadcast();
+}
+
+/** Add a machine to the window, or bring back one that failed. */
+function openMachine(target: string): void {
+  showWindow();
+  if (target === 'local') return;
+  const known = machines.has(target);
+  const machine = machineFor({ kind: 'ssh', target });
+  if (!known) {
+    saveSession();
+    void connect(machine);
+  } else if (machine.link === 'failed') {
+    void connect(machine);
+  } else {
+    broadcast();
+  }
+}
+
+function closeMachine(target: string): void {
+  const machine = machines.get(target);
+  if (!machine || machine.host.kind === 'local') return;
+  machine.attempt += 1;
+  machine.connection?.close();
+  machines.delete(target);
+  saveSession();
+  broadcast();
 }
 
 /** What went wrong reaching a machine, said plainly, with ssh's own words after it. */
@@ -139,104 +200,144 @@ function explainSsh(target: string, error: unknown): string {
   return plain ? `${plain}\n\n${raw}` : raw;
 }
 
-// The launch page's buttons after a failure: start this window's host again,
-// or show the helper's logs.
+/* --- the window ----------------------------------------------------------- */
+
+function showWindow(bounds?: Electron.Rectangle): BrowserWindow {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    return mainWindow;
+  }
+  const window = new BrowserWindow({
+    width: 1440, height: 900, ...bounds, minWidth: 720, minHeight: 480, show: false, title: 'Dolphin',
+    ...windowChrome(),
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  mainWindow = window;
+  workspaceShown = false;
+  hardenWindow(window);
+  window.on('page-title-updated', (event) => event.preventDefault());
+  // macOS hides the traffic lights in full screen; the page then reclaims their space.
+  window.on('enter-full-screen', () => window.webContents.send('dolphin:fullscreen', true));
+  window.on('leave-full-screen', () => window.webContents.send('dolphin:fullscreen', false));
+  // Saved while the window still exists, so its place and machines come back.
+  window.on('close', () => saveSession());
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+    workspaceShown = false;
+    // The helpers and tmux keep running; only this app's links to them go.
+    for (const machine of machines.values()) { machine.attempt += 1; machine.connection?.close(); }
+    machines.clear();
+  });
+  void startWorkspace(window);
+  return window;
+}
+
+/** The launch page until this computer's helper answers, then the workspace. */
+async function startWorkspace(window: BrowserWindow): Promise<void> {
+  workspaceShown = false;
+  await window.loadURL(`app://connect/status.html#${encodeURIComponent('Opening This Computer…')}`);
+  window.show();
+  const local = machineFor({ kind: 'local' });
+  if (local.link !== 'connected') await connect(local);
+  if (window.isDestroyed()) return;
+  if (local.link !== 'connected') {
+    void window.webContents.executeJavaScript(
+      `window.setError ? window.setError(${JSON.stringify('Could not open This Computer')}, ${JSON.stringify(local.error ?? '')}) : window.setStatus(${JSON.stringify(local.error ?? '')})`,
+    ).catch(() => undefined);
+    return;
+  }
+  await window.loadURL(`${APP_ORIGIN}/desktop.html#/workspace`);
+  workspaceShown = true;
+  broadcast();
+}
+
+// The launch page's buttons after a failure: start this computer's helper
+// again, or show its logs.
 ipcMain.on('dolphin:retry', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
-  const state = windows.get(event.sender.id);
-  if (!window || !state) return;
-  // A fresh window for the same machine, in the same place; the failed one goes.
-  void openHost(state.host, undefined, window.getBounds());
-  window.close();
+  if (window && window === mainWindow) void startWorkspace(window);
 });
 ipcMain.on('dolphin:open-logs', () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')));
 
-/* --- machines ------------------------------------------------------------- */
-
-const linkOf = (state: WindowState) => ({
-  kind: state.host.kind, target: state.host.kind === 'ssh' ? state.host.target : null, label: state.connection?.label ?? state.title,
-  state: state.link, reason: state.reason ?? null, offerKey: Boolean(state.offerKey),
-});
-const targetOf = (host: HostSpec) => (host.kind === 'local' ? 'local' : host.target);
-
-/** Bring the window for a machine forward, or open one. */
-function openMachine(target: string): void {
-  for (const [id, state] of windows) {
-    if (targetOf(state.host) === target) {
-      const window = BrowserWindow.getAllWindows().find((item) => !item.isDestroyed() && item.webContents.id === id);
-      if (window) {
-        if (window.isMinimized()) window.restore();
-        window.focus();
-        return;
-      }
-    }
-  }
-  void openHost(target === 'local' ? { kind: 'local' } : { kind: 'ssh', target });
-}
-
-/* The machines open when Dolphin quits come back at the next launch, each in
-   its own window where it was. Saved on every open and close, but not while
-   quitting closes them all. */
-let quitting = false;
+/* The machines open when Dolphin quits come back at the next launch, in the
+   window's last place. */
 const sessionFile = () => path.join(app.getPath('userData'), 'session.json');
-type Saved = { target: string; bounds?: Electron.Rectangle };
+type Saved = { machines?: string[]; bounds?: Electron.Rectangle; open?: { target: string; bounds?: Electron.Rectangle }[] };
 function saveSession(): void {
-  if (quitting) return;
-  const open: Saved[] = [];
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
-    const state = windows.get(window.webContents.id);
-    if (state) open.push({ target: targetOf(state.host), bounds: window.getNormalBounds() });
-  }
-  try { writeFileSync(sessionFile(), JSON.stringify({ open }, null, 2)); } catch { /* restoring is a convenience */ }
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  let saved: Saved = {};
+  try { saved = JSON.parse(readFileSync(sessionFile(), 'utf8')) as Saved; } catch { /* first save */ }
+  const state: Saved = {
+    machines: [...machines.keys()].filter((id) => id !== 'local'),
+    bounds: window ? window.getNormalBounds() : saved.bounds,
+  };
+  try { writeFileSync(sessionFile(), JSON.stringify(state, null, 2)); } catch { /* restoring is a convenience */ }
 }
 function restoreSession(): void {
-  let saved: Saved[] = [];
-  try { saved = (JSON.parse(readFileSync(sessionFile(), 'utf8')) as { open?: Saved[] }).open ?? []; } catch { /* first launch */ }
-  saved = saved.filter((item) => item.target === 'local' || validTarget(item.target));
-  if (saved.length === 0) saved = [{ target: 'local' }];
-  for (const item of saved) void openHost(item.target === 'local' ? { kind: 'local' } : { kind: 'ssh', target: item.target }, undefined, item.bounds);
+  let saved: Saved = {};
+  try { saved = JSON.parse(readFileSync(sessionFile(), 'utf8')) as Saved; } catch { /* first launch */ }
+  // Before 0.1.11 each machine had its own window: their machines all come
+  // into the one window, which takes the first one's place.
+  const targets = (saved.machines ?? (saved.open ?? []).map((item) => item.target))
+    .filter((target) => target !== 'local' && validTarget(target));
+  const bounds = saved.bounds ?? saved.open?.[0]?.bounds;
+  machineFor({ kind: 'local' });
+  for (const target of [...new Set(targets)]) machineFor({ kind: 'ssh', target });
+  showWindow(bounds);
+  for (const machine of machines.values()) if (machine.host.kind === 'ssh') void connect(machine);
 }
 
+const machineOf = (target: unknown) => (typeof target === 'string' ? machines.get(target) : undefined);
+
+ipcMain.on('dolphin:machine-list', (event) => { event.returnValue = machineList(); });
+// This computer's link, for the launch page.
 ipcMain.on('dolphin:connection-state', (event) => {
-  const state = windows.get(event.sender.id);
-  event.returnValue = state ? linkOf(state) : null;
+  const local = machines.get('local');
+  event.returnValue = local ? infoOf(local) : null;
 });
-ipcMain.handle('dolphin:machines', async () => {
-  const open = new Set([...windows.values()].map((state) => targetOf(state.host)));
-  return (await detectMachines(app.getPath('userData'))).map((machine) => ({ ...machine, open: open.has(machine.target) }));
-});
+ipcMain.handle('dolphin:machines', async () => (await detectMachines(app.getPath('userData')))
+  .map((machine) => ({ ...machine, open: machines.has(machine.target) })));
 ipcMain.handle('dolphin:open-machine', (_event, target: unknown) => {
   if (typeof target !== 'string' || (target !== 'local' && !validTarget(target))) return { error: 'Enter a machine like gpu-box, user@10.0.0.5 or ssh://user@host:2222.' };
   openMachine(target);
   return { ok: true };
 });
+ipcMain.on('dolphin:close-machine', (_event, target: unknown) => { if (typeof target === 'string') closeMachine(target); });
 ipcMain.handle('dolphin:forget-machine', (_event, target: unknown) => {
   if (typeof target === 'string') forgetMachine(app.getPath('userData'), target);
 });
-ipcMain.on('dolphin:reconnect', (event) => windows.get(event.sender.id)?.connection?.reconnectNow?.(true));
-ipcMain.handle('dolphin:setup-key', async (event) => {
-  const state = windows.get(event.sender.id);
-  if (!state || state.host.kind !== 'ssh') return { error: 'Only machines reached over SSH sign in.' };
+ipcMain.on('dolphin:reconnect', (_event, target: unknown) => {
+  const machine = machineOf(target);
+  if (!machine) return;
+  if (machine.link === 'failed' || !machine.connection) void connect(machine);
+  else machine.connection.reconnectNow?.(true);
+});
+ipcMain.handle('dolphin:setup-key', async (_event, target: unknown) => {
+  const machine = machineOf(target);
+  if (!machine || machine.host.kind !== 'ssh') return { error: 'Only machines reached over SSH sign in.' };
   try {
-    await installKey(state.host.target);
-    state.offerKey = false;
+    await installKey(machine.host.target);
+    machine.offerKey = false;
+    broadcast();
     return { ok: true };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 });
-ipcMain.on('dolphin:dismiss-key', (event) => {
-  const state = windows.get(event.sender.id);
-  if (state) state.offerKey = false;
+ipcMain.on('dolphin:dismiss-key', (_event, target: unknown) => {
+  const machine = machineOf(target);
+  if (machine) { machine.offerKey = false; broadcast(); }
 });
 
-/** Connect to a Machine… : the focused window's own dialog, or a small window when none is open. */
+/** Connect to a Machine… : the window's own dialog, or a small window while it has none. */
 function connectFromMenu(): void {
-  const focused = BrowserWindow.getFocusedWindow();
-  const state = focused ? windows.get(focused.webContents.id) : undefined;
-  if (focused && state?.connection) focused.webContents.send('dolphin:connect-open');
-  else openConnectWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && workspaceShown) {
+    showWindow();
+    mainWindow.webContents.send('dolphin:connect-open');
+  } else {
+    openConnectWindow();
+  }
 }
 
 function openConnectWindow(): void {
@@ -250,15 +351,15 @@ function openConnectWindow(): void {
 }
 
 ipcMain.on('dolphin:config', (event) => {
-  const state = windows.get(event.sender.id);
-  event.returnValue = state?.connection
-    ? { apiBase: state.connection.apiBase, token: state.connection.token, host: state.connection.label }
-    : null;
+  // The window's own backend is this computer's helper.
+  const local = event.sender === mainWindow?.webContents ? machines.get('local')?.connection : undefined;
+  event.returnValue = local ? { apiBase: local.apiBase, token: local.token, host: local.label } : null;
 });
 ipcMain.handle('dolphin:ssh-hosts', () => sshConfigHosts());
 ipcMain.handle('dolphin:connect', async (event, target: unknown) => {
   if (typeof target !== 'string' || !validTarget(target.trim())) return { error: 'Enter a machine like gpu-box, user@10.0.0.5 or ssh://user@host:2222.' };
-  BrowserWindow.fromWebContents(event.sender)?.close();
+  const from = BrowserWindow.fromWebContents(event.sender);
+  if (from && from !== mainWindow) from.close();
   openMachine(target.trim());
   return { ok: true };
 });
@@ -284,7 +385,6 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Window for This Computer', accelerator: 'CmdOrCtrl+Shift+N', click: () => void openHost({ kind: 'local' }) },
         { label: 'Connect to Machine…', accelerator: 'CmdOrCtrl+Shift+O', click: connectFromMenu },
         { type: 'separator' },
         process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
@@ -304,13 +404,7 @@ function buildMenu(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const [first] = BrowserWindow.getAllWindows();
-    if (first) {
-      if (first.isMinimized()) first.restore();
-      first.focus();
-    }
-  });
+  app.on('second-instance', () => { if (mainWindow) showWindow(); });
   app.whenReady().then(() => {
     serveApp();
     setSshEnv(startAskpass());
@@ -318,15 +412,15 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     restoreSession();
     // Back from sleep: every machine link tries again at once.
-    powerMonitor.on('resume', () => { for (const state of windows.values()) state.connection?.reconnectNow?.(false); });
+    powerMonitor.on('resume', () => { for (const machine of machines.values()) machine.connection?.reconnectNow?.(false); });
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) void openHost({ kind: 'local' });
+      if (!mainWindow) restoreSession();
     });
   });
   // Drop every relay and SSH forward on quit; open connections must not hold the app open.
-  app.on('before-quit', () => { saveSession(); quitting = true; });
+  app.on('before-quit', () => saveSession());
   app.on('will-quit', () => {
-    for (const state of windows.values()) state.connection?.close();
+    for (const machine of machines.values()) machine.connection?.close();
     // Nothing in this process needs flushing: helpers and tmux are detached and
     // keep running. Exit now; a live notification stream in the network
     // service otherwise held the quit open indefinitely.

@@ -23,12 +23,7 @@ import {
   useState,
 } from 'react';
 
-import {
-  fetchSystemHealthAlerts,
-  fetchSystemHealthHistory,
-  fetchSystemHealthSummary,
-  fetchSystemHealthWorkloads,
-} from './api';
+import { useApi } from './apiContext';
 import type {
   SystemHealthAlerts,
   SystemHealthHistory,
@@ -261,6 +256,7 @@ function workloadSort(items: SystemHealthWorkload[]) {
 }
 
 export default function SystemHealthView() {
+  const { fetchSystemHealthAlerts, fetchSystemHealthHistory, fetchSystemHealthSummary, fetchSystemHealthWorkloads } = useApi();
   const [summary, setSummary] = useState<SystemHealthSummary | null>(null);
   const [alerts, setAlerts] = useState<SystemHealthAlerts | null>(null);
   const [workloads, setWorkloads] = useState<SystemHealthWorkloads | null>(null);

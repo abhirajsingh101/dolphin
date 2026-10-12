@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Maximize2, Minimize2, Minus, Plus, Terminal, X } from 'lucide-react';
 import { TerminalRuntimeProvider } from '@dolphin-terminal/react/runtime';
-import { dolphinTerminalClient } from './dolphinTerminalClient';
-import { fetchWorkspace } from './api';
+import { terminalClientFor } from './dolphinTerminalClient';
+import { useApi } from './apiContext';
 import { useDictation } from './DictationProvider';
 import type { TmuxSession } from './types';
 const TerminalPane = lazy(() => import('@dolphin-terminal/react/pane'));
@@ -19,8 +19,10 @@ const glassTerminalTheme = {
   brightRed: '#ffadb5', brightGreen: '#92dfc2', brightYellow: '#f3d9a8',
   brightBlue: '#a8ceff', brightMagenta: '#d5bfff', brightCyan: '#a4e4ed', brightWhite: '#f4f8ff',
 };
-export default function GlassSessionWindow({ target, collapsed, visible = true, tabs, creating = false, fullscreen = false, onToggleFullscreen, onNewSession, onToggleCollapsed, onClose, onTerminated, onFocus, onChanged }: {
+export default function GlassSessionWindow({ target, machine, collapsed, visible = true, tabs, creating = false, fullscreen = false, onToggleFullscreen, onNewSession, onToggleCollapsed, onClose, onTerminated, onFocus, onChanged }: {
   target: { projectId: string; projectName: string; sessionName: string };
+  /** Dolphin Desktop: the machine the session runs on, when it isn't this computer. */
+  machine?: string;
   collapsed: boolean; visible?: boolean; tabs?: ReactNode; creating?: boolean; fullscreen?: boolean; onToggleFullscreen?: () => void;
   onNewSession?: () => void; onToggleCollapsed: () => void;
   onClose: () => void; onTerminated: () => void; onFocus: () => void; onChanged: () => void;
@@ -89,6 +91,9 @@ export default function GlassSessionWindow({ target, collapsed, visible = true, 
     return () => cancelAnimationFrame(frame);
   }, [fullscreen, visible, collapsed]);
   const dictation = useDictation();
+  const api = useApi();
+  const { fetchWorkspace } = api;
+  const terminalClient = useMemo(() => terminalClientFor(api), [api]);
   const [session, setSession] = useState<TmuxSession | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -104,7 +109,7 @@ export default function GlassSessionWindow({ target, collapsed, visible = true, 
   const label = `${target.projectName} / ${target.sessionName}`;
   return <div ref={root} className="glass-window-content" data-interacting={interacting} data-collapsed={collapsed} onFocusCapture={onFocus} onPointerDown={onFocus}>
     <header className="glass-window-title">
-      <Terminal size={15} /><h2 aria-label={label}>{tabs ? target.projectName : label}</h2>{tabs}
+      <Terminal size={15} />{machine && <span className="glass-window-machine" title={`Running on ${machine}`}>{machine}</span>}<h2 aria-label={machine ? `${label} on ${machine}` : label}>{tabs ? target.projectName : label}</h2>{tabs}
       {onNewSession && !collapsed && <button className="glass-new-terminal-tab" aria-label={`New terminal session in ${target.projectName}`} title="New tmux session in this project" disabled={creating} onClick={onNewSession}><Plus size={14} /></button>}
       {!collapsed && <button className="glass-terminal-mode" aria-pressed={interacting}
         aria-label={interacting ? 'Browse windows' : 'Interact with terminal'}
@@ -126,7 +131,7 @@ export default function GlassSessionWindow({ target, collapsed, visible = true, 
       <button aria-label={`Close window ${label}`} title="Close view — tmux keeps running" onClick={onClose}><X size={14} /></button>
     </header>
     <div className="glass-terminal" hidden={collapsed}>
-      {error ? <p role="alert">{error}</p> : <TerminalRuntimeProvider client={dolphinTerminalClient} dictation={dictation} automation={false}>
+      {error ? <p role="alert">{error}</p> : <TerminalRuntimeProvider client={terminalClient} dictation={dictation} automation={false}>
         <Suspense fallback={<p>Loading terminal…</p>}>
           {session ? <TerminalPane enableWebgl={false} theme={glassTerminalTheme} projectId={target.projectId} session={session} onSessionChanged={onChanged} onSessionClosed={() => { onTerminated(); onChanged(); }} /> : <p>Connecting…</p>}
         </Suspense>

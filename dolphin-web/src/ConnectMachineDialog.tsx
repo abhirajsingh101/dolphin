@@ -7,7 +7,8 @@ import './connectMachine.css';
 /* Connect to a Machine: everything Dolphin found on this computer (recent
    machines, ~/.ssh/config, shell history, the tailnet, known_hosts), a search
    that doubles as the address field, and one click or Enter to connect. The
-   machine opens in its own window, which shows the setup and stays connected. */
+   machine joins this window as its own section of the projects list, which
+   shows the setup and stays connected. */
 
 export default function ConnectMachineDialog({ onClose, currentTarget }: { onClose: () => void; currentTarget: string | null }) {
   const [machines, setMachines] = useState<Machine[] | null>(null);

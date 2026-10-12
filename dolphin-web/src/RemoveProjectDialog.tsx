@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderMinus, X } from 'lucide-react';
-import { deleteProject } from './api';
+import { useApi } from './apiContext';
 import './newSession.css';
 
 /* Remove a project from Dolphin. Only Dolphin's record goes, with its tasks:
@@ -11,6 +11,7 @@ export default function RemoveProjectDialog({ project, onClose, onRemoved }: {
   onClose: () => void;
   onRemoved: () => void;
 }) {
+  const { deleteProject } = useApi();
   const [state, setState] = useState<'idle' | 'working' | 'failed'>('idle');
   const [error, setError] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);

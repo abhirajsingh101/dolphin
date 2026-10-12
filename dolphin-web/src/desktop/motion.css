@@ -102,8 +102,10 @@
 /* Entrances hold only their first frame (backwards), so hover can still move them. */
 .desktop-splash .dolphin-orb { animation: dd-rise 420ms var(--ease) backwards, dd-breathe 2.2s ease-in-out 420ms infinite; }
 
-/* Machines: the machine menu drops from its chip. */
-.machine-menu { animation: dd-drop 220ms var(--ease) backwards; transform-origin: top left; }
+/* Machines: a machine's menu drops from its button; a link on its way turns its spinner. */
+.machine-menu { animation: dd-drop 220ms var(--ease) backwards; transform-origin: top right; }
+.glass-machine-name small > svg { animation: dd-spin 1s linear infinite; }
+@keyframes dd-spin { to { transform: rotate(360deg); } }
 
 /* Updates: the pill arrives, the About panel drops from the header, the toast pops. */
 .update-pill { animation: dd-pop 320ms var(--ease) backwards; }
@@ -121,7 +123,7 @@
   .new-session-option, .signals-tray, .glass-notification-panel, .desktop-start > *, .desktop-start li,
   .glass-health .health-overview-grid > *, .glass-health :is(.health-chart-card, .health-panel, .gpu-health-card),
   .desktop-splash > *, .desktop-splash .dolphin-orb, .desktop-splash-bar::after,
-  .update-pill, .update-panel, .update-toast, .machine-menu {
+  .update-pill, .update-panel, .update-toast, .machine-menu, .glass-machine-name small > svg {
     animation: none;
   }
   .glass-health :is(.health-card, .health-chart-card), .new-session-option, .desktop-start button,

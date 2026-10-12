@@ -34,19 +34,23 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   retry: () => ipcRenderer.send('dolphin:retry'),
   openLogs: () => ipcRenderer.send('dolphin:open-logs'),
   sshHosts: (): Promise<string[]> => ipcRenderer.invoke('dolphin:ssh-hosts'),
-  // Machines (main.ts, machines.ts): what can be connected to, and this window's link.
+  // Machines (main.ts, machines.ts): what can be connected to, and the
+  // machines this window works on, each with its helper's address and token.
   machines: (): Promise<unknown[]> => ipcRenderer.invoke('dolphin:machines'),
-  openMachine: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:open-machine', target),
-  forgetMachine: (target: string): Promise<void> => ipcRenderer.invoke('dolphin:forget-machine', target),
-  connection: () => ipcRenderer.sendSync('dolphin:connection-state'),
-  onConnection: (listener: (state: unknown) => void) => {
-    const heard = (_event: unknown, state: unknown) => listener(state);
-    ipcRenderer.on('dolphin:connection', heard);
-    return () => { ipcRenderer.removeListener('dolphin:connection', heard); };
+  machineList: (): unknown[] => ipcRenderer.sendSync('dolphin:machine-list'),
+  onMachineList: (listener: (machines: unknown[]) => void) => {
+    const heard = (_event: unknown, machines: unknown[]) => listener(machines);
+    ipcRenderer.on('dolphin:machines', heard);
+    return () => { ipcRenderer.removeListener('dolphin:machines', heard); };
   },
-  reconnect: () => ipcRenderer.send('dolphin:reconnect'),
-  setupKey: (): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:setup-key'),
-  dismissKey: () => ipcRenderer.send('dolphin:dismiss-key'),
+  openMachine: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:open-machine', target),
+  closeMachine: (target: string) => ipcRenderer.send('dolphin:close-machine', target),
+  forgetMachine: (target: string): Promise<void> => ipcRenderer.invoke('dolphin:forget-machine', target),
+  // This computer's link, for the launch page.
+  connection: () => ipcRenderer.sendSync('dolphin:connection-state'),
+  reconnect: (target: string) => ipcRenderer.send('dolphin:reconnect', target),
+  setupKey: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:setup-key', target),
+  dismissKey: (target: string) => ipcRenderer.send('dolphin:dismiss-key', target),
   // Connect to Machine… in the menu opens the window's own dialog.
   onConnectOpen: (listener: () => void) => {
     const heard = () => listener();

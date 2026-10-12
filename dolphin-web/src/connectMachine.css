@@ -1,6 +1,6 @@
-/* Machines in Dolphin Desktop: the header's machine chip and its menu
-   (MachineSwitcher.tsx), and Connect to a Machine (ConnectMachineDialog.tsx).
-   Motion lives in desktop/motion.css. */
+/* Machines in Dolphin Desktop: each machine's section of the projects list,
+   its menu (MachineSection.tsx), and Connect to a Machine
+   (ConnectMachineDialog.tsx). Motion lives in desktop/motion.css. */
 
 .machine-switcher {
   position: relative;
@@ -8,36 +8,177 @@
   min-width: 0;
 }
 
-/* The chip keeps .glass-host's look; it is a button now, with the link's state in its dot. */
-.glass-workspace .machine-chip {
-  gap: 6px;
-  max-width: 220px;
-  padding: 3px 8px 3px 8px;
+/* A machine's section: its heading, any trouble with its link, its projects. */
+.glass-machine + .glass-machine {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--glass-edge);
+}
+.glass-machine-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.glass-workspace .glass-machine-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.glass-workspace .glass-machine-toggle:hover {
+  background: var(--glass-bubble);
+}
+.glass-machine-toggle > svg {
+  flex-shrink: 0;
   color: var(--glass-muted);
-  font-size: var(--fs-xs);
+  transition: transform 180ms var(--glass-ease);
 }
-.glass-workspace .machine-chip:hover {
-  background: var(--glass-selection);
-  color: var(--glass-text);
+.glass-machine-toggle[aria-expanded='false'] > svg {
+  transform: rotate(-90deg);
 }
-.machine-chip-label {
+.glass-machine-icon {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--glass-bubble);
+  color: var(--glass-accent);
+}
+.glass-machine-name {
+  display: grid;
+  min-width: 0;
+}
+.glass-machine-name strong {
   overflow: hidden;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.glass-machine-name small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--glass-muted);
+  font-size: var(--fs-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.machine-chip[data-state='reconnecting']::before,
-.machine-chip[data-state='connecting']::before {
-  background: var(--glass-alert);
-  animation: machine-pulse 1.2s ease-in-out infinite;
+.glass-machine[data-kind='ssh'] .glass-machine-name small[data-state='connected'] {
+  color: var(--glass-success);
 }
-.machine-chip[data-state='offline']::before {
-  background: var(--danger);
+.glass-machine-name small[data-state='connecting'],
+.glass-machine-name small[data-state='reconnecting'] {
+  color: var(--glass-alert);
 }
-.machine-chip[data-state='offline'] {
+.glass-machine-name small[data-state='offline'],
+.glass-machine-name small[data-state='failed'] {
   color: var(--danger);
 }
-@keyframes machine-pulse {
-  50% { opacity: 0.35; }
+.glass-workspace .glass-machine-add,
+.glass-workspace .glass-machine-more {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  padding: 0;
+  border-radius: var(--r-md);
+  color: var(--glass-muted);
+}
+.glass-workspace .glass-machine-add:hover:not(:disabled),
+.glass-workspace .glass-machine-more:hover {
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+}
+.glass-workspace .glass-machine-more {
+  position: relative;
+}
+.glass-workspace .glass-machine-add:disabled {
+  opacity: 0.4;
+}
+/* Something to look at in the menu: sign-in without a password. */
+.glass-machine-more[data-attention]::after {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--glass-accent);
+  content: '';
+}
+.glass-machine-problem {
+  display: grid;
+  gap: 8px;
+  margin: 0 4px 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--glass-bubble);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.glass-machine-problem p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+.glass-machine-problem > div {
+  display: flex;
+  gap: 6px;
+}
+.glass-workspace .glass-machine-dismiss {
+  padding: 5px 11px;
+  border-radius: var(--r-full);
+  color: var(--glass-muted);
+  font-size: 12px;
+}
+.glass-workspace .glass-machine-dismiss:hover {
+  background: var(--glass-selection);
+  color: var(--glass-text);
+}
+.glass-workspace .glass-connect-machine {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px dashed var(--glass-edge);
+  border-radius: var(--r-md);
+  color: var(--glass-muted);
+  font-size: 13px;
+}
+.glass-workspace .glass-connect-machine:hover {
+  border-color: var(--glass-accent);
+  color: var(--glass-text);
+}
+/* In a session window's title: the machine it runs on. */
+.glass-window-machine {
+  flex-shrink: 0;
+  max-width: 140px;
+  overflow: hidden;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: var(--glass-bubble);
+  color: var(--glass-muted);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .machine-menu {
@@ -56,6 +197,11 @@
   backdrop-filter: blur(28px) saturate(135%);
   color: var(--glass-text);
   user-select: none;
+}
+/* A machine's menu, in a layer above the projects list (placed by MachineSection). */
+.machine-menu--end {
+  position: fixed;
+  z-index: 60;
 }
 .machine-current,
 .machine-key {
@@ -136,6 +282,17 @@
   padding: 8px 10px;
   font-size: 13px;
   text-align: left;
+}
+/* System Health is a link; it reads like the menu's buttons. */
+.glass-workspace a.machine-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-md);
+  color: inherit;
+  text-decoration: none;
+}
+.glass-workspace a.machine-item:hover {
+  background: var(--glass-selection);
 }
 .machine-item > svg {
   flex-shrink: 0;
@@ -310,11 +467,4 @@
   color: var(--text-2);
   font-size: var(--fs-xs);
   line-height: 1.5;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .machine-chip[data-state='reconnecting']::before,
-  .machine-chip[data-state='connecting']::before {
-    animation: none;
-  }
 }
