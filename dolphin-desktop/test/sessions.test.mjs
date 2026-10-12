@@ -73,3 +73,41 @@ test('first run links a recent repo; New Session installs a missing agent and st
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('tmux sessions already running become projects; the folder picker names the machine', { timeout: 150_000 }, async () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'dsess-'));
+  const dolphinHome = path.join(home, '.dolphin-server');
+  const tmuxDir = path.join(home, 'tmux');
+  for (const dir of [tmuxDir, path.join(home, 'api', '.git'), path.join(home, 'api', 'src')]) mkdirSync(dir, { recursive: true });
+  const { TMUX: _tmux, TMUX_PANE: _pane, ...inherited } = process.env;
+  const env = {
+    ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, TMUX_TMPDIR: tmuxDir, SHELL: '/bin/sh', DOLPHIN_WORKSPACE_ROOTS: home,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off',
+  };
+  const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, 'default');
+  const tmux = (...args) => execFileSync('tmux', ['-S', socket, ...args], { env, encoding: 'utf8' });
+  // Started before Dolphin, inside the repo but not at its top. With -S, tmux
+  // does not make the socket's folder itself.
+  mkdirSync(path.dirname(socket), { recursive: true, mode: 0o700 });
+  tmux('new-session', '-d', '-s', 'api-work', '-c', path.join(home, 'api', 'src'));
+  const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
+  try {
+    const window = await app.firstWindow();
+    await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
+    const project = window.locator('details', { hasText: 'api' });
+    await project.getByText('api-work').waitFor({ timeout: 30_000 });
+
+    await window.getByRole('button', { name: 'Add a project' }).click();
+    const picker = window.getByRole('dialog', { name: 'Link a project' });
+    await picker.getByText('Folders on this computer').waitFor({ timeout: 15_000 });
+    await window.keyboard.press('Escape');
+  } finally {
+    const exited = new Promise((resolve) => app.process().once('exit', resolve));
+    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+    await exited;
+    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env }); } catch { /* not running */ }
+    // This test's own tmux server, on its scratch socket; never the user's.
+    try { tmux('kill-server'); } catch { /* none started */ }
+    rmSync(home, { recursive: true, force: true });
+  }
+});

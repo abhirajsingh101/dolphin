@@ -15,7 +15,7 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
   const home = mkdtempSync(path.join(tmpdir(), 'dh-'));
   const app = await electron.launch({
     args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
-    env: { ...process.env, DOLPHIN_HOME: home, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
+    env: { ...process.env, DOLPHIN_HOME: home, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off' },
   });
   try {
     const window = await app.firstWindow();
@@ -100,7 +100,7 @@ test('without netdata, System Health uses the built-in monitor; + opens the fold
   const home = mkdtempSync(path.join(tmpdir(), 'dh-'));
   const app = await electron.launch({
     args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
-    env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_SYSTEM_HEALTH_SOURCE: 'native', ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
+    env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_SYSTEM_HEALTH_SOURCE: 'native', ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off' },
   });
   try {
     const window = await app.firstWindow();

@@ -43,7 +43,7 @@ async function launch(home, feed, { lastVersion } = {}) {
   const app = await electron.launch({
     // Its own profile: the last-run version lives there, and must not leak between runs.
     args: ['--no-sandbox', `--user-data-dir=${profile}`, root],
-    env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_GBRAIN: 'off', ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
+    env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off', ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       DOLPHIN_DESKTOP_UPDATE_FEED: feed.url, DOLPHIN_DESKTOP_UPDATE_DELAY_MS: '500' },
   });
   const window = await app.firstWindow();

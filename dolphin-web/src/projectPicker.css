@@ -44,6 +44,19 @@
   font-weight: var(--fw-strong);
 }
 
+.picker-title {
+  min-width: 0;
+}
+
+.picker-machine {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .picker-panel > .dt-input {
   flex: 0 0 auto;
   width: calc(100% - (var(--sp-4) * 2));

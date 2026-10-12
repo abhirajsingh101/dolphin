@@ -532,6 +532,15 @@ export function getAgentClis(): Promise<AgentCli[]> {
   return request<AgentCli[]>('/api/desktop/agents');
 }
 
+/** Dolphin Desktop: make projects of the folders this machine's tmux sessions
+ * run in. Each folder is imported once; returns the projects just added. */
+export function importTmuxProjects(): Promise<{ id: string; name: string; path: string; sessions: string[] }[]> {
+  return request<{ added: { id: string; name: string; path: string; sessions: string[] }[] }>(
+    '/api/desktop/tmux-projects',
+    { method: 'POST' },
+  ).then((body) => body.added);
+}
+
 export function renameTmuxSession(
   projectId: string,
   sessionName: string,

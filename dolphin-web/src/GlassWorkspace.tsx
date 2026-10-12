@@ -42,6 +42,7 @@ import {
   sendTmuxInput,
   request,
   DolphinApiError,
+  importTmuxProjects,
 } from './api';
 import type { SessionChoice } from './NewSessionDialog';
 import { applyTheme, persistTheme, readStoredTheme } from './theme';
@@ -422,11 +423,21 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         setInventoryAvailable(false);
         setError(String(e));
       });
+  // Dolphin Desktop: the folders of tmux sessions already running on this
+  // machine become projects (once each), so their sessions show up too.
+  const importSessions = () => importTmuxProjects().then((added) => { if (added.length) void refresh(); }).catch(() => undefined);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(refresh, 15000);
+    if (desktop) void importSessions();
+    let tick = 0;
+    const timer = setInterval(() => {
+      void refresh();
+      if (desktop && ++tick % 4 === 0) void importSessions();
+    }, 15000);
     // Dolphin Desktop: the SSH link came back, so load now rather than at the next tick.
-    const stop = desktop ? machineBridge()?.onConnection?.((link) => { if (link.state === 'connected') void refresh(); }) : undefined;
+    const stop = desktop ? machineBridge()?.onConnection?.((link) => {
+      if (link.state === 'connected') { void refresh(); void importSessions(); }
+    }) : undefined;
     return () => { clearInterval(timer); stop?.(); };
   }, []);
   useEffect(() => {
@@ -661,6 +672,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       {pickingProject && (
         <Suspense fallback={null}>
           <ProjectPickerDialog
+            machine={desktop ? (machineBridge()?.connection?.()?.kind === 'local' ? 'this computer' : desktopHost) : undefined}
             onClose={() => setPickingProject(false)}
             onPick={(path) => {
               setPickingProject(false);

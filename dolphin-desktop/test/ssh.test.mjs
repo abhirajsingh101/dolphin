@@ -44,7 +44,7 @@ test('a machine connects from the header, stays connected, and comes back at the
   rmSync(remoteHome, { recursive: true }); // the app must create it
   const launch = () => electron.launch({
     args: ['--no-sandbox', `--user-data-dir=${path.join(localHome, 'profile')}`, root],
-    env: { ...process.env, DOLPHIN_HOME: localHome, DOLPHIN_DESKTOP_REMOTE_HOME: remoteHome, DOLPHIN_GBRAIN: 'off', DOLPHIN_DESKTOP_REMOTE_ENV: 'DOLPHIN_GBRAIN=off', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
+    env: { ...process.env, DOLPHIN_HOME: localHome, DOLPHIN_DESKTOP_REMOTE_HOME: remoteHome, DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off', DOLPHIN_DESKTOP_REMOTE_ENV: 'DOLPHIN_GBRAIN=off DOLPHIN_TMUX_IMPORT=off', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
   });
   let app = await launch();
   try {
@@ -86,7 +86,7 @@ test('a machine connects from the header, stays connected, and comes back at the
       await remote.locator('.glass-tree summary', { hasText: name }).waitFor({ timeout: 15_000 });
     }
     await remote.getByRole('button', { name: 'Add a project' }).click();
-    await remote.getByRole('dialog', { name: /Link a project/i }).waitFor();
+    await remote.getByRole('dialog', { name: /Link a project/i }).getByText('Folders on localhost').waitFor();
     await remote.keyboard.press('Escape');
 
     // The chip's menu lists this computer, to switch back.
@@ -121,7 +121,7 @@ test('the first connection asks to trust the host key inside the app', { timeout
   const app = await electron.launch({
     args: ['--no-sandbox', `--user-data-dir=${path.join(localHome, 'profile')}`, root],
     env: {
-      ...process.env, DOLPHIN_HOME: localHome, DOLPHIN_DESKTOP_REMOTE_HOME: remoteHome, DOLPHIN_GBRAIN: 'off', DOLPHIN_DESKTOP_REMOTE_ENV: 'DOLPHIN_GBRAIN=off',
+      ...process.env, DOLPHIN_HOME: localHome, DOLPHIN_DESKTOP_REMOTE_HOME: remoteHome, DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off', DOLPHIN_DESKTOP_REMOTE_ENV: 'DOLPHIN_GBRAIN=off DOLPHIN_TMUX_IMPORT=off',
       DOLPHIN_DESKTOP_SSH_OPTIONS: `-o UserKnownHostsFile=${knownHosts} -o StrictHostKeyChecking=ask -o ControlPath=none`,
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
     },

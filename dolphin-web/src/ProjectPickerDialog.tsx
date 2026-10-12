@@ -112,9 +112,12 @@ function NodeRow({ node, style, dragHandle }: NodeRendererProps<PickerNode>) {
 export default function ProjectPickerDialog({
   onClose,
   onPick,
+  machine,
 }: {
   onClose: () => void;
   onPick: (path: string) => void;
+  /** Dolphin Desktop: whose folders these are ("this computer", or a host). */
+  machine?: string;
 }) {
   const [roots, setRoots] = useState<WorkspaceRoot[]>([]);
   const [rootsState, setRootsState] = useState<'loading' | 'ready' | 'failed'>(
@@ -290,7 +293,14 @@ export default function ProjectPickerDialog({
         role="dialog"
       >
         <header className="picker-header">
-          <h2>Link a project</h2>
+          <div className="picker-title">
+            <h2>Link a project</h2>
+            {machine ? (
+              <p className="picker-machine">
+                Folders on {machine}
+              </p>
+            ) : null}
+          </div>
           <button
             aria-label="Close the project picker"
             className="dt-btn dt-btn--ghost"
