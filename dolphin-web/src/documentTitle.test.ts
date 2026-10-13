@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 /// <reference types="node" />
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { APP_TITLE, documentTitleFor, glassDocumentTitle } from './documentTitle';
@@ -98,6 +98,10 @@ describe('the other routes', () => {
 describe('route-root writers', () => {
   const SOURCE_DIR = resolve(__dirname);
   const ASSIGNMENT = /(^|[^.\w])document\s*\.\s*title\s*=[^=]/;
+  // The public export ships the desktop workspace without the web app's App.tsx.
+  const ROUTE_ROOTS = ['App.tsx', 'GlassWorkspace.tsx'].filter((name) =>
+    existsSync(resolve(SOURCE_DIR, name)),
+  );
 
   function sourceFiles(): string[] {
     return readdirSync(SOURCE_DIR)
@@ -108,7 +112,7 @@ describe('route-root writers', () => {
   it('finds the app source, so this guard cannot pass vacuously', () => {
     const files = sourceFiles();
     expect(files.length).toBeGreaterThan(20);
-    expect(files).toContain('App.tsx');
+    expect(files).toContain('GlassWorkspace.tsx');
     expect(files).toContain('SystemHealthView.tsx');
   });
 
@@ -117,7 +121,7 @@ describe('route-root writers', () => {
       ASSIGNMENT.test(readFileSync(resolve(SOURCE_DIR, name), 'utf8')),
     );
 
-    expect(writers).toEqual(['App.tsx', 'GlassWorkspace.tsx']);
+    expect(writers).toEqual(ROUTE_ROOTS);
   });
 });
 
