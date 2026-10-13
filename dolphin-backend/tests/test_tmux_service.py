@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
+import os
 import shlex
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -499,6 +501,10 @@ def test_stable_pane_identity_uses_one_read_only_tmux_batch(monkeypatch):
                     "#{pane_current_path}",
                     "#{pane_current_command}",
                     "#{pane_pid}",
+                    "#{pane_active}",
+                    "#{window_active}",
+                    "#{pane_dead}",
+                    "#{@dolphin-turn-state}",
                 ]
             ),
         )
@@ -825,7 +831,7 @@ def test_create_codex_mode_bootstraps_shell_then_starts_and_refreshes(
     )
 
     spawn_args = next(event[1] for event in events if event[0] == "spawn")
-    assert spawn_args[-1] == str(workspace)
+    assert spawn_args[spawn_args.index("-c") + 1] == str(workspace)
     assert "codex" not in spawn_args
     assert [event[0] for event in events if event[0] != "sleep"] == [
         "spawn",
@@ -909,7 +915,7 @@ def test_create_claude_mode_bootstraps_shell_then_starts_and_refreshes(
     )
 
     spawn_args = next(event[1] for event in events if event[0] == "spawn")
-    assert spawn_args[-1] == str(workspace)
+    assert spawn_args[spawn_args.index("-c") + 1] == str(workspace)
     assert "claude" not in spawn_args
     assert [event[0] for event in events if event[0] != "sleep"] == [
         "spawn",
@@ -1310,11 +1316,13 @@ def test_start_codex_validates_then_sends_literal_command_without_settle_delay(
 
 def test_start_codex_shell_quotes_initial_prompt_as_positional_argument(
     monkeypatch,
+    tmp_path,
 ):
     workspace = Path("/tmp/project")
     session_name = "dolphin-task-quoted-prompt"
     prompt = "Research the user's task\nDo not execute $(touch /tmp/not-run)"
     commands: list[tuple[str, ...]] = []
+    monkeypatch.setenv("DOLPHIN_HOME", str(tmp_path))
 
     async def fake_require_workspace_session(path: Path, name: str):
         assert (path, name) == (workspace, session_name)
@@ -1366,17 +1374,12 @@ def test_start_codex_shell_quotes_initial_prompt_as_positional_argument(
         )
     )
 
-    assert commands == [
-        (
-            "send-keys",
-            "-t",
-            session_name,
-            "-l",
-            f"codex {shlex.quote(prompt)}",
-        ),
-        ("send-keys", "-t", session_name, "Enter"),
-    ]
-    assert shlex.split(commands[0][-1]) == ["codex", prompt]
+    assert [c[:4] for c in commands] == [("send-keys", "-t", session_name, "-l"), ("send-keys", "-t", session_name, "Enter")]
+    typed = commands[0][-1]
+    assert typed.startswith("sh ") and "Research" not in typed
+    launcher = Path(shlex.split(typed)[1])
+    assert (launcher.parent / "prompt.txt").read_text() == prompt
+    assert "exec codex -- \"$prompt\"" in launcher.read_text()
 
 
 def test_start_codex_timeout_is_bounded_and_preserves_shell(monkeypatch):
@@ -1688,11 +1691,13 @@ def test_start_claude_validates_then_sends_literal_command_without_settle_delay(
 
 def test_start_claude_shell_quotes_initial_prompt_and_carries_run_id(
     monkeypatch,
+    tmp_path,
 ):
     workspace = Path("/tmp/project")
     session_name = "dolphin-task-quoted-claude-prompt"
     prompt = "Research the user's task\nDo not execute $(touch /tmp/not-run)"
     commands: list[tuple[str, ...]] = []
+    monkeypatch.setenv("DOLPHIN_HOME", str(tmp_path))
 
     async def fake_require_workspace_session(path: Path, name: str):
         assert (path, name) == (workspace, session_name)
@@ -1745,21 +1750,13 @@ def test_start_claude_shell_quotes_initial_prompt_and_carries_run_id(
         )
     )
 
-    assert commands == [
-        (
-            "send-keys",
-            "-t",
-            session_name,
-            "-l",
-            f"DOLPHIN_RUN_ID=RUN789 claude {shlex.quote(prompt)}",
-        ),
-        ("send-keys", "-t", session_name, "Enter"),
-    ]
-    assert shlex.split(commands[0][-1]) == [
-        "DOLPHIN_RUN_ID=RUN789",
-        "claude",
-        prompt,
-    ]
+    typed = commands[0][-1]
+    assert commands[1] == ("send-keys", "-t", session_name, "Enter")
+    assert typed.startswith("sh ") and "Research" not in typed
+    launcher = Path(shlex.split(typed)[1])
+    assert (launcher.parent / "prompt.txt").read_text() == prompt
+    text = launcher.read_text()
+    assert "export DOLPHIN_RUN_ID=RUN789" in text and "exec claude -- \"$prompt\"" in text
 
 
 def test_start_claude_timeout_is_bounded_and_preserves_shell(monkeypatch):
@@ -2249,3 +2246,157 @@ def test_claude_readiness_recognizes_version_named_native_binary(monkeypatch):
     tree = {100: [101]}
     assert tmux_service._process_tree_contains_executable_basename(100, 'claude', tree)
     assert not tmux_service._process_tree_contains_executable_basename(100, 'codex', tree)
+
+
+def _fake_tmux(tmp_path, body: str):
+    fake = tmp_path / "tmux"
+    fake.write_text("#!/bin/sh\n" + body)
+    fake.chmod(0o755)
+    return fake
+
+
+def test_a_hung_tmux_call_times_out_and_is_killed(tmp_path, monkeypatch):
+    pid_file = tmp_path / "pid"
+    monkeypatch.setenv("DOLPHIN_TMUX_BIN", str(_fake_tmux(tmp_path, f'echo $$ > "{pid_file}"\nexec sleep 30\n')))
+    monkeypatch.setattr(tmux_service, "TMUX_TIMEOUT_SECONDS", 0.5)
+
+    started = time.monotonic()
+    with pytest.raises(tmux_service.TmuxServiceError) as caught:
+        asyncio.run(tmux_service._run_tmux("list-sessions"))
+    assert time.monotonic() - started < 3
+    assert caught.value.status_code == 504
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+def test_a_hung_tmux_call_with_input_times_out_too(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOLPHIN_TMUX_BIN", str(_fake_tmux(tmp_path, "exec sleep 30\n")))
+    monkeypatch.setattr(tmux_service, "TMUX_TIMEOUT_SECONDS", 0.5)
+    with pytest.raises(tmux_service.TmuxServiceError) as caught:
+        asyncio.run(tmux_service._run_tmux_with_input("load-buffer", "-", input_text="x"))
+    assert caught.value.status_code == 504
+
+
+def _sessions_in(workspace, count):
+    return [
+        tmux_service.TmuxSessionInfo(
+            name=f"s{index}", path=str(workspace.resolve()), created_at=datetime.now(timezone.utc),
+            windows=1, attached=False, current_command="bash", is_codex_running=False,
+            pane_paths=(str(workspace.resolve()),),
+        )
+        for index in range(count)
+    ]
+
+
+def test_twenty_terminal_opens_share_one_scan(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    sessions = _sessions_in(workspace, 20)
+    scans = 0
+
+    async def uncached():
+        nonlocal scans
+        scans += 1
+        await asyncio.sleep(0.05)
+        return sessions
+
+    async def no_tmux(*args, check=True):
+        raise AssertionError(f"unexpected tmux call {args}")
+
+    async def exercise():
+        monkeypatch.setattr(tmux_service, "_SESSIONS_CACHE_LOCK", asyncio.Lock())
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "data", None)
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "at", 0.0)
+        monkeypatch.setattr(tmux_service, "_list_all_sessions_uncached", uncached)
+        monkeypatch.setattr(tmux_service, "_run_tmux", no_tmux)
+        return await asyncio.gather(*(
+            tmux_service.require_workspace_session(workspace, session.name, fresh=False) for session in sessions
+        ))
+
+    found = asyncio.run(exercise())
+    assert [session.name for session in found] == [session.name for session in sessions]
+    assert scans == 1
+
+
+def test_a_session_newer_than_the_cache_is_found_after_has_session(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    created = _sessions_in(workspace, 1)
+    scans = 0
+    asked: list[tuple[str, ...]] = []
+
+    async def uncached():
+        nonlocal scans
+        scans += 1
+        return created
+
+    async def has_session(*args, check=True):
+        asked.append(args)
+        return 0, "", ""
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "data", [])
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "at", loop.time())
+        monkeypatch.setattr(tmux_service, "_list_all_sessions_uncached", uncached)
+        monkeypatch.setattr(tmux_service, "_run_tmux", has_session)
+        return await tmux_service.require_workspace_session(workspace, "s0", fresh=False)
+
+    assert asyncio.run(exercise()).name == "s0"
+    assert asked == [("has-session", "-t", "=s0")]
+    assert scans == 1
+
+
+def test_a_session_that_is_gone_is_404_without_a_scan(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+
+    async def uncached():
+        raise AssertionError("no scan for a session tmux says is gone")
+
+    async def has_session(*args, check=True):
+        return 1, "", "can't find session: s0"
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "data", [])
+        monkeypatch.setitem(tmux_service._SESSIONS_CACHE, "at", loop.time())
+        monkeypatch.setattr(tmux_service, "_list_all_sessions_uncached", uncached)
+        monkeypatch.setattr(tmux_service, "_run_tmux", has_session)
+        await tmux_service.require_workspace_session(workspace, "s0", fresh=False)
+
+    with pytest.raises(tmux_service.TmuxServiceError) as caught:
+        asyncio.run(exercise())
+    assert caught.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_opening_a_terminal_stream_uses_the_cached_lookup(monkeypatch, tmp_path):
+    from app import main
+
+    calls = []
+
+    async def fake_workspace(project_id, db):
+        return None, tmp_path
+
+    async def spy(workspace_path, session_name, **kwargs):
+        calls.append(kwargs)
+
+    async def attach(*args, **kwargs):
+        return None
+
+    class Socket:
+        async def accept(self):
+            return None
+
+        async def send_json(self, value):
+            raise AssertionError(value)
+
+        async def close(self, code=1000):
+            raise AssertionError(code)
+
+    monkeypatch.setattr(main, "_workspace_path_for_project", fake_workspace)
+    monkeypatch.setattr(main, "require_workspace_session", spy)
+    monkeypatch.setattr(main, "_stream_tmux_attach", attach)
+    await main.stream_project_tmux_session(Socket(), "project", "build")
+    assert calls == [{"fresh": False}]

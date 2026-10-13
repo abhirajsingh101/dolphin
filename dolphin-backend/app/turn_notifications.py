@@ -1,9 +1,10 @@
 """Turn-end notifications: collect agent turns that tmux panes recorded.
 
 ``scripts/dolphin-automation-hook`` leaves each finished Claude or Codex turn
-on its pane as ``@dolphin-turn``. A loop here reads every pane in one tmux call,
-stores turns it has not seen as ``notifications`` rows, and pushes them to the
-browsers subscribed to the stream. The record waits in tmux, so a turn that ends
+on its pane as ``@dolphin-turn``. A loop here reads every pane when a hook nudges it (helper mode; every 30 s
+otherwise as a fallback) or every 2 s (the web install), stores turns it has not
+seen as ``notifications`` rows, publishes them, and publishes each pane's
+turn-state change as a ``turn`` event. The record waits in tmux, so a turn that ends
 while the backend restarts is still collected.
 
 Known limit: a pane that finishes two turns within one scan keeps only the
@@ -17,18 +18,38 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import re
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import delete, select, update
 
 from .models import Notification, Project
+from . import tmux_service
 from .tmux_service import _run_tmux
+from .turn_state import OPTION as STATE_OPTION, parse_turn_state
 
 logger = logging.getLogger(__name__)
 
 OPTION = "@dolphin-turn"
-SCAN_SECONDS = 2.0
+SCAN_SECONDS = 2.0            # the web install: nothing nudges it
+FALLBACK_SCAN_SECONDS = 30.0  # helper mode: hooks nudge it; this only catches a missed nudge
+PRUNE_SECONDS = 1800.0
+
+
+def scan_interval() -> float:
+    return FALLBACK_SCAN_SECONDS if os.getenv("DOLPHIN_HELPER_VERSION") else SCAN_SECONDS
+
+
+_collectors: set["Collector"] = set()
+
+
+def wake() -> None:
+    """A hook said a turn changed (POST /api/desktop/turn-nudge): scan now."""
+    for collector in list(_collectors):
+        collector.wake()
 RETAIN = timedelta(days=7)
 KEEP = 500
 PROVIDERS = {"claude", "codex"}
@@ -55,6 +76,30 @@ class Broadcaster:
                 queue.put_nowait(item)
 
 
+_FENCE = re.compile(r"```[\w+-]*")
+_LINK = re.compile(r"!?\[([^\]]*)\]\([^)\s]*\)")
+_INLINE_CODE = re.compile(r"`([^`]+)`")
+# **bold**, *italic*, ~~struck~~. Not underscores: they are in file names.
+_EMPHASIS = re.compile(r"(?<![\w*])(\*\*|\*|~~)(?=\S)(.+?)(?<=\S)\1(?![\w*])")
+_LEADING_MARK = re.compile(r"^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)")
+_HEADING = re.compile(r"(?<=\s)#{1,6}\s+")
+
+
+def plain_summary(text: str) -> str:
+    """A turn's summary as plain text. Agents end replies in Markdown; pop-ups,
+    toasts and the bell show text. The summary's line breaks were collapsed by
+    the hook, so only a mark at the very start is read as a list or quote."""
+    text = _FENCE.sub(" ", text)
+    text = _LINK.sub(r"\1", text)
+    text = _INLINE_CODE.sub(r"\1", text)
+    previous = None
+    while previous != text:  # ***nested*** emphasis peels one layer a pass
+        previous, text = text, _EMPHASIS.sub(r"\2", text)
+    text = _LEADING_MARK.sub("", text.strip())
+    text = _HEADING.sub("", text)
+    return " ".join(text.split())
+
+
 def to_item(row: Notification, project_name: str | None) -> dict:
     return {
         "id": row.id,
@@ -65,7 +110,7 @@ def to_item(row: Notification, project_name: str | None) -> dict:
         "project_name": project_name,
         "session_name": row.session_name,
         "pane_id": row.pane_id,
-        "summary": row.summary,
+        "summary": plain_summary(row.summary or ""),
         "finished_at": _iso(row.finished_at),
         "created_at": _iso(row.created_at),
         "read": row.read_at is not None,
@@ -93,6 +138,49 @@ def _parse_turn(raw: str) -> dict | None:
         finished_at = finished_at.replace(tzinfo=timezone.utc)
     return {"id": turn_id, "provider": turn["provider"], "finished_at": finished_at,
             "summary": summary[:MAX_SUMMARY_CHARS]}
+
+
+async def _pane_states() -> dict[str, tuple[str, str, datetime]]:
+    """pane_id -> (session_name, state, when) for every pane with a turn state."""
+    code, out, _ = await _run_tmux(
+        "list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{" + STATE_OPTION + "}", check=False,
+    )
+    if code != 0:
+        return {}
+    found = {}
+    for line in out.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        parsed = parse_turn_state(parts[2])
+        if parsed is not None:
+            found[parts[0]] = (parts[1], parsed[0], parsed[1])
+    return found
+
+
+class TurnStates:
+    """Publishes a ``turn_state`` item whenever a pane's turn state changes, so
+    open windows refresh that session at once instead of at their next poll."""
+
+    def __init__(self) -> None:
+        self._last: dict[str, tuple[str, str, datetime]] | None = None
+
+    async def scan(self, broadcaster: "Broadcaster") -> list[dict]:
+        current = await _pane_states()
+        previous, self._last = self._last, current
+        if previous is None:
+            return []  # the first scan after a start is the baseline
+        items = [
+            {"kind": "turn_state", "pane_id": pane, "session_name": session,
+             "turn_state": state, "turn_at": _iso(at)}
+            for pane, (session, state, at) in current.items()
+            if previous.get(pane) != (session, state, at)
+        ]
+        if items:
+            tmux_service._invalidate_sessions_cache()
+        for item in items:
+            broadcaster.publish(item)
+        return items
 
 
 async def _pane_turns() -> list[tuple[str, str, str, dict]]:
@@ -130,7 +218,7 @@ def _project_for(path: str, projects: list[tuple[str, str, Path]]) -> tuple[str,
 
 
 async def _projects(db) -> list[tuple[str, str, Path]]:
-    rows = (await db.execute(select(Project.id, Project.name, Project.path).where(Project.path.is_not(None)))).all()
+    rows = (await db.execute(select(Project.id, Project.name, Project.path).where(Project.path.is_not(None), Project.is_hidden.is_(False)))).all()
     projects = []
     for project_id, name, path in rows:
         try:
@@ -221,23 +309,34 @@ async def event_stream(broadcaster: Broadcaster, *, heartbeat_seconds: float = 2
             except asyncio.TimeoutError:
                 yield ": ping\n\n"
                 continue
-            yield f"event: notification\ndata: {json.dumps(item)}\n\n"
+            name = "turn" if item.get("kind") == "turn_state" else "notification"
+            yield f"event: {name}\ndata: {json.dumps(item)}\n\n"
     finally:
         broadcaster.unsubscribe(queue)
 
 
 class Collector:
-    """The background loop: scan every couple of seconds, prune now and then."""
+    """The background loop: scan when a hook nudges it, and on a fallback
+    interval (scan_interval) in case a nudge was missed; prune now and then."""
 
     def __init__(self, session_factory, broadcaster: Broadcaster) -> None:
         self._session_factory = session_factory
         self._broadcaster = broadcaster
         self._task: asyncio.Task | None = None
+        self._wake: asyncio.Event | None = None
+        self._states = TurnStates()
 
     def start(self) -> None:
+        self._wake = asyncio.Event()
+        _collectors.add(self)
         self._task = asyncio.create_task(self._run())
 
+    def wake(self) -> None:
+        if self._wake is not None:
+            self._wake.set()
+
     async def stop(self) -> None:
+        _collectors.discard(self)
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -245,16 +344,20 @@ class Collector:
         self._task = None
 
     async def _run(self) -> None:
-        scans = 0
+        assert self._wake is not None
+        pruned_at = float("-inf")
         while True:
+            self._wake.clear()  # a nudge during this scan triggers the next one
             try:
                 await scan_once(self._session_factory, self._broadcaster)
-                if scans % 900 == 0:  # about every half hour
+                await self._states.scan(self._broadcaster)
+                if time.monotonic() - pruned_at >= PRUNE_SECONDS:
                     async with self._session_factory() as db:
                         await prune(db)
+                    pruned_at = time.monotonic()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Turn notification scan failed")
-            scans += 1
-            await asyncio.sleep(SCAN_SECONDS)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), timeout=scan_interval())

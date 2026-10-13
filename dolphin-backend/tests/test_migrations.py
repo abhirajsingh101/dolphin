@@ -35,7 +35,7 @@ DIRECTION_REVISION = "e2c8b4195a7d"
 PRE_PLANNING_REVISION = "f6b4c8d21e30"
 # The last revision that still had Learn/Active automation and learned planning.
 PRE_REMOVAL_REVISION = "9324cf29e61e"
-HEAD_REVISION = "0e469321b805"
+HEAD_REVISION = "c41d7e9a2b58"
 FLEET_TABLES = {
     "fleet_missions",
     "fleet_tasks",
@@ -66,6 +66,8 @@ CHIEF_TABLES = {
 # Project registry and proactive signals (7b6ea6689e2a): new, empty, not domain data.
 SIGNAL_TABLES = {"project_links", "chat_rooms", "signals", "signal_seen_messages"}
 NOTIFICATION_TABLES = {"notifications"}
+# Session links (c41d7e9a2b58): new, empty, not domain data.
+SESSION_LINK_TABLES = {"session_links"}
 
 EXPECTED_CHIEF_COLUMNS = {
     "chief_threads": {
@@ -611,6 +613,7 @@ def _domain_rows(path):
                 | FLEET_TABLES
                 | SIGNAL_TABLES
                 | NOTIFICATION_TABLES
+                | SESSION_LINK_TABLES
             )
         ]
         snapshot = {}
@@ -626,6 +629,9 @@ def _domain_rows(path):
                     row.pop("origin", None)
                     row.pop("execution_prompt", None)
                     row.pop("source_proposal_id", None)
+            if table == "projects":
+                for row in rows:
+                    row.pop("is_hidden", None)  # added by c41d7e9a2b58
             snapshot[table] = rows
         return snapshot
     finally:

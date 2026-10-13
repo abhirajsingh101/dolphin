@@ -7,11 +7,15 @@
  * Check for Updates… in the menu. What happens next depends on how it was
  * installed:
  *
- * - AppImage: electron-updater downloads the update in the background; the
- *   user restarts when it suits them ("Restart to Update").
- * - macOS and .deb: the app offers the matching installer ("Download").
- *   macOS refuses to install updates into an unsigned app, and a .deb belongs
- *   to the system's package manager, so neither can update itself yet.
+ * - AppImage, and a signed Mac app: electron-updater downloads the update in
+ *   the background; the user restarts when it suits them ("Restart to Update").
+ * - Unsigned macOS, .deb and .rpm: the app offers the matching installer
+ *   ("Download"). macOS refuses to install updates into an unsigned app, and a
+ *   .deb or .rpm belongs to the system's package manager.
+ *
+ * The update channel (settings.ts: updateChannel) decides which releases count:
+ * stable sees only full releases, beta sees GitHub prereleases too. Changing it
+ * checks again at once.
  *
  * Windows hear every change (dolphin:update) and show it as a pill in the
  * header only when there is something to do, never as a dialog. A quiet check
@@ -21,12 +25,15 @@
  * one when it starts (app/helper.py), on this computer and on SSH machines.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, net, powerMonitor, shell } from 'electron';
-import { installerFor, isNewer, Release, releaseVersion } from './releases';
+import { canSelfUpdate, Channel, compareVersions, dropStagedUpdate, installerFor, linuxPackage, pickRelease, Release, StagedUpdater, tagVersion, updateFilesChannel } from './releases';
+import { onSettingsChange, readSettings } from './settings';
 
-export const RELEASES = 'https://api.github.com/repos/abhirajsingh101/dolphin/releases/latest';
+// The list, not /releases/latest: GitHub's "latest" never names a prerelease,
+// and the beta channel needs them (pickRelease chooses per channel).
+export const RELEASES = 'https://api.github.com/repos/abhirajsingh101/dolphin/releases?per_page=30';
 const DOWNLOADS = 'https://github.com/abhirajsingh101/dolphin/releases/download';
 const FIRST_CHECK_MS = 10_000;
 const EVERY_MS = 60 * 60 * 1000;
@@ -55,16 +62,28 @@ function publish(next: Found): void {
   }
 }
 
-/** An AppImage can replace itself; nothing else Dolphin ships can yet. */
-function selfUpdating(): boolean {
-  return process.platform === 'linux' && Boolean(process.env.APPIMAGE) && app.isPackaged;
+/** Set by CI when it signs the Mac build (package.json extraMetadata). */
+function signedBuild(): boolean {
+  try {
+    return Boolean(JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).dolphinSigned);
+  } catch {
+    return false;
+  }
 }
 
-async function latestRelease(): Promise<Release> {
+/** An AppImage, or a signed Mac app, replaces itself (releases.ts). */
+function selfUpdating(): boolean {
+  return canSelfUpdate({ platform: process.platform, packaged: app.isPackaged, appImage: Boolean(process.env.APPIMAGE), signed: signedBuild() });
+}
+
+const channel = (): Channel => readSettings(app.getPath('userData')).updateChannel;
+
+async function newestRelease(wanted: Channel): Promise<Release | undefined> {
   const feed = process.env.DOLPHIN_DESKTOP_UPDATE_FEED || RELEASES;
   const response = await net.fetch(feed, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Dolphin/${app.getVersion()}` } });
   if (!response.ok) throw new Error(`the release feed answered ${response.status}`);
-  return (await response.json()) as Release;
+  const body = (await response.json()) as Release | Release[];
+  return pickRelease(Array.isArray(body) ? body : [body], wanted);
 }
 
 async function startUpdater(): Promise<NonNullable<typeof updater>> {
@@ -90,6 +109,7 @@ async function startUpdater(): Promise<NonNullable<typeof updater>> {
 }
 
 let pendingVersion = '';
+let downloadToken: { cancel(): void } | null = null;
 const version = () => pendingVersion;
 
 let asked = false;
@@ -110,25 +130,34 @@ export async function checkForUpdates(manual = false): Promise<UpdateState> {
   before = found;
   publish({ state: 'checking' });
   try {
-    const release = await latestRelease();
-    const latest = releaseVersion(release.tag_name);
+    const release = await newestRelease(channel());
+    const latest = tagVersion(release?.tag_name);
     checkedAt = Date.now();
-    if (!latest || release.draft || release.prerelease || !isNewer(latest, app.getVersion())) {
+    if (!release || !latest || compareVersions(latest, app.getVersion()) <= 0) {
       publish({ state: 'current' });
       return current;
     }
-    pendingVersion = latest.join('.');
+    pendingVersion = latest;
     const notesUrl = release.html_url || notesFor(pendingVersion);
     if (selfUpdating()) {
       publish({ state: 'downloading', version: pendingVersion, percent: 0, notesUrl });
-      const appImageUpdater = await startUpdater();
-      // That release's own files (latest-linux.yml beside the AppImage), so
-      // electron-updater needs no opinion about how releases are tagged.
-      appImageUpdater.setFeedURL({ provider: 'generic', url: process.env.DOLPHIN_DESKTOP_UPDATE_FILES || `${DOWNLOADS}/desktop-v${pendingVersion}` });
-      await appImageUpdater.checkForUpdates();
+      const selfUpdater = await startUpdater();
+      // A prerelease's update files are beta-linux.yml / beta-mac.yml. Setting a
+      // channel also turns downgrades on, which Dolphin never offers.
+      selfUpdater.channel = updateFilesChannel(pendingVersion);
+      selfUpdater.allowPrerelease = pendingVersion.includes('-');
+      selfUpdater.allowDowngrade = false;
+      // That release's own files (latest-linux.yml beside the AppImage, the
+      // release job's latest-mac.yml), so electron-updater needs no opinion
+      // about how releases are tagged.
+      selfUpdater.setFeedURL({ provider: 'generic', url: process.env.DOLPHIN_DESKTOP_UPDATE_FILES || `${DOWNLOADS}/desktop-v${pendingVersion}` });
+      selfUpdater.autoInstallOnAppQuit = true; // a channel switch may have turned it off
+      const result = await selfUpdater.checkForUpdates();
+      downloadToken = result?.cancellationToken ?? null;
       return current;
     }
-    const url = installerFor(release, process.platform, process.arch, false) ?? release.html_url ?? '';
+    const pkg = process.platform === 'darwin' ? 'dmg' : linuxPackage({ appImage: Boolean(process.env.APPIMAGE), hasDpkg: existsSync('/usr/bin/dpkg'), hasRpm: existsSync('/usr/bin/rpm') });
+    const url = installerFor(release, process.platform, process.arch, pkg) ?? release.html_url ?? '';
     publish({ state: 'available', version: pendingVersion, action: 'download', url, notesUrl });
   } catch (error) {
     fail(error, asked);
@@ -178,6 +207,24 @@ function noteVersion(): void {
   try { writeFileSync(file, now); } catch { /* a read-only profile only loses the announcement */ }
 }
 
+/** Going back to stable never installs a beta: abort its download, unstage it
+ *  (nothing installs on quit) and clear the offer. Stable then checks as usual,
+ *  and never downgrades. */
+async function leavePrerelease(now: Channel): Promise<void> {
+  if (now !== 'stable' || !pendingVersion.includes('-')) return;
+  if (found.state !== 'downloading' && found.state !== 'ready') return;
+  if (updater) {
+    try {
+      await dropStagedUpdate(updater as unknown as StagedUpdater, downloadToken ?? undefined);
+    } catch (error) {
+      console.error('Dolphin could not clear the beta update:', error);
+    }
+  }
+  downloadToken = null;
+  pendingVersion = '';
+  publish({ state: 'idle' });
+}
+
 export function startUpdateChecks(): void {
   publish(found);
   noteVersion();
@@ -189,6 +236,11 @@ export function startUpdateChecks(): void {
   if (!app.isPackaged && !process.env.DOLPHIN_DESKTOP_UPDATE_FEED) return; // a development build has nothing to update to
   setTimeout(() => void checkForUpdates(), Number(process.env.DOLPHIN_DESKTOP_UPDATE_DELAY_MS) || FIRST_CHECK_MS);
   setInterval(() => void checkForUpdates(), EVERY_MS);
+  // A new channel changes which releases count: look again now.
+  onSettingsChange((next, previous) => {
+    if (next.updateChannel === previous.updateChannel) return;
+    void leavePrerelease(next.updateChannel).then(() => checkForUpdates());
+  });
   // Give the network a moment after waking before asking.
   powerMonitor.on('resume', () => setTimeout(checkIfStale, 5_000));
   app.on('browser-window-focus', checkIfStale);

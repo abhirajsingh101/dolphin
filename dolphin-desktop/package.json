@@ -1,7 +1,7 @@
 {
   "name": "dolphin-desktop",
   "productName": "Dolphin",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "description": "Run Claude Code and Codex in tmux, on this computer or any machine over SSH.",
   "main": "dist/main.js",
   "private": true,
@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "renderer": "cd ../dolphin-web && npx vite build --config vite.desktop.config.ts",
+    "renderer": "cd ../dolphin-web && npm run build:desktop",
     "start": "npm run build && electron .",
     "test": "npm run build && xvfb-run -a node --test --test-concurrency=1 test/*.test.mjs",
     "dist": "npm run renderer && npm run build && electron-builder --publish never"
@@ -20,6 +20,7 @@
   "build": {
     "appId": "dev.dolphin.desktop",
     "productName": "Dolphin",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -44,7 +45,8 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Development",
       "icon": "../dolphin-web/public/brand/dolphin-icon.png",
@@ -53,7 +55,8 @@
     },
     "mac": {
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.developer-tools",
       "icon": "../dolphin-web/public/brand/dolphin-icon.png",

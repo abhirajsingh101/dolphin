@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { pickKeys, rememberBounded } from './cachePruning';
 import { createPortal } from 'react-dom';
 import { Bell, Terminal, X } from 'lucide-react';
 import { api, type Api } from './api';
 import type { AppNotification } from './types';
+import { notificationTitle, systemNotificationText, wantsBrowserNotification } from './notificationText';
+import { getSetting } from './settings';
 
 const TOAST_MS = 8_000;
 const MAX_TOASTS = 3;
@@ -21,10 +24,6 @@ function ago(iso: string): string {
   return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-function label(item: Item): string {
-  return `${item.machineLabel ? `${item.machineLabel} · ` : ''}${item.project_name ?? 'No project'} / ${item.session_name}`;
-}
-
 function targetOf(item: Item): NotificationTarget | null {
   return item.project_id && item.project_name
     ? { projectId: item.project_id, projectName: item.project_name, sessionName: item.session_name, machine: item.machine }
@@ -40,7 +39,7 @@ function sameOrigin(a: Item, b: Item): boolean {
   return a.project_id ? a.project_id === b.project_id : !b.project_id && a.session_name === b.session_name;
 }
 
-export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { onOpen: (target: NotificationTarget) => void; sources?: NotificationSource[] }) {
+export default function NotificationBell({ onOpen, onTurn, sources = LOCAL_SOURCES }: { onOpen: (target: NotificationTarget) => void; onTurn?: (machine: string) => void; sources?: NotificationSource[] }) {
   // Each machine's list and unread count, merged for display.
   const [itemsBy, setItemsBy] = useState<Record<string, Item[]>>({});
   const [unreadBy, setUnreadBy] = useState<Record<string, number>>({});
@@ -67,13 +66,15 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
   const dismiss = useCallback((uid: string) => setToasts((current) => current.filter((toast) => toast.uid !== uid)), []);
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
+  const onTurnRef = useRef(onTurn);
+  onTurnRef.current = onTurn;
 
   const tag = (source: NotificationSource, item: AppNotification): Item => ({ ...item, machine: source.id, machineLabel: source.label, uid: `${source.id} ${item.id}` });
 
   const load = useCallback(async (source: NotificationSource) => {
     try {
       const list = await source.api.fetchNotifications();
-      for (const item of list.items) known.current.add(`${source.id} ${item.id}`);
+      for (const item of list.items) rememberBounded(known.current, `${source.id} ${item.id}`);
       setItems(source.id, () => list.items.map((item) => tag(source, item)));
       setUnread(source.id, list.unread_count);
     } catch {
@@ -91,11 +92,17 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
 
   const sourcesKey = sources.map((source) => `${source.id} ${source.api.API_BASE} ${source.api.API_TOKEN}`).join('|');
   useEffect(() => {
+    // A machine that left the window takes its list and count with it.
+    const liveIds = sourcesRef.current.map((source) => source.id);
+    setItemsBy((all) => pickKeys(all, liveIds));
+    setUnreadBy((all) => pickKeys(all, liveIds));
     const streams = sourcesRef.current.map((source) => {
       void load(source);
       const stream = new EventSource(source.api.notificationStreamUrl);
       // Every (re)connect resynchronises, so nothing missed while offline is lost.
       stream.onopen = () => void load(source);
+      // A session's turn changed there: that machine's sessions refresh now.
+      stream.addEventListener('turn', () => onTurnRef.current?.(source.id));
       stream.addEventListener('notification', (event) => {
         let raw: AppNotification;
         try {
@@ -105,7 +112,7 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
         }
         const item = tag(source, raw);
         if (known.current.has(item.uid)) return;
-        known.current.add(item.uid);
+        rememberBounded(known.current, item.uid);
         // A project's newest turn replaces its earlier ones: the backend has
         // marked those read, so they leave the count and their pop-ups go.
         setItems(source.id, (current) => [item, ...current.map((entry) => (
@@ -117,12 +124,16 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
         if (document.visibilityState === 'visible' && !openRef.current) {
           setToasts((current) => [item, ...current.filter((toast) => toast.uid !== item.uid)].slice(0, MAX_TOASTS));
         }
-        if (document.visibilityState === 'hidden' && typeof Notification !== 'undefined'
-            && Notification.permission === 'granted') {
-          const popup = new Notification(`${label(item)} finished a turn`, {
-            body: item.summary || `${item.provider === 'claude' ? 'Claude Code' : 'Codex'} is waiting for you.`,
-            tag: item.uid,
-          });
+        const desktopApp = Boolean((window as { dolphinDesktop?: { notify?: unknown } }).dolphinDesktop?.notify);
+        if (wantsBrowserNotification({
+          hidden: document.visibilityState === 'hidden',
+          focused: document.hasFocus(),
+          granted: typeof Notification !== 'undefined' && Notification.permission === 'granted',
+          enabled: getSetting('notifications.system'),
+          desktop: desktopApp,
+        })) {
+          const text = systemNotificationText(item, item.machineLabel);
+          const popup = new Notification(text.title, { body: text.body, tag: item.uid });
           popup.onclick = () => {
             window.focus();
             popup.close();
@@ -204,7 +215,7 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
                 <button
                   className="glass-toast-open"
                   disabled={!target}
-                  title={target ? `Open ${label(item)}` : 'This session is outside every project.'}
+                  title={target ? `Open ${notificationTitle(item)}` : 'This session is outside every project.'}
                   onClick={() => {
                     if (!target) return;
                     read(item);
@@ -214,12 +225,12 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
                 >
                   <Terminal size={15} aria-hidden="true" />
                   <span>
-                    <strong>{label(item)} finished</strong>
+                    <strong>{notificationTitle(item)}{item.machineLabel && <span className="glass-machine-chip">{item.machineLabel}</span>}</strong>
                     {item.summary && <span className="glass-notification-summary">{item.summary}</span>}
                     <small>{item.provider === 'claude' ? 'Claude Code' : 'Codex'} · {ago(item.finished_at)}</small>
                   </span>
                 </button>
-                <button className="glass-toast-dismiss" aria-label={`Dismiss ${label(item)}`} onClick={() => dismiss(item.uid)}>
+                <button className="glass-toast-dismiss" aria-label={`Dismiss ${notificationTitle(item)}`} onClick={() => dismiss(item.uid)}>
                   <X size={13} />
                 </button>
               </li>
@@ -250,7 +261,7 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
                   <li key={item.uid} data-read={item.read}>
                     <button
                       disabled={!target}
-                      title={target ? `Open ${label(item)}` : 'This session is outside every project.'}
+                      title={target ? `Open ${notificationTitle(item)}` : 'This session is outside every project.'}
                       onClick={() => {
                         if (!target) return;
                         read(item);
@@ -260,7 +271,7 @@ export default function NotificationBell({ onOpen, sources = LOCAL_SOURCES }: { 
                     >
                       <Terminal size={15} aria-hidden="true" />
                       <span>
-                        <strong>{label(item)}</strong>
+                        <strong>{notificationTitle(item)}{item.machineLabel && <span className="glass-machine-chip">{item.machineLabel}</span>}</strong>
                         {item.summary && <span className="glass-notification-summary">{item.summary}</span>}
                         <small>{item.provider === 'claude' ? 'Claude Code' : 'Codex'} · {ago(item.finished_at)}</small>
                       </span>

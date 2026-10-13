@@ -34,10 +34,16 @@ def shim_path() -> Path:
 
 
 def write_shim(command: list[str]) -> Path:
-    """The stable command agents call; it follows the helper across upgrades."""
+    """The stable command agents call; it follows the helper across upgrades,
+    and tells the hook which helper to nudge (agents do not inherit DOLPHIN_HOME)."""
     path = shim_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(part) for part in command) + ' hook "$@"\n')
+    home = path.parent.parent
+    path.write_text(
+        "#!/bin/sh\n"
+        f"DOLPHIN_HOME={shlex.quote(str(home))}; export DOLPHIN_HOME\n"
+        "exec " + " ".join(shlex.quote(part) for part in command) + ' hook "$@"\n'
+    )
     path.chmod(0o700)
     return path
 

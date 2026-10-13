@@ -43,4 +43,12 @@ describe('Dolphin Desktop runtime config', () => {
     expect(url).toBe('http://127.0.0.1:43123/api/desktop/agents');
     expect(new Headers(init.headers).get('X-Dolphin-Token')).toBe('secret');
   });
+
+  it('never falls back to :8400 inside Dolphin Desktop when its own helper did not start', async () => {
+    vi.resetModules();
+    vi.stubGlobal('window', { location: { protocol: 'app:', hostname: 'dolphin' }, dolphinDesktop: {} });
+    const api = await import('./api');
+    expect(api.API_BASE).toBe(api.NO_LOCAL_HELPER);
+    expect(api.API_BASE).toBe('http://127.0.0.1:9');
+  });
 });

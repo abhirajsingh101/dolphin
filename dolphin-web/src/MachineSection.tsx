@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, ChevronDown, KeyRound, Laptop, LoaderCircle, MoreHorizontal, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
+import { Activity, ChevronDown, FileText, Gauge, KeyRound, LoaderCircle, MoreHorizontal, Network, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
 import { machineBridge, type MachineLink } from './machines';
 import './connectMachine.css';
 
@@ -23,12 +23,27 @@ export function machineStatus(link: MachineLink): string {
   return STATE[link.state];
 }
 
-export default function MachineSection({ link, count, collapsed, onToggle, onAddProject, children }: {
+/** Under the button when it fits, above it when it does not, always inside the window. */
+export function placeMachineMenu(
+  anchor: { top: number; bottom: number; right: number },
+  menu: { width: number; height: number },
+  view: { width: number; height: number },
+) {
+  const left = Math.max(16, Math.min(anchor.right - menu.width, view.width - menu.width - 16));
+  const below = anchor.bottom + 6;
+  const top = below + menu.height <= view.height - 16 ? below : anchor.top - 6 - menu.height;
+  return { top: Math.max(16, Math.min(top, view.height - menu.height - 16)), left };
+}
+
+export type WorkflowPanelKind = 'ports' | 'usage';
+
+export default function MachineSection({ link, count, collapsed, onToggle, onAddProject, onOpenPanel, children }: {
   link: MachineLink;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
   onAddProject: () => void;
+  onOpenPanel?: (panel: WorkflowPanelKind) => void;
   children: ReactNode;
 }) {
   const remote = link.kind === 'ssh';
@@ -46,15 +61,15 @@ export default function MachineSection({ link, count, collapsed, onToggle, onAdd
           title={remote ? `${label} over SSH · ${machineStatus(link)}` : `This computer (${link.hostname ?? 'local'})`}
           onClick={onToggle}
         >
-          <ChevronDown size={13} aria-hidden="true" />
-          <span className="glass-machine-icon" aria-hidden="true">{remote ? <Server size={14} /> : <Laptop size={14} />}</span>
-          <span className="glass-machine-name">
-            <strong>{label}</strong>
+          <ChevronDown size={12} aria-hidden="true" />
+          <i className="glass-machine-dot" data-state={link.state} aria-hidden="true" />
+          <strong className="glass-machine-label">{label}</strong>
+          {!connected && (
             <small data-state={link.state}>
               {(link.state === 'connecting' || link.state === 'reconnecting') && <LoaderCircle size={11} aria-hidden="true" />}
               {machineStatus(link)}
             </small>
-          </span>
+          )}
         </button>
         <button
           type="button"
@@ -66,16 +81,16 @@ export default function MachineSection({ link, count, collapsed, onToggle, onAdd
         >
           <Plus size={15} />
         </button>
-        {remote && <MachineMenu link={link} />}
+        {(remote || (onOpenPanel && machineBridge()?.openPort)) && <MachineMenu link={link} onOpenPanel={onOpenPanel} />}
       </div>
       {problem && !collapsed && (
         <div className="glass-machine-problem" role="alert">
           <p>{link.state === 'failed' ? link.error || `Dolphin couldn't reach ${label}.` : `The link to ${label} dropped${link.reason ? `: ${link.reason}` : '.'} Your sessions there keep running.`}</p>
           <div>
-            <button type="button" className="machine-action" onClick={() => link.target && machineBridge()?.reconnect?.(link.target)}>
+            <button type="button" className="machine-action" onClick={() => machineBridge()?.reconnect?.(link.target ?? link.id)}>
               <RefreshCw size={13} aria-hidden="true" /> Reconnect
             </button>
-            {link.state === 'failed' && (
+            {remote && link.state === 'failed' && (
               <button type="button" className="glass-machine-dismiss" onClick={() => link.target && machineBridge()?.closeMachine?.(link.target)}>
                 Remove
               </button>
@@ -88,9 +103,19 @@ export default function MachineSection({ link, count, collapsed, onToggle, onAdd
   );
 }
 
-function MachineMenu({ link }: { link: MachineLink }) {
+function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (panel: WorkflowPanelKind) => void }) {
+  const remote = link.kind === 'ssh';
+  // Ports and Usage both need a live link and the desktop bridge (the endpoints exist only in helper mode).
+  const canOpenPanels = link.state === 'connected' && onOpenPanel && machineBridge()?.openPort ? onOpenPanel : null;
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState<'idle' | 'working' | 'done' | string>('idle');
+  const [logError, setLogError] = useState('');
+  const showLog = async () => {
+    setLogError('');
+    const result = await machineBridge()?.remoteLog?.(target);
+    if (result?.error) setLogError(result.error);
+    else setOpen(false);
+  };
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState({ top: 0, left: 0 });
@@ -102,7 +127,8 @@ function MachineMenu({ link }: { link: MachineLink }) {
     const box = root.current?.getBoundingClientRect();
     if (!box) return;
     const width = Math.min(320, window.innerWidth - 32);
-    setPlace({ top: box.bottom + 6, left: Math.max(16, Math.min(box.right - width, window.innerWidth - width - 16)) });
+    const height = menu.current?.offsetHeight ?? 0;
+    setPlace(placeMachineMenu(box, { width, height }, { width: window.innerWidth, height: window.innerHeight }));
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -137,19 +163,21 @@ function MachineMenu({ link }: { link: MachineLink }) {
       </button>
       {open && createPortal(
         <div ref={menu} className="machine-menu machine-menu--end" role="menu" aria-label={`${link.label} options`} style={{ top: place.top, left: place.left }}>
-          <div className="machine-current">
-            <Server size={16} aria-hidden="true" />
-            <span>
-              <strong>{link.label}</strong>
-              <small data-state={link.state}>{STATE[link.state]} over SSH{link.reason && link.state !== 'connected' ? ` · ${link.reason}` : ''}</small>
-            </span>
-            {link.state !== 'connected' && (
-              <button type="button" role="menuitem" className="machine-action" onClick={() => { setOpen(false); machineBridge()?.reconnect?.(target); }}>
-                <RefreshCw size={13} aria-hidden="true" /> Reconnect
-              </button>
-            )}
-          </div>
-          {link.offerKey && key !== 'done' && (
+          {remote && (
+            <div className="machine-current">
+              <Server size={16} aria-hidden="true" />
+              <span>
+                <strong>{link.label}</strong>
+                <small data-state={link.state}>{STATE[link.state]} over SSH{link.reason && link.state !== 'connected' ? ` · ${link.reason}` : ''}</small>
+              </span>
+              {link.state !== 'connected' && (
+                <button type="button" role="menuitem" className="machine-action" onClick={() => { setOpen(false); machineBridge()?.reconnect?.(target); }}>
+                  <RefreshCw size={13} aria-hidden="true" /> Reconnect
+                </button>
+              )}
+            </div>
+          )}
+          {remote && link.offerKey && key !== 'done' && (
             <div className="machine-key">
               <KeyRound size={15} aria-hidden="true" />
               <span>
@@ -161,17 +189,57 @@ function MachineMenu({ link }: { link: MachineLink }) {
               </button>
             </div>
           )}
-          {key === 'done' && <p className="machine-note" role="status">Done. {link.label} signs you in with Dolphin's key from now on.</p>}
-          {link.state === 'connected' && (
+          {remote && key === 'done' && <p className="machine-note" role="status">Done. {link.label} signs you in with Dolphin's key from now on.</p>}
+          {canOpenPanels && (
+            <>
+              <button type="button" role="menuitem" className="machine-item" onClick={() => { setOpen(false); canOpenPanels('ports'); }}>
+                <Network size={15} aria-hidden="true" />
+                <span>Ports…</span>
+              </button>
+              <button type="button" role="menuitem" className="machine-item" onClick={() => { setOpen(false); canOpenPanels('usage'); }}>
+                <Gauge size={15} aria-hidden="true" />
+                <span>Usage…</span>
+              </button>
+            </>
+          )}
+          {remote && link.state === 'connected' && (
             <a role="menuitem" className="machine-item" href={`#/health/${encodeURIComponent(link.id)}`} onClick={() => setOpen(false)}>
               <Activity size={15} aria-hidden="true" />
               <span>System Health</span>
             </a>
           )}
-          <button type="button" role="menuitem" className="machine-item" onClick={() => { setOpen(false); machineBridge()?.closeMachine?.(target); }}>
-            <Unplug size={15} aria-hidden="true" />
-            <span>Disconnect</span>
-          </button>
+          {remote && (
+            <button type="button" role="menuitem" className="machine-item" onClick={() => void showLog()}>
+              <FileText size={15} aria-hidden="true" />
+              <span>Show Remote Log</span>
+            </button>
+          )}
+          {remote && logError && <p className="machine-note" role="alert">{logError}</p>}
+          {remote && link.state === 'connected' && (
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={Boolean(link.agentForwarding)}
+              className="machine-item"
+              onClick={() => void machineBridge()?.setAgentForwarding?.(target, !link.agentForwarding)}
+            >
+              <KeyRound size={15} aria-hidden="true" />
+              <span>
+                Forward SSH agent
+                <small>{link.agentError
+                  ? link.agentError
+                  : link.agentForwarding
+                    ? `New sessions on ${link.label} can use this computer's SSH keys.`
+                    : `Off. Turn on so git push from sessions on ${link.label} uses this computer's keys.`}</small>
+              </span>
+            </button>
+          )}
+          {remote && (
+            <button type="button" role="menuitem" className="machine-item" onClick={() => { setOpen(false); machineBridge()?.closeMachine?.(target); }}>
+              <Unplug size={15} aria-hidden="true" />
+              <span>Disconnect</span>
+            </button>
+          )}
         </div>,
         root.current?.closest('.glass-workspace') ?? document.body,
       )}

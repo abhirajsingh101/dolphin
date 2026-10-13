@@ -175,3 +175,12 @@ def isolate_logs(tmp_path_factory):
         logger.addHandler(handler)
     observability.LOG_DIR = original_dir
     observability.LOG_FILE = original_file
+
+
+@pytest.fixture(autouse=True)
+def _fresh_sessions_cache():
+    """The session inventory is cached for 2 s; a test must not see the last one's."""
+    from app import tmux_service
+
+    tmux_service._invalidate_sessions_cache()
+    yield

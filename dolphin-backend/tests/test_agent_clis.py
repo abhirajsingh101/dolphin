@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -71,3 +73,42 @@ def test_endpoint_exists_only_in_helper_mode(monkeypatch):
     monkeypatch.delenv("DOLPHIN_HELPER_VERSION", raising=False)
     with TestClient(app) as client:
         assert client.get("/api/desktop/agents").status_code == 404
+
+
+def test_merge_path_keeps_the_current_order_and_adds_new_entries():
+    assert agent_clis.merge_path("/a:/b", "/c:/a:/d") == "/a:/b:/c:/d"
+    assert agent_clis.merge_path("/a:/b", None) == "/a:/b"
+    assert agent_clis.merge_path("", "/c") == "/c"
+
+
+def test_the_helper_adopts_the_login_shells_path(tmp_path, monkeypatch):
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    agent = agents / "dolphin-test-agent"
+    agent.write_text("#!/bin/sh\n")
+    agent.chmod(0o755)
+    shell = tmp_path / "login-shell"
+    # Like a real shell: profile output without a trailing newline, then the
+    # command the helper passed (-ilc <command>) runs with the profile's PATH.
+    shell.write_text(
+        "#!/bin/sh\n"
+        'printf "motd"\n'
+        f'PATH="{agents}:/usr/bin"\n'
+        'eval "$2"\n'
+    )
+    shell.chmod(0o755)
+    monkeypatch.setenv("SHELL", str(shell))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert shutil.which("dolphin-test-agent") is None
+
+    agent_clis.adopt_login_path()
+
+    assert os.environ["PATH"] == f"/usr/bin:/bin:{agents}"
+    assert shutil.which("dolphin-test-agent") == str(agent)
+
+
+def test_a_login_shell_that_fails_changes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", str(tmp_path / "no-such-shell"))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    agent_clis.adopt_login_path()
+    assert os.environ["PATH"] == "/usr/bin:/bin"

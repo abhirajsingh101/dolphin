@@ -396,6 +396,13 @@ export interface ControlCenterSession {
   has_recent_activity: boolean;
   observation_state: 'available' | 'degraded';
   observation_message: string | null;
+  /** The agent in the active pane, and the turn state its hook left there.
+      Optional: older helpers do not send them. */
+  agent?: 'claude' | 'codex' | null;
+  turn_state?: 'working' | 'finished' | null;
+  turn_at?: string | null;
+  pane_dead?: boolean;
+  last_activity_at?: string | null;
 }
 
 export interface ControlCenterProject {
@@ -433,6 +440,13 @@ export interface ControlCenterSnapshot {
   codex_session_count: number;
   needs_setup_count: number;
   projects: ControlCenterProject[];
+  /** tmux sessions outside every project (workflow). Older helpers do not send it. */
+  other_sessions?: OtherSession[];
+}
+
+/** A session in no project; `openable` when it lies inside a workspace root. */
+export interface OtherSession extends ControlCenterSession {
+  openable: boolean;
 }
 
 export interface SerialQueueItem {
@@ -849,4 +863,112 @@ export interface AppNotification {
 export interface NotificationList {
   items: AppNotification[];
   unread_count: number;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  head: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  dirty: number;
+  conflicted: number;
+}
+
+export interface WorktreeStatus extends GitStatus {
+  project_id: string;
+  worktree_path: string;
+  base_ref: string | null;
+  merged: boolean;
+  /** Ignored entries other than .env* that Archive deletes (folders end in "/"), up to 5 names. Optional: older helpers do not send them. */
+  ignored_count?: number;
+  ignored_names?: string[];
+}
+
+export interface GitStatuses {
+  projects: Record<string, GitStatus | null>;
+  sessions: Record<string, WorktreeStatus>;
+  errors: Record<string, string>;
+}
+
+export interface SessionDiff {
+  repo: string;
+  base_ref: string;
+  base_sha: string;
+  diff: string;
+  truncated: boolean;
+  untracked: number;
+  /** What was cut or skipped (a size cap, a file left out), in plain words. */
+  notes: string[];
+}
+
+export interface LaunchRequest {
+  mode: 'claude' | 'codex' | 'shell';
+  name?: string;
+  prompt?: string;
+  task_id?: string;
+  worktree?: { branch: string; run_setup: boolean };
+  resume?: { agent: 'claude' | 'codex'; id: string };
+}
+
+export interface LaunchResult {
+  session: TmuxSession;
+  worktree: { path: string; branch: string; base_ref: string; base_sha: string; copied: string[]; setup: boolean } | null;
+  warning: string | null;
+}
+
+export interface SessionLink {
+  session_name: string;
+  project_id: string;
+  task_id: string | null;
+  agent: string | null;
+  worktree_path: string | null;
+  branch: string | null;
+  base_ref: string | null;
+  base_sha: string | null;
+  created_at: string;
+  archived_at: string | null;
+}
+
+export interface WorktreeOptions {
+  git: boolean;
+  branch: string | null;
+  suggested_branch: string;
+  setup: boolean;
+  env_files: string[];
+}
+
+export interface ListeningPort {
+  port: number;
+  address: string;
+  pid: number;
+  process: string;
+  command: string;
+  cwd: string | null;
+  project_id: string | null;
+  project_name: string | null;
+}
+
+export interface AgentUsage {
+  agent: 'claude' | 'codex';
+  found: boolean;
+  five_hour: { tokens: number; started_at: string | null; ends_at: string | null; burn_per_minute: number | null } | null;
+  seven_day: { tokens: number };
+  limits: { window_minutes: number; used_percent: number; resets_at: string | null }[];
+}
+
+export interface UsageReport {
+  collected_at: string;
+  agents: AgentUsage[];
+}
+
+export interface HistoryItem {
+  agent: 'claude' | 'codex';
+  id: string;
+  cwd: string;
+  title: string;
+  started_at: string | null;
+  updated_at: string;
+  message_count: number;
+  snippets: string[];
 }

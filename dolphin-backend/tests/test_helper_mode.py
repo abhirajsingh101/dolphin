@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -15,9 +17,18 @@ import pytest
 BACKEND = Path(__file__).resolve().parents[1]
 
 
+def _isolate(env: dict, root: Path) -> None:
+    """Never let a helper under test touch the real HOME, shell or tmux server."""
+    env.update(HOME=str(root), SHELL="/bin/sh", TMUX_TMPDIR=str(root / "tmux"))
+    (root / "tmux").mkdir(parents=True, exist_ok=True)
+    env.pop("TMUX", None)
+    env.pop("TMUX_PANE", None)
+
+
 def _helper(home: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if not k.startswith("DOLPHIN_") and k != "DATABASE_URL"}
     env["DOLPHIN_HOME"] = str(home)
+    _isolate(env, home.parent)
     env["DOLPHIN_GBRAIN"] = "off"  # memory setup downloads ~400 MB; tests/test_brain.py covers it
     return subprocess.run([sys.executable, "-m", "app.helper", *args], cwd=BACKEND, env=env,
                           capture_output=True, text=True, timeout=60, check=check)
@@ -49,6 +60,7 @@ def test_helper_serves_with_a_token_starts_once_and_stops(tmp_path):
     try:
         _helper(home, "serve", "--port", "0", "--detach", check=True)
         info = _wait_server(home)
+        assert info["state"] == "ready"
         token = (home / "token").read_text().strip()
         assert oct((home / "token").stat().st_mode & 0o777) == "0o600"
         assert oct(home.stat().st_mode & 0o777) == "0o700"
@@ -74,7 +86,7 @@ def test_helper_socket_is_private(tmp_path):
         _helper(home, "serve", "--detach", check=True)
         for _ in range(150):
             server = home / "run" / "server.json"
-            if server.exists():
+            if server.exists() and "socket" in server.read_text():
                 break
             time.sleep(0.2)
         socket_path = Path(json.loads(server.read_text())["socket"])
@@ -251,7 +263,8 @@ async def test_self_client_reaches_the_helper_through_its_socket(tmp_path, monke
     try:
         _helper(home, "serve", "--detach", check=True)
         for _ in range(150):
-            if (home / "run" / "server.json").exists():
+            server = home / "run" / "server.json"
+            if server.exists() and "socket" in server.read_text():
                 break
             time.sleep(0.2)
         info = json.loads((home / "run" / "server.json").read_text())
@@ -297,3 +310,152 @@ def test_a_newer_helper_replaces_an_older_running_one(tmp_path):
         assert again["pid"] == after["pid"]
     finally:
         _helper(home, "stop")
+
+
+@pytest.mark.asyncio
+async def test_the_helper_announces_itself_only_after_startup_finishes():
+    import uvicorn
+
+    from app.helper_server import ReadyServer
+
+    events: list[str] = []
+
+    async def app(scope, receive, send):
+        assert scope["type"] == "lifespan"
+        await receive()
+        events.append("startup-begin")
+        await asyncio.sleep(0.3)  # the snapshot and migrations
+        events.append("startup-end")
+        await send({"type": "lifespan.startup.complete"})
+        await receive()
+        await send({"type": "lifespan.shutdown.complete"})
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    server = ReadyServer(uvicorn.Config(app, log_level="warning", lifespan="on"), on_ready=lambda: events.append("ready"))
+    task = asyncio.create_task(server.serve(sockets=[listener]))
+    for _ in range(100):
+        if "ready" in events:
+            break
+        await asyncio.sleep(0.05)
+    server.should_exit = True
+    await task
+    assert events == ["startup-begin", "startup-end", "ready"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_startup_is_never_announced():
+    import uvicorn
+
+    from app.helper_server import ReadyServer
+
+    async def app(scope, receive, send):
+        await receive()
+        await send({"type": "lifespan.startup.failed", "message": "migration failed"})
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    announced = []
+    server = ReadyServer(uvicorn.Config(app, log_level="critical", lifespan="on"), on_ready=lambda: announced.append(True))
+    await server.serve(sockets=[listener])
+    assert announced == [] and not server.started
+
+
+def test_a_helper_whose_startup_fails_says_so_in_server_json(tmp_path):
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DOLPHIN_") and k != "DATABASE_URL"}
+    _isolate(env, tmp_path)
+    env.update(
+        DOLPHIN_HOME=str(home),
+        DOLPHIN_GBRAIN="off",
+        # A database in a folder that does not exist: init_db fails in startup.
+        DATABASE_URL=f"sqlite+aiosqlite:///{tmp_path / 'missing' / 'dolphin.db'}",
+    )
+    result = subprocess.run([sys.executable, "-m", "app.helper", "serve", "--port", "0"], cwd=BACKEND, env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 3, result.stderr[-2000:]
+    info = json.loads((home / "run" / "server.json").read_text())
+    assert info["state"] == "failed"
+    assert "port" not in info and "socket" not in info
+
+
+def test_helper_log_is_rotated_past_its_limit(tmp_path):
+    from app.helper import rotate_log
+
+    log = tmp_path / "helper.log"
+    assert rotate_log(log, max_bytes=10) is False  # no log yet
+    log.write_text("small")
+    assert rotate_log(log, max_bytes=10) is False
+    log.write_text("x" * 11)
+    assert rotate_log(log, max_bytes=10) is True
+    assert not log.exists() and (tmp_path / "helper.log.1").read_text() == "x" * 11
+    log.write_text("y" * 11)
+    assert rotate_log(log, max_bytes=10) is True  # one generation: .1 is replaced
+    assert (tmp_path / "helper.log.1").read_text() == "y" * 11
+
+
+def test_a_helper_that_fails_before_its_server_runs_says_failed(tmp_path):
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DOLPHIN_") and k != "DATABASE_URL"}
+    _isolate(env, tmp_path)
+    env.update(DOLPHIN_HOME=str(home), DOLPHIN_GBRAIN="off")
+    # A port that is already taken: bind fails after "starting" was written.
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen(1)
+    try:
+        result = subprocess.run([sys.executable, "-m", "app.helper", "serve", "--port", str(taken.getsockname()[1])],
+                                cwd=BACKEND, env=env, capture_output=True, text=True, timeout=60)
+    finally:
+        taken.close()
+    assert result.returncode != 0
+    assert json.loads((home / "run" / "server.json").read_text())["state"] == "failed"
+
+
+def test_a_stop_during_startup_leaves_no_failed_record(tmp_path):
+    import signal
+
+    home = tmp_path / "home"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DOLPHIN_") and k != "DATABASE_URL"}
+    _isolate(env, tmp_path)
+    env.update(DOLPHIN_HOME=str(home), DOLPHIN_GBRAIN="off")
+    proc = subprocess.Popen([sys.executable, "-m", "app.helper", "serve", "--port", "0"], cwd=BACKEND, env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        # Stop it the moment it is ready, then again-safe: a requested stop never leaves "failed".
+        info = _wait_server(home)
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert info["state"] == "ready"
+    assert not (home / "run" / "server.json").exists()
+
+
+def test_helper_mode_asks_before_setting_up_memory(monkeypatch, tmp_path):
+    from app import helper
+
+    environ = {key: value for key, value in os.environ.items() if key != "DOLPHIN_GBRAIN"}
+    monkeypatch.setattr(os, "environ", environ)
+    helper.configure_environment(tmp_path, "t" * 40)
+    assert environ["DOLPHIN_GBRAIN"] == "ask"
+
+
+# Shared with dolphin-desktop/test/releases.test.mjs (VERSION_ORDER): the app
+# and the helper must agree on which version is newer.
+VERSION_ORDER = ["0.1.11", "0.2.0", "0.2.1-beta.1", "0.2.1-beta.2", "0.2.1-beta.10", "0.2.1-rc.1", "0.2.1", "0.10.0"]
+
+
+def test_a_beta_helper_orders_with_the_releases_around_it(monkeypatch):
+    from app import helper
+
+    keys = [helper._version_key(version) for version in VERSION_ORDER]
+    assert keys == sorted(keys) and len(set(keys)) == len(keys)
+    monkeypatch.setattr(helper, "VERSION", "0.2.1-beta.1")
+    assert helper._older("0.2.0")
+    assert not helper._older("0.2.1")
+    assert helper._older("nonsense")

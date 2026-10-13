@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FolderGit2, FolderOpen, Server } from 'lucide-react';
+import type { AgentCli } from './api';
 import { useApi } from './apiContext';
+import FirstRunChecklist from './FirstRunChecklist';
 import './desktopStart.css';
 
 /* Dolphin Desktop's first run, in a machine's part of the project list: open a
@@ -13,12 +15,16 @@ function shortPath(path: string) {
   return path.replace(/^\/(home|Users)\/[^/]+/, '~');
 }
 
-export default function DesktopStart({ machine, onOpenFolder, onLink, onConnect }: {
+export default function DesktopStart({ machine, onOpenFolder, onLink, onConnect, onInstall, onSignIn }: {
   /** Another machine's name; this computer's start says nothing about where. */
   machine?: string;
   onOpenFolder: () => void;
   onConnect?: () => void;
   onLink: (repo: Repo) => Promise<void>;
+  /** The checklist's Install: runs the installer in a new terminal. */
+  onInstall?: (agent: AgentCli) => Promise<void> | void;
+  /** The checklist's Sign In: starts the agent, which asks the user to sign in. */
+  onSignIn?: (agent: 'claude' | 'codex') => Promise<void> | void;
 }) {
   const { request } = useApi();
   const [repos, setRepos] = useState<Repo[] | null>(null);
@@ -30,8 +36,9 @@ export default function DesktopStart({ machine, onOpenFolder, onLink, onConnect 
 
   return (
     <section className="desktop-start" aria-label={machine ? `Get started on ${machine}` : 'Get started'}>
+      <FirstRunChecklist onInstall={onInstall} onSignIn={onSignIn} />
       <p>{machine ? `Open a folder on ${machine} to start.` : 'Open a folder to start.'} Each project gets its own terminals and tasks.</p>
-      <button type="button" className="desktop-start-open" onClick={onOpenFolder}>
+      <button type="button" className="desktop-start-open desktop-start-primary" onClick={onOpenFolder}>
         <FolderOpen size={14} aria-hidden="true" />
         Open Folder
       </button>

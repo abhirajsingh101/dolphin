@@ -82,12 +82,6 @@
   font-size: var(--fs-xs);
 }
 
-.new-session-option code {
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  overflow-wrap: anywhere;
-}
-
 .new-session-option:hover:not(:disabled),
 .new-session-option:focus-visible {
   border-color: var(--border-interactive);
@@ -191,4 +185,57 @@
   .remove-project-actions button {
     transition: none;
   }
+}
+
+.new-session-number {
+  display: inline-grid; flex: 0 0 20px; width: 20px; height: 20px; margin-top: 1px; place-items: center;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-2xs);
+}
+
+.new-session-command {
+  display: block; width: fit-content; max-width: 100%; margin-top: 4px; padding: 2px 6px;
+  border-radius: var(--r-sm); background: var(--surface-2);
+  font-family: var(--font-mono); font-size: var(--fs-2xs); overflow-wrap: anywhere;
+}
+
+.new-session-worktree {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.new-session-worktree small {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.new-session-worktree .new-session-problem {
+  color: var(--danger);
+}
+
+.new-session-branch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.new-session-branch input {
+  flex: 1;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-interactive);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.new-session-branch input[aria-invalid='true'] {
+  border-color: var(--danger);
 }

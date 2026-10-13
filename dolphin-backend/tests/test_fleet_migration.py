@@ -24,7 +24,7 @@ FLEET_TABLES = {
 }
 PREVIOUS_HEAD = "f09d7b6a2e10"
 FLEET_REVISION = "f3537bbb1a21"
-HEAD = "0e469321b805"
+HEAD = "c41d7e9a2b58"
 
 
 def _tables(path):

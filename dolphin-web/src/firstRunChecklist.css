@@ -1,0 +1,53 @@
+/* Dolphin Desktop's first-run checklist, inside the start panel (desktopStart.css). */
+
+.desktop-start .first-run {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.desktop-start .first-run ul {
+  gap: 0;
+}
+
+.desktop-start .first-run-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  color: var(--glass-text);
+}
+
+.desktop-start .first-run-item > svg {
+  flex: none;
+  color: var(--glass-muted);
+}
+
+.desktop-start .first-run-item.is-done > svg {
+  color: var(--glass-accent);
+}
+
+.desktop-start .first-run-item > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.desktop-start .first-run-item small {
+  color: var(--glass-muted-small);
+  overflow-wrap: anywhere;
+}
+
+.desktop-start .first-run-item button,
+.desktop-start .first-run .first-run-again {
+  flex: none;
+  width: auto;
+  padding: var(--sp-1) var(--sp-2);
+  border-color: var(--glass-edge);
+}
+
+.desktop-start .first-run .first-run-again {
+  justify-self: start;
+  border-color: transparent;
+  color: var(--glass-muted-small);
+  text-decoration: underline;
+}

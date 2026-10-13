@@ -20,6 +20,12 @@ export type MachineLink = {
   offerKey: boolean;
   apiBase: string | null;
   token: string | null;
+  /** Moves each time this machine's link comes back or gets a new token or
+      address (dolphin-desktop/src/link-epoch.ts). Always 0 in the web app. */
+  epoch: number;
+  /** SSH only: this computer's SSH agent is forwarded to new sessions there (off unless turned on). */
+  agentForwarding?: boolean;
+  agentError?: string | null;
 };
 
 type Bridge = {
@@ -31,8 +37,16 @@ type Bridge = {
   forgetMachine?: (target: string) => Promise<void>;
   reconnect?: (target: string) => void;
   setupKey?: (target: string) => Promise<{ ok?: boolean; error?: string }>;
+  setAgentForwarding?: (target: string, on: boolean) => Promise<{ ok?: boolean; error?: string }>;
   dismissKey?: (target: string) => void;
+  openPort?: (machine: string, port: number) => Promise<{ url?: string; error?: string }>;
+  openUrl?: (machine: string, url: string) => Promise<{ url?: string; error?: string }>;
+  remoteLog?: (target: string) => Promise<{ ok?: boolean; file?: string; error?: string }>;
   onConnectOpen?: (listener: () => void) => (() => void) | void;
+  /** A click on a system notification (main.ts): open this session. */
+  onOpenSession?: (listener: (target: { machine: string; projectId: string; session: string }) => void) => (() => void) | void;
+  notify?: (payload: { title: string; body: string; machine: string; projectId: string; session: string }) => void;
+  setSystemNotifications?: (enabled: boolean) => void;
 };
 
 export const machineBridge = (): Bridge | undefined => (window as { dolphinDesktop?: Bridge }).dolphinDesktop;
@@ -77,4 +91,18 @@ export function filterMachines(machines: Machine[], query: string): Machine[] {
   };
   return machines.map((machine) => ({ machine, score: score(machine) })).filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score).map((item) => item.machine);
+}
+
+/** `machine:epoch`, the key that makes an open terminal attach again (spec: "Machine link epoch").
+ *  The machine comes from the target itself, then the project list; while it is still unknown
+ *  in desktop mode there is no key, so it cannot flip from a guess to the real value. */
+export function terminalReconnectKey(
+  target: { projectId: string; machine?: string },
+  projects: { id: string; machine: string }[],
+  links: { id: string; epoch: number }[],
+  desktop = false,
+): string | undefined {
+  const machine = target.machine ?? projects.find((project) => project.id === target.projectId)?.machine ?? (desktop ? undefined : 'local');
+  if (!machine) return undefined;
+  return `${machine}:${links.find((link) => link.id === machine)?.epoch ?? 0}`;
 }

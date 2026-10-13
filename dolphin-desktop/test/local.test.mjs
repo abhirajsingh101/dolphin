@@ -2,11 +2,11 @@
 // and show System Health for this machine. Run with `npm test` (xvfb-run).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { teardown } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -22,6 +22,10 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     await window.waitForURL(/app:\/\/dolphin\/desktop\.html/, { timeout: 90_000 });
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor({ timeout: 30_000 });
     await window.getByText(/sessions in view/).waitFor({ timeout: 30_000 });
+    // This computer connected once: its link's epoch moved from 0 to 1.
+    const local = await window.evaluate(() => window.dolphinDesktop.machineList().find((m) => m.id === 'local'));
+    assert.equal(local.state, 'connected');
+    assert.equal(local.epoch, 1);
     assert.equal(await window.getByRole('link', { name: 'Missions' }).count(), 0);
 
     // No separate title bar: the header is the drag area, its controls stay
@@ -46,9 +50,26 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
       assert.ok(chrome.headerPadding >= chrome.controlsWidth - 18, `header leaves room for window controls: ${JSON.stringify(chrome)}`);
     }
     await window.screenshot({ path: path.join(shots, 'desktop-workspace.png') });
+    // Machine sections: one sticky 28px row each.
+    const head = await window.locator('.glass-machine-head').first().evaluate((element) => ({ position: getComputedStyle(element).position, height: Math.round(element.getBoundingClientRect().height) }));
+    assert.deepEqual(head, { position: 'sticky', height: 28 });
 
+    // Keyboard commands are menu items: they open the palette and Settings.
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('palette').click());
+    await window.getByRole('dialog', { name: 'Command palette' }).waitFor();
+    await window.keyboard.press('Escape');
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('settings').click());
+    await window.getByRole('dialog', { name: 'Settings' }).waitFor();
+    await window.screenshot({ path: path.join(shots, 'desktop-settings.png') });
+    await window.keyboard.press('Escape');
+
+    await window.getByRole('textbox', { name: 'Message Dolphin' }).fill('Keep this while I check health');
     await window.getByRole('link', { name: 'System Health' }).click();
     await window.getByRole('link', { name: /Back to Workspace/ }).waitFor();
+    // An overlay: the workspace stays mounted underneath, out of reach.
+    assert.equal(await window.locator('.glass-workspace').count(), 1);
+    assert.equal(await window.locator('.glass-workspace').getAttribute('inert'), '');
+    assert.equal(await window.locator('.glass-health').getAttribute('aria-modal'), 'true');
     await window.getByText(/CPU/).first().waitFor({ timeout: 30_000 });
     await window.waitForTimeout(3000);
     await window.screenshot({ path: path.join(shots, 'desktop-health.png') });
@@ -74,6 +95,15 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
 
     await window.getByRole('link', { name: /Back to Workspace/ }).click();
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
+    assert.equal(await window.getByRole('textbox', { name: 'Message Dolphin' }).inputValue(), 'Keep this while I check health');
+    assert.equal(await window.locator('.glass-workspace').getAttribute('inert'), null);
+    // A machine that is not connected: said plainly, never this computer's numbers.
+    await window.evaluate(() => { location.hash = '#/health/gpu-box'; });
+    await window.getByText('gpu-box is not connected.').waitFor();
+    assert.equal(await window.getByText(/CPU/).count(), 0);
+    await window.keyboard.press('Escape');
+    await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
+    await window.getByRole('textbox', { name: 'Message Dolphin' }).fill('');
 
     // Motion: dialogs scale in from their scrim; reduced motion turns it off.
     await window.getByRole('button', { name: 'Open command palette' }).click();
@@ -86,13 +116,7 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     await window.keyboard.press('Escape');
     await window.emulateMedia({ reducedMotion: 'no-preference' });
   } finally {
-    // The app exits directly on quit (see main.ts will-quit), which Playwright's
-    // close() does not notice; wait for the process instead.
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env: { ...process.env, DOLPHIN_HOME: home } }); } catch { /* already stopped */ }
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [home], remove: [home] });
   }
 });
 
@@ -117,10 +141,6 @@ test('without netdata, System Health uses the built-in monitor; + opens the fold
     await window.waitForTimeout(6000);
     await window.screenshot({ path: path.join(shots, 'desktop-health-native.png') });
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env: { ...process.env, DOLPHIN_HOME: home } }); } catch { /* already stopped */ }
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [home], remove: [home] });
   }
 });

@@ -4,11 +4,12 @@
 // scratch folder, so the user's real agent settings are never touched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { teardown } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -18,7 +19,7 @@ test('one Turn On gives the installed agents notifications and Dolphin\'s memory
   const home = mkdtempSync(path.join(tmpdir(), 'dmemo-'));
   const dolphinHome = path.join(home, '.dolphin-server');
   const { TMUX: _t, TMUX_PANE: _p, ...inherited } = process.env;
-  const env = { ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, DOLPHIN_GBRAIN: 'auto', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
+  const env = { ...inherited, HOME: home, TMUX_TMPDIR: path.join(home, 'tmux'), DOLPHIN_HOME: dolphinHome, DOLPHIN_GBRAIN: 'auto', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
   const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
   try {
     const window = await app.firstWindow();
@@ -36,10 +37,6 @@ test('one Turn On gives the installed agents notifications and Dolphin\'s memory
     if (has('claude')) assert.match(readFileSync(path.join(home, '.claude.json'), 'utf8'), /"dolphin-memory"/);
     if (has('codex')) assert.match(readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8'), /mcp_servers\.dolphin-memory/);
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env }); } catch { /* not running */ }
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [[dolphinHome, { env }]], remove: [home] });
   }
 });

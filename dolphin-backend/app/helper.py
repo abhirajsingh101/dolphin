@@ -26,6 +26,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import socket
@@ -36,6 +37,9 @@ from pathlib import Path
 from .version import VERSION
 
 DESKTOP_ORIGIN = "app://dolphin"
+
+# helper.log past this size becomes helper.log.1 when a helper starts.
+LOG_LIMIT_BYTES = 5 * 1024 * 1024
 
 
 def home() -> Path:
@@ -78,7 +82,7 @@ def configure_environment(base: Path, token: str) -> None:
         "DOLPHIN_FLEET_ENABLED": "0",
         "DOLPHIN_CORS_ORIGINS": DESKTOP_ORIGIN,
         "DOLPHIN_SYSTEM_HEALTH_SOURCE": "auto",
-        "DOLPHIN_GBRAIN": "auto",
+        "DOLPHIN_GBRAIN": "ask",  # memory downloads ~400 MB: only once the user turns it on
         "DOLPHIN_TERMINAL_ATTACHMENT_ROOT": str(paths["data"] / "terminal-attachments"),
     }
     for key, value in defaults.items():
@@ -175,6 +179,17 @@ def _write_json(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
+def rotate_log(path: Path, max_bytes: int = LOG_LIMIT_BYTES) -> bool:
+    """Keep helper.log bounded: past max_bytes it becomes helper.log.1 (one generation)."""
+    try:
+        if path.stat().st_size <= max_bytes:
+            return False
+    except FileNotFoundError:
+        return False
+    os.replace(path, path.with_name(path.name + ".1"))
+    return True
+
+
 def _detach(log: Path) -> None:
     """Double fork so the helper outlives the SSH session that started it."""
     if os.fork() > 0:
@@ -187,6 +202,14 @@ def _detach(log: Path) -> None:
     os.dup2(null, 0)
     os.dup2(descriptor, 1)
     os.dup2(descriptor, 2)
+
+
+def _mark_failed(base: Path, starting: dict) -> None:
+    try:
+        if read_server(base) == starting:
+            _write_json(_paths(base)["server"], {**starting, "state": "failed"})
+    except OSError:
+        pass
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -207,6 +230,7 @@ def serve(args: argparse.Namespace) -> int:
         print(json.dumps(running))
         return 0
     if args.detach:
+        rotate_log(paths["logs"] / "helper.log")
         _detach(paths["logs"] / "helper.log")
 
     lock = open(paths["lock"], "a+")
@@ -216,64 +240,93 @@ def serve(args: argparse.Namespace) -> int:
         print(json.dumps(read_server(base) or {"running": True}))
         return 0
 
-    token = ensure_token(paths["token"])
-    configure_environment(base, token)
-    tmux_wrapper = configure_tmux(base)
-    from .agent_hooks_setup import write_shim
+    # Said at once, so the app can tell "still starting" from "never started":
+    # a starting file whose pid has died, or a failed one, means startup
+    # failed, and logs/helper.log says why.
+    starting = {"version": VERSION, "pid": os.getpid(), "started_at": time.time(), "state": "starting"}
+    _write_json(paths["server"], starting)
 
-    write_shim(_self_command())
-
-    import uvicorn
-
-    from .main import app
-
-    info: dict = {"version": VERSION, "pid": os.getpid(), "started_at": time.time(),
-                  "tmux": "bundled" if tmux_wrapper else "system"}
-    config_kwargs: dict = {"log_level": "warning", "proxy_headers": False, "access_log": False}
-    if args.port is not None:
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("127.0.0.1", args.port))
-        listener.listen(128)
-        info["port"] = listener.getsockname()[1]
-        os.environ["DOLPHIN_SELF_PORT"] = str(info["port"])
-    else:
-        path = Path(args.socket).expanduser() if args.socket else paths["socket"]
-        if len(os.fsencode(path)) > 100:
-            # sun_path holds 104 (macOS) to 108 (Linux) bytes. A deep home
-            # directory overflows it, so fall back to a private short path;
-            # server.json records where the socket really is.
-            # One name per home, so two helpers never share (and unlink) a socket.
-            digest = hashlib.sha256(str(base).encode()).hexdigest()[:12]
-            path = Path(f"/tmp/dolphin-{os.getuid()}") / f"{digest}.sock"
-            path.parent.mkdir(mode=0o700, exist_ok=True)
-            if path.parent.stat().st_uid != os.getuid():
-                raise SystemExit(f"{path.parent} belongs to another user")
-            os.chmod(path.parent, 0o700)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() or path.is_symlink():
-            path.unlink()
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(str(path))
-        os.chmod(path, 0o600)
-        listener.listen(128)
-        info["socket"] = str(path)
-        os.environ["DOLPHIN_SELF_SOCKET"] = str(path)
-
-    _write_json(paths["server"], info)
-    print(json.dumps(info), flush=True)
     try:
+        token = ensure_token(paths["token"])
+        configure_environment(base, token)
+        tmux_wrapper = configure_tmux(base)
+        # Agents installed under ~/.local/bin or nvm are on the login shell's
+        # PATH, not on the one an app or `ssh host cmd` starts with. Read once,
+        # in the background, so startup never waits on a slow shell profile.
+        import threading
+
+        from . import agent_clis
+
+        threading.Thread(target=agent_clis.adopt_login_path, name="login-path", daemon=True).start()
+        from .agent_hooks_setup import write_shim
+
+        write_shim(_self_command())
+
+        import uvicorn
+
+        from .helper_server import ReadyServer
+        from .main import app
+
+        info: dict = {**starting, "tmux": "bundled" if tmux_wrapper else "system", "state": "ready"}
+        config_kwargs: dict = {"log_level": "warning", "proxy_headers": False, "access_log": False}
+        if args.port is not None:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", args.port))
+            listener.listen(128)
+            info["port"] = listener.getsockname()[1]
+            os.environ["DOLPHIN_SELF_PORT"] = str(info["port"])
+        else:
+            path = Path(args.socket).expanduser() if args.socket else paths["socket"]
+            if len(os.fsencode(path)) > 100:
+                # sun_path holds 104 (macOS) to 108 (Linux) bytes. A deep home
+                # directory overflows it, so fall back to a private short path;
+                # server.json records where the socket really is.
+                # One name per home, so two helpers never share (and unlink) a socket.
+                digest = hashlib.sha256(str(base).encode()).hexdigest()[:12]
+                path = Path(f"/tmp/dolphin-{os.getuid()}") / f"{digest}.sock"
+                path.parent.mkdir(mode=0o700, exist_ok=True)
+                if path.parent.stat().st_uid != os.getuid():
+                    raise SystemExit(f"{path.parent} belongs to another user")
+                os.chmod(path.parent, 0o700)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() or path.is_symlink():
+                path.unlink()
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(path))
+            os.chmod(path, 0o600)
+            listener.listen(128)
+            info["socket"] = str(path)
+            os.environ["DOLPHIN_SELF_SOCKET"] = str(path)
+
+        def announce() -> None:
+            # After the app's startup (snapshot, migrations): only now may a client connect.
+            _write_json(paths["server"], info)
+            print(json.dumps(info), flush=True)
+
         # Pre-bound sockets: uvicorn's fd= option assumes AF_UNIX, sockets= takes either.
-        uvicorn.Server(uvicorn.Config(app, **config_kwargs)).run(sockets=[listener])
+        server = ReadyServer(uvicorn.Config(app, **config_kwargs), on_ready=announce)
+    except BaseException:
+        # Any failure before the server runs leaves "failed", never a stale "starting".
+        _mark_failed(base, starting)
+        raise
+    try:
+        server.run(sockets=[listener])
     finally:
         try:
-            if read_server(base) == info:
+            current = read_server(base)
+            if current == info:
                 paths["server"].unlink()
+            elif current == starting:
+                if server.started:  # a requested stop that arrived during startup
+                    paths["server"].unlink()
+                else:
+                    _write_json(paths["server"], {**starting, "state": "failed"})
             if "socket" in info:
                 Path(info["socket"]).unlink(missing_ok=True)
         except OSError:
             pass
-    return 0
+    return 0 if server.started else 3
 
 
 def _self_command() -> list[str]:
@@ -289,11 +342,17 @@ def status(_args: argparse.Namespace) -> int:
     return 0 if running else 3
 
 
-def _version_key(version: object) -> tuple[int, ...]:
-    try:
-        return tuple(int(part) for part in str(version).split("."))
-    except ValueError:
-        return (0,)
+def _version_key(version: object) -> tuple:
+    """Semver order, prereleases included: 0.2.1-beta.2 < 0.2.1-beta.10 < 0.2.1.
+    Anything unreadable sorts before every real version."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?", str(version))
+    if not match:
+        return ((0, 0, 0), 0, ())
+    core = tuple(int(part) for part in match.group(1, 2, 3))
+    if match.group(4) is None:
+        return (core, 1, ())
+    parts = tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in match.group(4).split("."))
+    return (core, 0, parts)
 
 
 def _older(version: object) -> bool:

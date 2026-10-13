@@ -1,0 +1,228 @@
+/* The workflow panels (diff, ports, usage, history, import). Same scrim,
+   elevation and radius as New Session and the project picker: one dialog look.
+   Loaded only with the lazy panels. */
+
+.workflow-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding-top: 8vh;
+  background: var(--scrim);
+  backdrop-filter: blur(3px);
+}
+
+.workflow-panel {
+  display: flex;
+  flex-direction: column;
+  width: 92vw;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow: hidden;
+  border: 1px solid var(--border-interactive);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--sh-3);
+}
+
+/* The panel takes focus only so the keyboard starts inside it. It is not a
+   control and shows no ring of its own: its border beside an outline read
+   as a double ring. Controls inside keep theirs. */
+.workflow-scrim .workflow-panel:focus,
+.workflow-scrim .workflow-panel:focus-visible {
+  outline: none;
+}
+
+.workflow-panel--wide {
+  max-width: 1100px;
+}
+
+.workflow-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-header h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.workflow-header small {
+  flex: 1;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.workflow-body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.workflow-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.workflow-note {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.workflow-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-list > li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.workflow-list > li > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.workflow-list small {
+  display: block;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diff-file {
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.diff-file > summary {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.diff-file > summary small {
+  color: var(--text-3);
+}
+
+.diff-hunk {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.diff-hunk-header td {
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.diff-line[data-kind="add"] {
+  background: var(--ok-soft);
+}
+
+.diff-line[data-kind="del"] {
+  background: var(--danger-soft);
+}
+
+.diff-num {
+  width: 3.5em;
+  padding: 0 var(--sp-2);
+  color: var(--text-3);
+  text-align: right;
+  user-select: none;
+}
+
+.diff-code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-act button {
+  opacity: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: opacity var(--d1) var(--ease);
+}
+
+.diff-line:hover .diff-act button,
+.diff-act button:focus-visible {
+  opacity: 1;
+}
+
+.diff-comment-row td {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.diff-comment-row textarea {
+  width: 100%;
+  min-height: 4em;
+  border: 1px solid var(--border-interactive);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.diff-comment {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+  font-family: var(--font-sans);
+}
+
+.workflow-search {
+  width: 100%;
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-interactive);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.workflow-list mark {
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: inherit;
+}

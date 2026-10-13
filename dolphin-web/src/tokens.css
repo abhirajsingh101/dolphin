@@ -220,6 +220,7 @@ body {
  --glass-term-sheen: rgba(211,233,255,.05);
  --glass-term-toolbar: rgba(144,187,232,.045);
  --glass-term-fullscreen: linear-gradient(145deg,#20364d,#101e30);
+ --glass-term-solid: #101e30;
  --glass-term-copy: #172a3e;
  --glass-float-shadow: rgba(10,25,45,.18);
  --glass-dialog-shadow: rgba(10,25,45,.28);
@@ -227,6 +228,8 @@ body {
  --glass-bg: #cbdcf0;
  --glass-text: #192943;
  --glass-muted: #5b708d;
+ --glass-muted-small: #4a5d78;
+ --glass-scrollbar: rgba(25,41,67,.24);
  --glass-panel: rgba(242,248,255,.54);
  --glass-edge: rgba(255,255,255,.88);
  --glass-shadow: 0 16px 42px rgba(40,73,115,.1), 0 2px 6px rgba(40,73,115,.04), inset 0 1px 0 rgba(255,255,255,1), inset 0 -1px 0 rgba(255,255,255,.48);
@@ -250,6 +253,8 @@ body {
  --glass-bg: #091421;
  --glass-text: #e7effb;
  --glass-muted: #a2b4cb;
+  --glass-muted-small: #b4c4d8;
+  --glass-scrollbar: rgba(186,214,245,.22);
  --glass-panel: rgba(26,42,60,.68);
  --glass-edge: rgba(157,197,231,.25);
  --glass-shadow: 0 16px 48px rgba(0,0,0,.23), inset 0 1px 0 rgba(200,228,255,.07);

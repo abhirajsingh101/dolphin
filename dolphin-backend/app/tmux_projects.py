@@ -27,17 +27,27 @@ def _state_file() -> Path:
 
 def imported() -> set[str]:
     try:
-        return set(json.loads(_state_file().read_text()))
-    except (OSError, ValueError, TypeError):
+        data = json.loads(_state_file().read_text())
+    except (OSError, ValueError):
         return set()
+    # Anything but a list of paths is a damaged file, which reads as empty.
+    if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+        return set()
+    return set(data)
 
 
 def remember(paths: set[str]) -> None:
     state = _state_file()
     state.parent.mkdir(parents=True, exist_ok=True)
-    temporary = state.with_suffix(".tmp")
-    temporary.write_text(json.dumps(sorted(paths)))
-    os.replace(temporary, state)
+    temporary = state.with_suffix(f".{os.getpid()}.tmp")
+    try:
+        with open(temporary, "w") as handle:
+            handle.write(json.dumps(sorted(paths)))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, state)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def project_dir(raw: str, roots: list[Path]) -> Path | None:

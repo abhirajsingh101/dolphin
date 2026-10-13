@@ -2,11 +2,12 @@
 // HOME is a scratch folder, so the user's real Claude/Codex settings are never touched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { teardown } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -15,9 +16,11 @@ const has = (cli) => { try { execFileSync('sh', ['-c', `command -v ${cli}`]); re
 test('Turn On adds Dolphin\'s hook for the agents installed here', { timeout: 120_000, skip: !has('claude') && !has('codex') }, async () => {
   const home = mkdtempSync(path.join(tmpdir(), 'dhome-'));
   const dolphinHome = path.join(home, '.dolphin-server');
+  // Never the user's tmux server: its sessions would be offered as projects.
+  const { TMUX: _t, TMUX_PANE: _p, ...scrubbed } = process.env;
   const app = await electron.launch({
     args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root],
-    env: { ...process.env, HOME: home, DOLPHIN_HOME: dolphinHome, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
+    env: { ...scrubbed, HOME: home, TMUX_TMPDIR: path.join(home, 'tmux'), DOLPHIN_HOME: dolphinHome, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off' },
   });
   try {
     const window = await app.firstWindow();
@@ -36,10 +39,6 @@ test('Turn On adds Dolphin\'s hook for the agents installed here', { timeout: 12
     }
     assert.ok(existsSync(shim));
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env: { ...process.env, HOME: home, DOLPHIN_HOME: dolphinHome } }); } catch { /* not running */ }
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [[dolphinHome, { env: { ...process.env, HOME: home } }]], remove: [home] });
   }
 });

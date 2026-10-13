@@ -11,6 +11,8 @@ export default defineConfig({
   build: {
     outDir: 'dist-desktop',
     emptyOutDir: true,
+    // The bundle budget (scripts/check-bundle-budget.mjs) reads this.
+    manifest: true,
     rollupOptions: { input: 'desktop.html' },
   },
 });

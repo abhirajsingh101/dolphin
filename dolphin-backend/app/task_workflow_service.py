@@ -362,7 +362,9 @@ async def _resolve_task_placement(
     task_text = f"{task.title}\n{task.description or ''}".strip()
     task_tokens = _placement_tokens(task_text)
     result = await db.execute(
-        select(Project).order_by(Project.position, Project.created_at, Project.id)
+        select(Project)
+        .where(Project.is_hidden.is_(False))
+        .order_by(Project.position, Project.created_at, Project.id)
     )
     candidates: list[_PlacementCandidate] = []
     for project in result.scalars().all():

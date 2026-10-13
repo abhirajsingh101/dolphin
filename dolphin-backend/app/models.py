@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import relationship
 
@@ -45,6 +46,10 @@ class Project(Base):
     color = Column(String, default="#6B7280")
     path = Column(String, nullable=True)
     is_inbox = Column(Boolean, default=False)
+    # A project the user never sees: the machine's own workspace root, made
+    # on demand so tmux sessions outside every project can still be opened
+    # (control center "Other sessions"). Left out of every project list.
+    is_hidden = Column(Boolean, default=False, server_default=false(), nullable=False)
     position = Column(Integer, default=0)
     serial_queue_id = Column(String, nullable=True, index=True)
     serial_queue_status = Column(
@@ -441,6 +446,29 @@ class Run(Base):
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class SessionLink(Base):
+    """What Dolphin knows about a tmux session it launched.
+
+    The tmux session is the source of truth for whether the session exists.
+    This row adds what tmux cannot hold: the project it belongs to, the todo
+    it works on, and, for a worktree session, its worktree, branch and the
+    commit it started from (the diff panel's base, the archive check's target).
+    """
+
+    __tablename__ = "session_links"
+
+    session_name = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+    agent = Column(String, nullable=True)
+    worktree_path = Column(Text, nullable=True)
+    branch = Column(String, nullable=True)
+    base_ref = Column(String, nullable=True)
+    base_sha = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
 
 
 class ChiefThread(Base):

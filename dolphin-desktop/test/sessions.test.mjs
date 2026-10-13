@@ -4,11 +4,11 @@
 // and the user's tmux server is never touched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { teardown, tmuxFor } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -28,8 +28,7 @@ test('first run links a recent repo; New Session installs a missing agent and st
     ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, TMUX_TMPDIR: tmuxDir, SHELL: '/bin/sh', DOLPHIN_WORKSPACE_ROOTS: home,
     PATH: `${fakeBin}:/usr/bin:/bin`, ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off',
   };
-  const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, 'default');
-  const tmux = (...args) => execFileSync('tmux', ['-S', socket, ...args], { env, encoding: 'utf8' });
+  const tmux = tmuxFor(env);
   const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
   try {
     const window = await app.firstWindow();
@@ -48,6 +47,8 @@ test('first run links a recent repo; New Session installs a missing agent and st
     await install.waitFor({ timeout: 15_000 });
     assert.match(await install.innerText(), /npm install -g @openai\/codex/);
     assert.ok(await dialog.getByRole('button', { name: /Shell/ }).isVisible());
+    assert.deepEqual(await dialog.locator('.new-session-number').allInnerTexts(), ['1', '2', '3']);
+    assert.match(await install.locator('code.new-session-command').innerText(), /^npm install -g @openai\/codex$/);
     await window.screenshot({ path: path.join(shots, 'desktop-new-session.png') });
     await install.click();
     await dialog.waitFor({ state: 'detached' });
@@ -64,13 +65,8 @@ test('first run links a recent repo; New Session installs a missing agent and st
     assert.match(pane, /fake npm install -g @openai\/codex/);
     assert.match(pane, /FAKE-CODEX-READY/);
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env }); } catch { /* not running */ }
-    // This test's own tmux server, on its scratch socket; never the user's.
-    try { tmux('kill-server'); } catch { /* none started */ }
-    rmSync(home, { recursive: true, force: true });
+    // The tmux server is this test's own, on its scratch socket; never the user's.
+    await teardown({ app, helpers: [[dolphinHome, { env }]], cleanup: [() => { try { tmux('kill-server'); } catch { /* none started */ } }], remove: [home] });
   }
 });
 
@@ -84,11 +80,9 @@ test('tmux sessions already running become projects; the folder picker names the
     ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, TMUX_TMPDIR: tmuxDir, SHELL: '/bin/sh', DOLPHIN_WORKSPACE_ROOTS: home,
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off',
   };
-  const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, 'default');
-  const tmux = (...args) => execFileSync('tmux', ['-S', socket, ...args], { env, encoding: 'utf8' });
+  const tmux = tmuxFor(env);
   // Started before Dolphin, inside the repo but not at its top. With -S, tmux
   // does not make the socket's folder itself.
-  mkdirSync(path.dirname(socket), { recursive: true, mode: 0o700 });
   tmux('new-session', '-d', '-s', 'api-work', '-c', path.join(home, 'api', 'src'));
   const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
   try {
@@ -102,12 +96,76 @@ test('tmux sessions already running become projects; the folder picker names the
     await picker.getByText('Folders on this computer').waitFor({ timeout: 15_000 });
     await window.keyboard.press('Escape');
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env }); } catch { /* not running */ }
-    // This test's own tmux server, on its scratch socket; never the user's.
-    try { tmux('kill-server'); } catch { /* none started */ }
-    rmSync(home, { recursive: true, force: true });
+    // The tmux server is this test's own, on its scratch socket; never the user's.
+    await teardown({ app, helpers: [[dolphinHome, { env }]], cleanup: [() => { try { tmux('kill-server'); } catch { /* none started */ } }], remove: [home] });
+  }
+});
+
+test('a machine with no project and more than five folders is asked, and nothing is added before the answer', { timeout: 150_000 }, async () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'dsess-'));
+  const dolphinHome = path.join(home, '.dolphin-server');
+  const tmuxDir = path.join(home, 'tmux');
+  const folders = [0, 1, 2, 3, 4, 5].map((index) => path.join(home, `work${index}`));
+  for (const dir of [tmuxDir, ...folders]) mkdirSync(dir, { recursive: true });
+  const { TMUX: _tmux, TMUX_PANE: _pane, ...inherited } = process.env;
+  const env = {
+    ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, TMUX_TMPDIR: tmuxDir, SHELL: '/bin/sh', DOLPHIN_WORKSPACE_ROOTS: home,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off',
+    PATH: '/usr/bin:/bin', // no agents installed, so no Agent setup line
+  };
+  const tmux = tmuxFor(env);
+  folders.forEach((folder, index) => tmux('new-session', '-d', '-s', `w${index}`, '-c', folder));
+  const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
+  try {
+    const window = await app.firstWindow();
+    await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
+    // A project's section; the Other sessions group also mentions these folders.
+    const projectOf = (name) => window.locator('details', { hasText: name }).filter({ hasNotText: 'Other sessions' });
+    const dialog = window.getByRole('dialog', { name: 'Add projects from This Computer' });
+    await dialog.waitFor({ timeout: 30_000 });
+    await dialog.getByRole('heading', { name: 'Add 6 projects from This Computer?' }).waitFor();
+    assert.equal(await projectOf('work0').count(), 0, 'nothing is added before the answer');
+    await dialog.getByRole('checkbox', { name: 'work5' }).uncheck();
+    await window.screenshot({ path: path.join(shots, 'desktop-import-confirm.png') });
+    await dialog.getByRole('button', { name: 'Add 5 projects' }).click();
+    await projectOf('work4').waitFor({ timeout: 15_000 });
+    assert.equal(await projectOf('work5').count(), 0);
+    const remembered = JSON.parse(readFileSync(path.join(dolphinHome, 'data', 'tmux-imported.json'), 'utf8'));
+    assert.ok(remembered.includes(folders[5]), 'the folder not chosen is not offered again');
+  } finally {
+    await teardown({ app, helpers: [[dolphinHome, { env }]], cleanup: [() => { try { tmux('kill-server'); } catch { /* none started */ } }], remove: [home] });
+  }
+});
+
+test('the import question waits for the Agent setup line, then appears even with no project', { timeout: 150_000 }, async () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'dsess-'));
+  const dolphinHome = path.join(home, '.dolphin-server');
+  const tmuxDir = path.join(home, 'tmux');
+  const fakeBin = path.join(home, 'fakebin');
+  const folders = [0, 1, 2, 3, 4, 5].map((index) => path.join(home, `work${index}`));
+  for (const dir of [tmuxDir, fakeBin, ...folders]) mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(fakeBin, 'claude'), '#!/bin/sh\nexit 0\n');
+  chmodSync(path.join(fakeBin, 'claude'), 0o755);
+  const { TMUX: _tmux, TMUX_PANE: _pane, ...inherited } = process.env;
+  const env = {
+    ...inherited, HOME: home, DOLPHIN_HOME: dolphinHome, TMUX_TMPDIR: tmuxDir, SHELL: '/bin/sh', DOLPHIN_WORKSPACE_ROOTS: home,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: '1', DOLPHIN_GBRAIN: 'off', PATH: `${fakeBin}:/usr/bin:/bin`,
+  };
+  const tmux = tmuxFor(env);
+  folders.forEach((folder, index) => tmux('new-session', '-d', '-s', `w${index}`, '-c', folder));
+  const app = await electron.launch({ args: ['--no-sandbox', `--user-data-dir=${path.join(home, 'profile')}`, root], env });
+  try {
+    const window = await app.firstWindow();
+    await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
+    const setup = window.getByRole('region', { name: 'Agent setup' });
+    await setup.getByRole('button', { name: 'Turn On' }).waitFor({ timeout: 30_000 });
+    const dialog = window.getByRole('dialog', { name: 'Add projects from This Computer' });
+    // Give the import time to have been answered with its pending folders.
+    await window.waitForTimeout(3_000);
+    assert.equal(await dialog.count(), 0, 'the question waits while Agent setup needs a click');
+    await setup.getByRole('button', { name: 'Not Now' }).click();
+    await dialog.waitFor({ timeout: 15_000 });
+  } finally {
+    await teardown({ app, helpers: [[dolphinHome, { env }]], cleanup: [() => { try { tmux('kill-server'); } catch { /* none started */ } }], remove: [home] });
   }
 });

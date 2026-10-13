@@ -126,6 +126,23 @@ export default function ProjectPickerDialog({
   const [showHidden, setShowHidden] = useState(false);
   const [groups, setGroups] = useState<ResultGroup[]>([]);
   const [busy, setBusy] = useState(false);
+  // New Folder names the folder in place: Electron has no window.prompt.
+  const [naming, setNaming] = useState(false);
+  const [folderName, setFolderName] = useState('');
+  const newFolderRef = useRef<HTMLButtonElement>(null);
+  const useBtnRef = useRef<HTMLButtonElement>(null);
+  const focusAfterNaming = useRef<'new' | 'use'>('new');
+  const creatingRef = useRef(false);
+  const wasNaming = useRef(false);
+  // The focused field unmounts when naming ends; hand focus back inside the
+  // panel so its Escape and Tab handling keep working.
+  useEffect(() => {
+    if (wasNaming.current && !naming) {
+      (focusAfterNaming.current === 'use' ? useBtnRef : newFolderRef).current?.focus();
+      focusAfterNaming.current = 'new';
+    }
+    wasNaming.current = naming;
+  }, [naming]);
   const [error, setError] = useState<string | null>(null);
   const [rootsAttempt, setRootsAttempt] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -218,11 +235,13 @@ export default function ProjectPickerDialog({
     [loadChildren],
   );
 
-  const createFolder = useCallback(async () => {
+  const folderParent = selected ?? roots[0]?.path ?? null;
+
+  const createFolder = useCallback(async (raw: string) => {
     const parent = selected ?? roots[0]?.path;
-    if (!parent) return;
-    const name = window.prompt(`New folder inside ${parent}`)?.trim();
-    if (!name) return;
+    const name = raw.trim();
+    if (!parent || !name || creatingRef.current) return;
+    creatingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -230,10 +249,14 @@ export default function ProjectPickerDialog({
       await loadChildren(parent);
       if (!mountedRef.current) return;
       setSelected(created.path);
+      focusAfterNaming.current = 'use';
+      setNaming(false);
+      setFolderName('');
     } catch (caught: unknown) {
       if (!mountedRef.current) return;
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
+      creatingRef.current = false;
       if (mountedRef.current) setBusy(false);
     }
   }, [loadChildren, roots, selected]);
@@ -443,20 +466,57 @@ export default function ProjectPickerDialog({
         <footer className="picker-footer">
           <code className="picker-selection">{selected ?? 'No folder selected'}</code>
           <div className="picker-actions">
-            <button
-              className="dt-btn dt-btn--ghost"
-              disabled={busy}
-              onClick={() => void createFolder()}
-              type="button"
-            >
-              <FolderPlus aria-hidden="true" size={14} />
-              New Folder
-            </button>
+            {naming && folderParent ? (
+              <form
+                className="picker-new-folder"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void createFolder(folderName);
+                }}
+              >
+                <input
+                  aria-label={`New folder inside ${folderParent}`}
+                  autoFocus
+                  className="dt-input"
+                  onChange={(event) => setFolderName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Escape') return;
+                    // Escape leaves the name field, not the whole picker.
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!creatingRef.current) setNaming(false);
+                  }}
+                  placeholder="Folder name"
+                  value={folderName}
+                />
+                <button className="dt-btn dt-btn--primary" disabled={busy || !folderName.trim()} type="submit">
+                  Create
+                </button>
+                <button aria-label="Cancel new folder" className="dt-btn dt-btn--ghost" disabled={busy} onClick={() => setNaming(false)} type="button">
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <button
+                className="dt-btn dt-btn--ghost"
+                ref={newFolderRef}
+                disabled={busy || !folderParent}
+                onClick={() => {
+                  setFolderName('');
+                  setNaming(true);
+                }}
+                type="button"
+              >
+                <FolderPlus aria-hidden="true" size={14} />
+                New Folder
+              </button>
+            )}
             <button className="dt-btn dt-btn--ghost" onClick={onClose} type="button">
               Cancel
             </button>
             <button
               className="dt-btn dt-btn--primary"
+              ref={useBtnRef}
               disabled={!selected || busy}
               onClick={() => selected && onPick(selected)}
               type="button"

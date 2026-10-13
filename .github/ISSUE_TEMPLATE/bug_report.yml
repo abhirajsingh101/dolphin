@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in Dolphin does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help → Report an Issue… in Dolphin fills in the version, environment and
+        recent log lines. Home folders, user and host names, addresses and tokens
+        are removed first. Read them before you submit; remove anything you would
+        rather not share.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dolphin version
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, helper and tmux versions.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Recent log lines
+      description: From ~/.dolphin-server/logs/helper.log.
+      render: text

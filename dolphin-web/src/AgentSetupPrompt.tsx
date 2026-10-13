@@ -1,89 +1,116 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
-import { API_BASE, request } from './api';
+import type { Api } from './api';
+import { AGENT_SETUP_CHANGED, BRAIN_CHANGED, memoryStillSettingUp } from './firstRun';
+import { dismissKey, doneMessage, offerFor, type HookRow, type MemoryRow, type SetupOffer } from './agentSetupModel';
 import './composerNotice.css';
 
-/* Dolphin Desktop: one line above the composer that connects the installed
-   agents (Claude Code, Codex) to Dolphin, offering whatever is still missing:
-   - notifications: Dolphin's hook reports each finished turn to the bell;
-   - memory: Dolphin's GBrain as an MCP server, once memory is set up.
-   Turn On does both; nothing changes without that click. */
+/* Dolphin Desktop: one line per machine above the composer, offering what
+   that machine's agents still need (agentSetupModel.ts). Turn On changes that
+   machine only; nothing changes without the click. Not Now is remembered per
+   machine. */
 
-type Agent = 'claude' | 'codex';
-type HookRow = { agent: Agent; cli_found: boolean; installed: boolean };
-type MemoryRow = { agent: Agent; cli_found: boolean; memory_ready: boolean; connected: boolean };
-const NAMES: Record<Agent, string> = { claude: 'Claude Code', codex: 'Codex' };
-const DISMISS_KEY = `dolphin.desktop.agent-setup-dismissed:${API_BASE}`;
+export type SetupSource = { id: string; label?: string; api: Api };
+type Result = { state: 'working' | 'done' | 'failed'; message: string };
 
-const joined = (agents: Agent[]) => [...new Set(agents)].map((agent) => NAMES[agent]).join(' and ');
-
-export default function AgentSetupPrompt() {
-  const [hooks, setHooks] = useState<Agent[]>([]);
-  const [memory, setMemory] = useState<Agent[]>([]);
-  const [state, setState] = useState<'idle' | 'working' | 'done' | 'failed'>('idle');
-  const [message, setMessage] = useState('');
+const dismissed = (machine: string) => { try { return localStorage.getItem(dismissKey(machine)) === '1'; } catch { return false; } };
+export default function AgentSetupPrompt({ sources, onHolding }: {
+  sources: SetupSource[];
+  /** The machines whose setup is still being looked at, or offered and not answered:
+   * a modal over them would cover the click they need. */
+  onHolding?: (machines: string[]) => void;
+}) {
+  const [offers, setOffers] = useState<Record<string, SetupOffer>>({});
+  const [settled, setSettled] = useState<string[]>([]);
+  const settle = (machine: string, done: boolean) => setSettled((all) => {
+    const has = all.includes(machine);
+    if (done === has) return all;
+    return done ? [...all, machine] : all.filter((id) => id !== machine);
+  });
+  const [results, setResults] = useState<Record<string, Result>>({});
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+  const [round, setRound] = useState(0);
+  // The first-run checklist turned notifications or memory on: look again.
+  useEffect(() => {
+    const again = () => setRound((value) => value + 1);
+    window.addEventListener(AGENT_SETUP_CHANGED, again);
+    window.addEventListener(BRAIN_CHANGED, again);
+    return () => { window.removeEventListener(AGENT_SETUP_CHANGED, again); window.removeEventListener(BRAIN_CHANGED, again); };
+  }, []);
+  const sourcesKey = sources.map((source) => `${source.id} ${source.api.API_BASE} ${source.api.API_TOKEN}`).join('|');
+  const setOffer = (machine: string, offer: SetupOffer | null) => setOffers((all) => {
+    const next = { ...all };
+    if (offer) next[machine] = offer; else delete next[machine];
+    return next;
+  });
 
   useEffect(() => {
-    try { if (localStorage.getItem(DISMISS_KEY) === '1') return undefined; } catch { /* storage is optional */ }
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const poll = async (source: SetupSource) => {
+      if (dismissed(source.id)) { settle(source.id, true); return; }
       try {
         const [hookRows, memoryRows] = await Promise.all([
-          request<HookRow[]>('/api/desktop/agent-hooks'),
-          request<MemoryRow[]>('/api/desktop/agent-memory'),
+          source.api.request<HookRow[]>('/api/desktop/agent-hooks'),
+          source.label ? Promise.resolve([] as MemoryRow[]) : source.api.request<MemoryRow[]>('/api/desktop/agent-memory'),
         ]);
         if (stopped || !Array.isArray(hookRows) || !Array.isArray(memoryRows)) return;
-        setHooks(hookRows.filter((row) => row.cli_found && !row.installed).map((row) => row.agent));
-        setMemory(memoryRows.filter((row) => row.cli_found && row.memory_ready && !row.connected).map((row) => row.agent));
-        // Memory sets itself up on first start; look again until it is ready.
-        if (memoryRows.some((row) => row.cli_found && !row.memory_ready)) timer = setTimeout(poll, 10_000);
-      } catch { /* not the desktop helper: show nothing */ }
+        setOffer(source.id, offerFor(source.id, source.label, hookRows, memoryRows));
+        // Once memory is on it sets itself up; look again until it is ready.
+        const waiting = !source.label && memoryStillSettingUp(memoryRows);
+        if (waiting) timers.push(setTimeout(() => void poll(source), 10_000));
+        // Memory is still setting up: an offer may yet appear, so the machine stays held.
+        else settle(source.id, true);
+      } catch { settle(source.id, true); /* an older helper, or not reachable now: offer nothing */ }
     };
-    void poll();
-    return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, []);
+    sourcesRef.current.forEach((source) => void poll(source));
+    return () => { stopped = true; timers.forEach(clearTimeout); };
+  }, [sourcesKey, round]);
 
-  if (hooks.length === 0 && memory.length === 0 && state !== 'done' && state !== 'failed') return null;
-  const agents = joined([...hooks, ...memory]);
-  const what = hooks.length && memory.length
-    ? 'get notified when they finish a turn, and let them share Dolphin’s memory.'
-    : hooks.length ? 'get notified when they finish a turn.' : 'let them share Dolphin’s memory, so what you tell Dolphin reaches them too.';
+  const holding = sources.filter((source) => !settled.includes(source.id) || offers[source.id]).map((source) => source.id);
+  const holdingKey = holding.join('|');
+  const report = useRef(onHolding);
+  report.current = onHolding;
+  useEffect(() => { report.current?.(holdingKey ? holdingKey.split('|') : []); }, [holdingKey]);
 
-  const turnOn = async () => {
-    setState('working');
+  const turnOn = async (offer: SetupOffer) => {
+    const source = sourcesRef.current.find((item) => item.id === offer.machine);
+    if (!source) return;
+    setResults((all) => ({ ...all, [offer.machine]: { state: 'working', message: '' } }));
     try {
-      if (hooks.length) await request('/api/desktop/agent-hooks', { method: 'POST', body: JSON.stringify({ agents: hooks }) });
-      if (memory.length) await request('/api/desktop/agent-memory', { method: 'POST', body: JSON.stringify({ agents: memory }) });
-      const done = [hooks.length ? 'notifications are on' : '', memory.length ? 'they share Dolphin’s memory in new sessions' : ''].filter(Boolean).join(', and ');
-      setMessage(`${agents}: ${done}.${hooks.includes('codex') ? ' Codex will ask you once to trust Dolphin’s hook; choose Trust.' : ''}`);
-      setState('done');
-      setHooks([]);
-      setMemory([]);
+      if (offer.hooks.length) await source.api.request('/api/desktop/agent-hooks', { method: 'POST', body: JSON.stringify({ agents: offer.hooks }) });
+      if (offer.memory.length) await source.api.request('/api/desktop/agent-memory', { method: 'POST', body: JSON.stringify({ agents: offer.memory }) });
+      setResults((all) => ({ ...all, [offer.machine]: { state: 'done', message: doneMessage(offer) } }));
+      setOffer(offer.machine, null);
     } catch (error) {
-      setMessage(`Could not connect them: ${error instanceof Error ? error.message : String(error)}`);
-      setState('failed');
+      setResults((all) => ({ ...all, [offer.machine]: { state: 'failed',
+        message: `Could not connect them${offer.label ? ` on ${offer.label}` : ''}: ${error instanceof Error ? error.message : String(error)}` } }));
     }
   };
 
+  const shown = sources.flatMap((source) => (offers[source.id] ? [offers[source.id]] : []));
+  const messages = sources.flatMap((source) => {
+    const result = results[source.id];
+    return result && result.state !== 'working' ? [{ id: source.id, message: result.message }] : [];
+  });
+  if (!shown.length && !messages.length) return null;
   return (
     <section className="signals-tray" aria-label="Agent setup">
-      {state === 'done' || state === 'failed' ? (
-        <p role="status" className="signals-status agent-hooks-message">{message}</p>
-      ) : (
-        <div className="agent-hooks-row">
+      {messages.map((item) => <p key={`result ${item.id}`} role="status" className="signals-status agent-hooks-message">{item.message}</p>)}
+      {shown.map((offer) => (
+        <div className="agent-hooks-row" key={offer.machine}>
           <Sparkles size={15} aria-hidden="true" />
-          <span>Connect {agents} to Dolphin: {what}</span>
+          <span>{offer.text}</span>
           <div className="signals-actions">
-            <button type="button" className="signals-primary" disabled={state === 'working'} onClick={() => void turnOn()}>Turn On</button>
-            <button type="button" onClick={() => {
-              try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* storage is optional */ }
-              setHooks([]);
-              setMemory([]);
+            <button type="button" className="signals-primary" aria-label={offer.action} disabled={results[offer.machine]?.state === 'working'} onClick={() => void turnOn(offer)}>Turn On</button>
+            <button type="button" aria-label={offer.label ? `Not now for ${offer.label}` : 'Not Now'} onClick={() => {
+              try { localStorage.setItem(dismissKey(offer.machine), '1'); } catch { /* storage is optional */ }
+              setOffer(offer.machine, null);
             }}>Not Now</button>
           </div>
         </div>
-      )}
+      ))}
     </section>
   );
 }

@@ -51,6 +51,37 @@ def _login_shell_paths() -> dict[str, str | None]:
     return found
 
 
+def login_shell_path(timeout: float = 6.0) -> str | None:
+    """The PATH the user's login shell sets up, or None if it can't be read."""
+    shell = os.getenv("SHELL") or "/bin/sh"
+    try:
+        result = subprocess.run([shell, "-ilc", f'printf "\\n{MARK}PATH=%s\\n" "$PATH"'], stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=timeout, env={**os.environ, "TERM": "dumb"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    prefix = f"{MARK}PATH="
+    for line in result.stdout.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip() or None
+    return None
+
+
+def merge_path(current: str, extra: str | None) -> str:
+    """`current` in its own order, then the entries of `extra` it lacks."""
+    parts = [part for part in current.split(os.pathsep) if part]
+    for part in (extra or "").split(os.pathsep):
+        if part and part not in parts:
+            parts.append(part)
+    return os.pathsep.join(parts)
+
+
+def adopt_login_path() -> None:
+    """Once per helper: add the login shell's PATH entries to the helper's own,
+    so the chat's `shutil.which("claude")` finds what a terminal would. The
+    helper's entries stay first: its bin/ holds the bundled tmux wrapper."""
+    os.environ["PATH"] = merge_path(os.environ.get("PATH", ""), login_shell_path())
+
+
 def _fallback(tool: str) -> str | None:
     found = shutil.which(tool)
     if found:

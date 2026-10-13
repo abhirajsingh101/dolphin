@@ -9,87 +9,30 @@
 }
 
 /* A machine's section: its heading, any trouble with its link, its projects. */
-.glass-machine + .glass-machine {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--glass-edge);
-}
+.glass-machine + .glass-machine { margin-top: 6px; border-top: 1px solid var(--glass-edge); }
+/* One sticky 28px row per machine: it stays in view while its projects scroll. */
 .glass-machine-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-bottom: 6px;
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  display: flex; align-items: center; gap: 2px; height: 28px; margin: 0 0 4px;
+  background: var(--glass-solid);
 }
-.glass-workspace .glass-machine-toggle {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 8px;
-  border-radius: var(--r-md);
-  text-align: left;
-}
-.glass-workspace .glass-machine-toggle:hover {
-  background: var(--glass-bubble);
-}
-.glass-machine-toggle > svg {
-  flex-shrink: 0;
-  color: var(--glass-muted);
-  transition: transform 180ms var(--glass-ease);
-}
-.glass-machine-toggle[aria-expanded='false'] > svg {
-  transform: rotate(-90deg);
-}
-.glass-machine-icon {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: var(--r-md);
-  background: var(--glass-bubble);
-  color: var(--glass-accent);
-}
-.glass-machine-name {
-  display: grid;
-  min-width: 0;
-}
-.glass-machine-name strong {
-  overflow: hidden;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.glass-machine-name small {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  color: var(--glass-muted);
-  font-size: var(--fs-2xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.glass-machine[data-kind='ssh'] .glass-machine-name small[data-state='connected'] {
-  color: var(--glass-success);
-}
-.glass-machine-name small[data-state='connecting'],
-.glass-machine-name small[data-state='reconnecting'] {
-  color: var(--glass-alert);
-}
-.glass-machine-name small[data-state='offline'],
-.glass-machine-name small[data-state='failed'] {
-  color: var(--danger);
-}
+.glass-workspace .glass-machine-toggle { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 6px; border-radius: var(--r-md); text-align: left; }
+.glass-workspace .glass-machine-toggle:hover { background: var(--glass-bubble); }
+.glass-machine-toggle > svg { flex-shrink: 0; color: var(--glass-muted); transition: transform 180ms var(--glass-ease); }
+.glass-machine-toggle[aria-expanded='false'] > svg { transform: rotate(-90deg); }
+.glass-machine-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--glass-muted); }
+.glass-machine-dot[data-state='connected'] { background: var(--glass-success); }
+.glass-machine-dot:is([data-state='connecting'], [data-state='reconnecting']) { background: var(--glass-alert); }
+.glass-machine-dot:is([data-state='offline'], [data-state='failed']) { background: var(--danger); }
+.glass-machine-label { min-width: 0; overflow: hidden; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.glass-machine-toggle small { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--glass-muted-small); font-size: var(--fs-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.glass-machine-toggle small:is([data-state='connecting'], [data-state='reconnecting']) { color: var(--glass-alert); }
+.glass-machine-toggle small:is([data-state='offline'], [data-state='failed']) { color: var(--danger); }
 .glass-workspace .glass-machine-add,
 .glass-workspace .glass-machine-more {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   place-items: center;
   padding: 0;
@@ -238,6 +181,7 @@
 }
 .machine-current small,
 .machine-key small,
+.machine-item small,
 .machine-note {
   color: var(--glass-muted);
   font-size: 12px;
@@ -303,6 +247,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The Forward SSH agent item: its state under its name, wrapped. */
+.machine-item small {
+  display: block;
+  white-space: normal;
 }
 .machine-item em,
 .connect-machine-open {

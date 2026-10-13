@@ -17,6 +17,7 @@ keystroke as paste body — the terminal looks dead until the session is killed.
 """
 
 import asyncio
+import contextlib
 import os
 import pty
 import tty
@@ -25,6 +26,7 @@ import pytest
 
 from app.main import (
     _MAX_COALESCED_OUTPUT_BYTES,
+    PtyOutputQueue,
     coalesce_pty_output,
     write_all_to_pty,
 )
@@ -166,3 +168,84 @@ async def test_writing_to_a_closed_pty_returns_instead_of_raising():
     os.close(master_fd)
 
     await asyncio.wait_for(write_all_to_pty(master_fd, b"x" * 100_000), timeout=5)
+
+
+def test_the_output_queue_pauses_above_high_water_and_resumes_below_low_water():
+    async def exercise():
+        events: list[str] = []
+        output = PtyOutputQueue(lambda: events.append("pause"), lambda: events.append("resume"), high=1000, low=300)
+        for _ in range(5):
+            output.put(b"x" * 300)
+        assert events == ["pause"] and output.paused and output.size == 1500
+        received = b""
+        while output.size:
+            received += await output.get()
+        assert events == ["pause", "resume"] and not output.paused
+        assert received == b"x" * 1500
+        output.end()
+        assert await output.get() is None
+
+    asyncio.run(exercise())
+
+
+def test_no_resume_after_the_stream_ended():
+    async def exercise():
+        events: list[str] = []
+        output = PtyOutputQueue(lambda: events.append("pause"), lambda: events.append("resume"), high=10, low=5)
+        output.put(b"0123456789AB")
+        output.end()
+        assert await output.get() == b"0123456789AB"
+        assert events == ["pause"]
+        assert await output.get() is None
+
+    asyncio.run(exercise())
+
+
+def _write_all_blocking(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+@pytest.mark.asyncio
+async def test_a_slow_reader_pauses_the_pty_instead_of_growing_memory():
+    master, slave = pty.openpty()
+    tty.setraw(slave)
+    os.set_blocking(master, False)
+    loop = asyncio.get_running_loop()
+    peak = 0
+    high = 256 * 1024
+    output: PtyOutputQueue
+
+    def on_readable() -> None:
+        nonlocal peak
+        try:
+            data = os.read(master, 65536)
+        except BlockingIOError:
+            return
+        if not data:
+            loop.remove_reader(master)
+            output.end()
+            return
+        output.put(data)
+        peak = max(peak, output.size)
+
+    output = PtyOutputQueue(lambda: loop.remove_reader(master), lambda: loop.add_reader(master, on_readable), high=high, low=64 * 1024)
+    loop.add_reader(master, on_readable)
+    payload = bytes(range(256)) * 16384  # 4 MiB
+    writer = asyncio.ensure_future(asyncio.to_thread(_write_all_blocking, slave, payload))
+    try:
+        await asyncio.sleep(1.0)  # nobody drains: the writer must be held back by the pty
+        assert output.paused
+        assert peak <= high + 65536
+        assert not writer.done()
+        received = bytearray()
+        while len(received) < len(payload):
+            received += await asyncio.wait_for(output.get(), 5)
+        await asyncio.wait_for(writer, 5)
+        assert bytes(received) == payload
+    finally:
+        with contextlib.suppress(ValueError):
+            loop.remove_reader(master)
+        os.close(master)
+        os.close(slave)

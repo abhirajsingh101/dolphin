@@ -1,0 +1,37 @@
+# Rendered for each stable release by scripts/render-cask.mjs, attached to the
+# release as dolphin-desktop.rb, and copied into the tap's Casks/ folder.
+cask "dolphin-desktop" do
+  arch arm: "arm64", intel: "x64"
+
+  version "@VERSION@"
+  sha256 arm:   "@SHA256_ARM64@",
+         intel: "@SHA256_X64@"
+
+  url "https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v#{version}/Dolphin-#{version}-mac-#{arch}.dmg"
+  name "Dolphin"
+  desc "Run Claude Code and Codex in tmux, on this computer or over SSH"
+  homepage "https://github.com/abhirajsingh101/dolphin"
+
+  livecheck do
+    url :url
+    regex(/^desktop-v(\d+(?:\.\d+)+)$/i)
+    strategy :github_latest
+  end
+
+  depends_on macos: ">= :big_sur"
+
+  app "Dolphin.app"
+
+  zap trash: [
+    "~/Library/Application Support/Dolphin",
+    "~/Library/Logs/Dolphin",
+    "~/Library/Preferences/dev.dolphin.desktop.plist",
+    "~/Library/Saved Application State/dev.dolphin.desktop.savedState",
+  ]
+
+  caveats <<~EOS
+    Dolphin is not signed yet, so macOS blocks it the first time you open it.
+    Open System Settings, then Privacy & Security, and choose Open Anyway
+    next to the message about Dolphin.
+  EOS
+end

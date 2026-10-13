@@ -21,7 +21,14 @@ trap 'status=$?
 
 "$BIN" version
 "$BIN" serve --detach
-for _ in $(seq 1 240); do [ -f "$DOLPHIN_HOME/run/server.json" ] && break; sleep 0.5; done
+# server.json exists from the start but says "starting" (no socket) until the
+# app's startup (snapshot, migrations) has finished.
+for _ in $(seq 1 240); do
+  grep -q -e '"state": *"ready"' -e '"socket"' "$DOLPHIN_HOME/run/server.json" 2>/dev/null && break
+  grep -q '"state": *"failed"' "$DOLPHIN_HOME/run/server.json" 2>/dev/null && { echo "helper startup failed" >&2; exit 1; }
+  sleep 0.5
+done
+grep -q -e '"state": *"ready"' -e '"socket"' "$DOLPHIN_HOME/run/server.json" 2>/dev/null || { echo "helper never became ready" >&2; exit 1; }
 SOCK="$(sed -n 's/.*"socket": *"\([^"]*\)".*/\1/p' "$DOLPHIN_HOME/run/server.json")"
 for _ in $(seq 1 120); do [ -S "$SOCK" ] && break; sleep 0.5; done
 TOKEN="$(cat "$DOLPHIN_HOME/token")"
@@ -33,6 +40,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$SOCK" http://dolp
 [ "$code" = 401 ] || { echo "expected 401 without the token, got $code" >&2; exit 1; }
 api /api/system-health/summary | grep -q '"cpu' || { echo "System Health returned no CPU figures" >&2; exit 1; }
 api /api/desktop/agents | grep -q '"agent":"claude"'
+api /api/desktop/environment | grep -q '"tmux":{"version":"[0-9]' || { echo "the helper did not report its tmux" >&2; api /api/desktop/environment >&2; exit 1; }
 api /api/desktop/recent-repos >/dev/null
 # A shell in a pane must start and run commands: the helper's own libraries
 # must not leak into it.
@@ -44,9 +52,10 @@ api "/api/projects/$project/tmux/sessions/$session/input" -X POST -d '{"text":"e
 for _ in $(seq 1 20); do api "/api/projects/$project/tmux/sessions/$session/snapshot" | grep -q 'SMOKE-42' && break; sleep 0.5; done
 api "/api/projects/$project/tmux/sessions/$session/snapshot" | grep -q 'SMOKE-42' || {
   echo "the terminal did not run a command:" >&2; api "/api/projects/$project/tmux/sessions/$session/snapshot" >&2; exit 1; }
-# Memory: the helper sets up a real GBrain in the background (this downloads
-# Bun and GBrain). DOLPHIN_GBRAIN=off skips it.
-if [ "${DOLPHIN_GBRAIN:-auto}" != off ]; then
+# Memory: opt in as Dolphin Desktop does, then the helper sets up a real GBrain
+# in the background (this downloads Bun and GBrain). DOLPHIN_GBRAIN=off skips it.
+if [ "${DOLPHIN_GBRAIN:-ask}" != off ]; then
+  api /api/brain/consent -X POST -d '{"enabled":true}' >/dev/null
   for _ in $(seq 1 300); do
     state="$(api /api/brain | field state)"
     [ "$state" = ready ] || [ "$state" = failed ] && break

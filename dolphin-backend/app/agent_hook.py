@@ -3,10 +3,13 @@
 On every Stop it records the finished turn on the pane (``@dolphin-turn``) for
 the backend's notification collector, but only when the agent running it is the
 pane's own interactive agent (see ``owns_pane``): background agents that merely
-inherited TMUX_PANE are ignored. For sessions the Dolphin chat delegated, it
-also marks the pane working on prompt submit and finished on Stop, keeping the
-agent's final reply as the result. It reads no transcript and sends nothing
-over the network. Any failure exits zero and can never block Codex or Claude.
+inherited TMUX_PANE are ignored. It also leaves the turn's state on the pane
+(``@dolphin-turn-state``, see turn_state.py): working from prompt submit,
+finished at Stop. For sessions the Dolphin chat delegated, it also tracks the
+delegated work, keeping the agent's final reply as the result. It reads no
+transcript, and the only request it makes is an empty nudge to this machine's
+own helper (``nudge_helper``). Any failure exits zero and can never block
+Codex or Claude.
 
 A Claude turn that ends while its background agents or commands are still
 running is not finished work: Claude ends its reply, then wakes when they
@@ -20,13 +23,17 @@ system Python on this server, and as ``dolphin-helper hook`` in Dolphin Desktop.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
+import socket
 import sys
 import subprocess
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+
+from .turn_state import OPTION as TURN_STATE_OPTION, format_turn_state
 
 
 MAX_INPUT_BYTES = 65_536
@@ -217,6 +224,17 @@ def record_turn(envelope: dict, last_message=None) -> None:
         pass  # A missed notification must never interrupt an agent.
 
 
+def record_state(envelope: dict, now: datetime | None = None) -> None:
+    """Mark the pane working (prompt submitted) or finished (turn ended)."""
+    try:
+        state = "finished" if envelope["event_name"] == "stop" else "working"
+        value = format_turn_state(state, now or datetime.now(timezone.utc))
+        subprocess.run(["tmux", "set-option", "-p", "-t", envelope["tmux_pane"], TURN_STATE_OPTION, value],
+                       capture_output=True, timeout=TIMEOUT_SECONDS)
+    except Exception:
+        pass  # A missed state must never interrupt an agent.
+
+
 def track_chat_work(envelope: dict, last_message=None) -> None:
     """Observe only explicitly tracked panes. No model, transcript or prompt read."""
     try:
@@ -250,6 +268,51 @@ def track_chat_work(envelope: dict, last_message=None) -> None:
         pass  # Never interrupt an agent because optional tracking failed.
 
 
+NUDGE_PATH = "/api/desktop/turn-nudge"
+NUDGE_TIMEOUT_SECONDS = 0.5
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path: str, timeout: float):
+        super().__init__("dolphin", timeout=timeout)
+        self._path = path
+
+    def connect(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self._path)
+        self.sock = sock
+
+
+def nudge_helper(environ) -> bool:
+    """Tell this machine's Dolphin helper that a turn changed, so it looks now
+    instead of at its next scan. The request carries nothing but the helper's
+    token; a helper that is not running costs one failed connect. Only a
+    helper whose server.json says ``ready`` is usable."""
+    try:
+        home = environ.get("DOLPHIN_HOME") or os.path.join(os.path.expanduser("~"), ".dolphin-server")
+        with open(os.path.join(home, "run", "server.json"), encoding="utf-8") as handle:
+            server = json.load(handle)
+        if not isinstance(server, dict) or server.get("state") != "ready":
+            return False
+        with open(os.path.join(home, "token"), encoding="utf-8") as handle:
+            token = handle.read().strip()
+        if isinstance(server.get("socket"), str):
+            connection = _UnixHTTPConnection(server["socket"], NUDGE_TIMEOUT_SECONDS)
+        elif isinstance(server.get("port"), int):
+            connection = http.client.HTTPConnection("127.0.0.1", server["port"], timeout=NUDGE_TIMEOUT_SECONDS)
+        else:
+            return False
+        try:
+            connection.request("POST", NUDGE_PATH, body=b"",
+                               headers={"X-Dolphin-Token": token, "Content-Length": "0"})
+            return connection.getresponse().status == 204
+        finally:
+            connection.close()
+    except Exception:
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     provider = _argument_value(argv, "--provider") or ""
@@ -268,7 +331,9 @@ def main(argv: list[str] | None = None) -> int:
             if not still_working:
                 last_message = payload.get('last_assistant_message')
                 record_turn(envelope, last_message)
+                record_state(envelope)
                 track_chat_work(envelope, last_message)
+                nudge_helper(os.environ)
     except BaseException:
         pass
     # Current Codex Stop hooks require JSON when they write stdout. An empty
@@ -277,8 +342,6 @@ def main(argv: list[str] | None = None) -> int:
     if provider == "codex":
         sys.stdout.write("{}\n")
     return 0
-
-
 
 
 if __name__ == "__main__":

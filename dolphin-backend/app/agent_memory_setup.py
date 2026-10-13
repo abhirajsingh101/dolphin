@@ -59,10 +59,12 @@ def _configured(agent: str) -> bool:
 def status() -> list[dict[str, Any]]:
     paths = agent_clis.locate()
     memory = brain.ready()
+    state = brain.status()["state"]
     return [{
         "agent": agent,
         "cli_found": paths.get(agent) is not None,
         "memory_ready": memory,
+        "memory_state": state,
         "connected": _configured(agent),
     } for agent in AGENTS]
 

@@ -11,9 +11,10 @@
  * This module has no Electron imports, so its parsers are tested directly. */
 
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readJson, writeJsonAtomic } from './session-store';
 
 export type MachineSource = 'recent' | 'config' | 'history' | 'tailscale' | 'known';
 export type Machine = { target: string; label: string; detail?: string; source: MachineSource; online?: boolean; lastUsed?: number };
@@ -151,25 +152,22 @@ export function parseKnownHosts(text: string): Machine[] {
 type Recents = { recent: { target: string; lastUsed: number }[] };
 
 function readRecents(dataDir: string): Recents {
-  try {
-    const value = JSON.parse(readFileSync(path.join(dataDir, 'machines.json'), 'utf8')) as Recents;
-    return { recent: (value.recent ?? []).filter((item) => typeof item.target === 'string' && validTarget(item.target)) };
-  } catch {
-    return { recent: [] };
-  }
+  const value = readJson<Partial<Recents>>(path.join(dataDir, 'machines.json'), {});
+  const recent = Array.isArray(value.recent) ? value.recent : [];
+  return { recent: recent.filter((item) => item && typeof item.target === 'string' && validTarget(item.target)) };
 }
 
 /** Remember a machine Dolphin connected to; the latest comes first. */
 export function rememberMachine(dataDir: string, target: string): void {
   const recents = readRecents(dataDir);
   recents.recent = [{ target, lastUsed: Date.now() }, ...recents.recent.filter((item) => item.target !== target)].slice(0, 12);
-  try { writeFileSync(path.join(dataDir, 'machines.json'), JSON.stringify(recents, null, 2)); } catch { /* remembering is a convenience */ }
+  try { writeJsonAtomic(path.join(dataDir, 'machines.json'), recents); } catch { /* remembering is a convenience */ }
 }
 
 export function forgetMachine(dataDir: string, target: string): void {
   const recents = readRecents(dataDir);
   recents.recent = recents.recent.filter((item) => item.target !== target);
-  try { writeFileSync(path.join(dataDir, 'machines.json'), JSON.stringify(recents, null, 2)); } catch { /* as above */ }
+  try { writeJsonAtomic(path.join(dataDir, 'machines.json'), recents); } catch { /* as above */ }
 }
 
 /* --- Tailscale ------------------------------------------------------------------- */

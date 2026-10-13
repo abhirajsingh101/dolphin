@@ -1,29 +1,59 @@
 diff --git a/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts b/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
-index 9121eab..c03c14f 100644
+index 9121eab..e372d0f 100644
 --- a/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
 +++ b/node_modules/@dolphin-terminal/react/dist/TerminalPane.d.ts
-@@ -24,6 +24,7 @@ export interface TerminalPaneProps {
+@@ -24,6 +24,10 @@ export interface TerminalPaneProps {
      onSessionChanged: () => void;
      dictationTargetId?: string;
      enableWebgl?: boolean;
 +    theme?: import("@xterm/xterm").ITheme;
++    reconnectKey?: string | number;
++    retryAfterDrop?: boolean;
++    onTerminal?: (terminal: import("@xterm/xterm").Terminal) => void | (() => void);
      workspaceControls?: TerminalWorkspaceControls;
  }
  export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId, enableWebgl, workspaceControls, }: TerminalPaneProps): import("react").JSX.Element;
 diff --git a/node_modules/@dolphin-terminal/react/dist/TerminalPane.js b/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
-index 510dee7..601e876 100644
+index 510dee7..7dedcc0 100644
 --- a/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
 +++ b/node_modules/@dolphin-terminal/react/dist/TerminalPane.js
-@@ -132,7 +132,7 @@ function terminalCopyScrollAnchor(terminal) {
+@@ -10,6 +10,7 @@ import SessionAutomationControl from './SessionAutomationControl.js';
+ import { useTerminalRuntime } from './TerminalRuntime.js';
+ import { isTerminalLikeTarget } from './shortcutTarget.js';
+ import { CONNECT_TIMEOUT_MS, OFFLINE_NOTICE, nextConnectDelayMs, reconnectNotice, shouldRetryConnection, } from './terminalReconnect.js';
++import { shouldRetryAfterClose } from './terminalDropRetry.js';
+ import { sanitizeTerminalTranscript } from './dictationTarget.js';
+ import { copyLayerScrollTopForAnchor, wheelDeltaYToPixels, } from './terminalCopyScroll.js';
+ import { buildSnapshotSegments, extractPathCandidates, pathCandidateBatches, } from './terminalFilePaths.js';
+@@ -132,7 +133,7 @@ function terminalCopyScrollAnchor(terminal) {
          rowsFromBottom: Math.max(0, buffer.baseY - buffer.viewportY),
      };
  }
 -export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId = 'dolphin-terminal-dictation-target', enableWebgl = true, workspaceControls, }) {
-+export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId = 'dolphin-terminal-dictation-target', enableWebgl = true, workspaceControls, theme, }) {
++export default function TerminalPane({ projectId, session, onSessionClosed, onSessionChanged, dictationTargetId = 'dolphin-terminal-dictation-target', enableWebgl = true, workspaceControls, theme, reconnectKey, retryAfterDrop = false, onTerminal, }) {
      const { automation, client, icons: { Maximize2, Minimize2, Paperclip, Power, RefreshCw, TerminalSquare, TextSelect, X, }, labels, slots, } = useTerminalRuntime();
      const { activateTarget, clearTarget } = useDictation();
      const closeSession = client.closeSession.bind(client);
-@@ -230,6 +230,9 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+@@ -167,6 +168,18 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+     // Bumped by the Retry control to re-run the connection effect with a fresh
+     // attempt budget. The effect owns the retries; this is how a click re-enters it.
+     const [reconnectNonce, setReconnectNonce] = useState(0);
++    const retryAfterDropRef = useRef(retryAfterDrop);
++    retryAfterDropRef.current = retryAfterDrop;
++    const onTerminalRef = useRef(onTerminal);
++    onTerminalRef.current = onTerminal;
++    // A new reconnectKey (Dolphin: the machine link came back) is a Retry click.
++    const reconnectKeyRef = useRef(reconnectKey);
++    useEffect(() => {
++        if (Object.is(reconnectKeyRef.current, reconnectKey))
++            return;
++        reconnectKeyRef.current = reconnectKey;
++        setReconnectNonce((current) => current + 1);
++    }, [reconnectKey]);
+     const [isFullscreen, setIsFullscreen] = useState(false);
+     const [isSelectMode, setIsSelectMode] = useState(false);
+     const [selectionSnapshot, setSelectionSnapshot] = useState('');
+@@ -230,6 +243,9 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
          fullscreenStateRef.current = isFullscreen;
          fullscreenChangeRef.current?.(isFullscreen);
      }, [isFullscreen]);
@@ -33,7 +63,7 @@ index 510dee7..601e876 100644
      useEffect(() => () => {
          if (fullscreenStateRef.current)
              fullscreenChangeRef.current?.(false);
-@@ -298,6 +301,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+@@ -298,6 +314,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
              return;
          const terminal = new Terminal({
              cursorBlink: true,
@@ -41,7 +71,7 @@ index 510dee7..601e876 100644
              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
              fontSize: 13,
              lineHeight: 1.2,
-@@ -315,6 +319,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+@@ -315,6 +332,7 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
                  magenta: '#c678dd',
                  cyan: '#56b6c2',
                  white: '#dcdcdc',
@@ -49,3 +79,69 @@ index 510dee7..601e876 100644
              },
          });
          const fit = new FitAddon();
+@@ -351,6 +369,8 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+         }
+         webglRef.current = webgl;
+         fit.fit();
++        // Host features attach here, once per terminal (Dolphin's patch).
++        const terminalCleanup = onTerminalRef.current?.(terminal);
+         terminal.attachCustomKeyEventHandler((event) => {
+             const isCopyKey = event.key.toLowerCase() === 'c' &&
+                 (event.ctrlKey || event.metaKey) &&
+@@ -469,6 +489,8 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+             attachmentUploadAbortRef.current?.abort();
+             attachmentUploadAbortRef.current = null;
+             clearTarget(dictationTargetId);
++            if (typeof terminalCleanup === 'function')
++                terminalCleanup();
+             // Release the GL context before the terminal goes; browsers cap how many
+             // live contexts a page may hold, and cockpits are opened repeatedly.
+             webglRef.current?.dispose();
+@@ -734,14 +756,17 @@ export default function TerminalPane({ projectId, session, onSessionClosed, onSe
+                 if (reachedOpen)
+                     setConnection('error');
+             };
+-            socket.onclose = () => {
++            socket.onclose = (event) => {
+                 if (!isCurrentSocket())
+                     return;
+                 clearConnectTimer();
+-                if (!shouldRetryConnection(reachedOpen)) {
++                if (!shouldRetryAfterClose(reachedOpen, event.code, retryAfterDropRef.current)) {
+                     setConnection((current) => (current === 'error' ? 'error' : 'closed'));
+                     return;
+                 }
++                // A live socket that dropped starts a fresh budget at the first delay.
++                if (reachedOpen)
++                    attempt = 1;
+                 giveUpOrScheduleRetry();
+             };
+         };
+diff --git a/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.d.ts b/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.d.ts
+new file mode 100644
+index 0000000..be7bb35
+--- /dev/null
++++ b/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.d.ts
+@@ -0,0 +1 @@
++export declare function shouldRetryAfterClose(reachedOpen: boolean, code: number, retryAfterDrop: boolean | undefined): boolean;
+diff --git a/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.js b/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.js
+new file mode 100644
+index 0000000..82a2062
+--- /dev/null
++++ b/node_modules/@dolphin-terminal/react/dist/terminalDropRetry.js
+@@ -0,0 +1,15 @@
++/**
++ * Whether a closed terminal socket is tried again (Dolphin's patch).
++ *
++ * A socket that never opened is retried, as before. One that was live and
++ * then closed is retried only when the host asks (`retryAfterDrop`) and the
++ * close was not one the backend chose: 1000 means the session ended (tmux
++ * attach exited) and 1008 means it was refused. Anything else — 1006 from a
++ * dropped tunnel or a slept laptop, 1012 from a helper restart — is a drop.
++ */
++export function shouldRetryAfterClose(reachedOpen, code, retryAfterDrop) {
++    if (!reachedOpen)
++        return true;
++    return Boolean(retryAfterDrop) && code !== 1000 && code !== 1008;
++}
++//# sourceMappingURL=terminalDropRetry.js.map

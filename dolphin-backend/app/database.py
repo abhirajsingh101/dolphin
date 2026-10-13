@@ -19,6 +19,12 @@ def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
         # default: the fleet's hook, watchdog and scheduler writes are short but
         # frequent, and a burst of them must queue rather than error.
         cursor.execute("PRAGMA busy_timeout=30000")
+        if os.getenv("DOLPHIN_HELPER_VERSION"):
+            # Helper mode: readers (the session scan every 2 s, the bell)
+            # never wait on a writer. The snapshot uses the backup API, which
+            # copies a WAL database consistently.
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
     finally:
         cursor.close()
 

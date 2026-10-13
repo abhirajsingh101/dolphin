@@ -19,6 +19,7 @@ from .schemas import (
     ControlCenterSourceResponse,
     ControlCenterTaskResponse,
     ControlCenterWorkspaceResponse,
+    OtherSessionResponse,
 )
 from .task_workflow_service import MANAGED_TEMP_PROJECT_ID, workflow_state_for
 
@@ -302,13 +303,24 @@ async def _observe_session(
             last_activity_at=session.last_activity_at,
             observation_state="degraded" if degraded else "available",
             observation_message=message,
+            agent=session.agent,
+            turn_state=session.turn_state,
+            turn_at=session.turn_at,
+            pane_dead=session.pane_dead,
         ),
         paths=tuple(paths),
     )
 
 
 def _path_belongs_to_workspace(path: Path, workspace: Path) -> bool:
-    return path == workspace or workspace in path.parents
+    return tmux_service.path_in_workspace(path, workspace)
+
+
+def _specificity(path: Path, workspace: Path) -> int:
+    """How deep the matching base is; a deeper base is a more specific project."""
+    if path == workspace or workspace in path.parents:
+        return len(workspace.parts)
+    return len(tmux_service.worktrees_dir(workspace).parts)
 
 
 async def build_control_center(
@@ -332,6 +344,7 @@ async def build_control_center(
 
     result = await db.execute(
         select(Project)
+        .where(Project.is_hidden.is_(False))
         .options(selectinload(Project.tasks).selectinload(Task.workflow))
         .order_by(Project.position, Project.created_at, Project.id)
     )
@@ -442,22 +455,42 @@ async def build_control_center(
     associated_session_names: set[str] = set()
     associated_codex_names: set[str] = set()
 
+    roots = tmux_service.workspace_roots()
+    other_sessions: list[OtherSessionResponse] = []
     for observation in observations:
-        associated = False
-        for project in projects:
-            workspace_path = workspace_by_project[project.id].ready_path
-            if workspace_path is None:
-                continue
-            if any(
-                _path_belongs_to_workspace(path, workspace_path)
-                for path in observation.paths
-            ):
-                sessions_by_project[project.id].append(observation.response)
-                associated = True
-        if associated:
+        # Each path goes to the most specific project holding it; a session
+        # with panes in different projects belongs to each of them.
+        owners: list[str] = []
+        for path in observation.paths:
+            best_depth = -1
+            path_owners: list[str] = []
+            for project in projects:
+                workspace_path = workspace_by_project[project.id].ready_path
+                if workspace_path is None or not _path_belongs_to_workspace(
+                    path, workspace_path
+                ):
+                    continue
+                depth = _specificity(path, workspace_path)
+                if depth > best_depth:
+                    best_depth, path_owners = depth, [project.id]
+                elif depth == best_depth:
+                    path_owners.append(project.id)
+            owners.extend(o for o in path_owners if o not in owners)
+        for project_id in owners:
+            sessions_by_project[project_id].append(observation.response)
+        if owners:
             associated_session_names.add(observation.response.name)
             if observation.response.is_codex_running:
                 associated_codex_names.add(observation.response.name)
+        else:
+            other_sessions.append(OtherSessionResponse(
+                **observation.response.model_dump(),
+                openable=any(
+                    path == root or root in path.parents
+                    for path in observation.paths
+                    for root in roots
+                ),
+            ))
 
     project_responses: list[ControlCenterProjectResponse] = []
     for project in projects:
@@ -515,6 +548,7 @@ async def build_control_center(
         codex_session_count=len(associated_codex_names),
         needs_setup_count=needs_setup_count,
         projects=project_responses,
+        other_sessions=other_sessions,
     )
     _store_durable_deck(db, snapshot)
     return snapshot

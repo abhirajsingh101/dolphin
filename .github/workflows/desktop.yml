@@ -71,10 +71,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { target: linux-x64, os: ubuntu-22.04 }
-          - { target: darwin-arm64, os: macos-15 }
-          - { target: darwin-x64, os: macos-15-intel }
+        # Linux arm64 builds where GitHub's arm64 runners are free: public repositories.
+        include: ${{ fromJSON(github.event.repository.private
+          && '[{"target":"linux-x64","os":"ubuntu-22.04"},{"target":"darwin-arm64","os":"macos-15"},{"target":"darwin-x64","os":"macos-15-intel"}]'
+          || '[{"target":"linux-x64","os":"ubuntu-22.04"},{"target":"linux-arm64","os":"ubuntu-22.04-arm"},{"target":"darwin-arm64","os":"macos-15"},{"target":"darwin-x64","os":"macos-15-intel"}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -118,12 +118,18 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update -q && sudo apt-get install -yq rpm; fi  # rpmbuild, for the rpm target
           if [ "$RUNNER_OS" = macOS ] && [ -n "$MAC_CERTIFICATE" ]; then
             export CSC_LINK="$MAC_CERTIFICATE" CSC_KEY_PASSWORD="$MAC_CERTIFICATE_PASSWORD"
-            npm run dist -- -c.mac.notarize=true
+            # dolphinSigned: the app may then update itself in place (src/updates.ts).
+            npm run dist -- -c.mac.notarize=true -c.extraMetadata.dolphinSigned=true
           else
             CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist
           fi
+
+      - name: Check the installers' names
+        working-directory: dolphin-desktop
+        run: node scripts/check-artifacts.mjs release ${{ matrix.target }}
 
       - name: First run on a clean machine (Linux)
         if: runner.os == 'Linux'
@@ -131,9 +137,11 @@ jobs:
         env:
           DOLPHIN_SHOTS: ${{ runner.temp }}/shots
         run: |
-          sudo apt-get update -q && sudo apt-get install -yq xvfb
+          sudo apt-get update -q && sudo apt-get install -yq xvfb ffmpeg
           mkdir -p "$DOLPHIN_SHOTS"
-          DOLPHIN_DESKTOP_APP="$PWD/release/linux-unpacked/dolphin-desktop" xvfb-run -a node --test test/packaged.test.mjs
+          DOLPHIN_DESKTOP_APP="$(ls -d "$PWD"/release/linux*-unpacked)/dolphin-desktop" xvfb-run -a node --test test/packaged.test.mjs
+          # The README's hero, from this clean run's screenshots (one target is enough).
+          if [ "${{ matrix.target }}" = linux-x64 ]; then ./scripts/make-hero.sh "$DOLPHIN_SHOTS" "$DOLPHIN_SHOTS/dolphin-hero.gif"; fi
 
       - name: First run on a clean machine (macOS)
         if: runner.os == 'macOS'
@@ -154,12 +162,16 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: app-${{ matrix.target }}
-          # latest-linux.yml is what an installed AppImage reads to update itself.
+          # latest-linux*.yml is what an installed AppImage reads to update itself;
+          # the Mac feed is written by the release job for both architectures.
           path: |
             dolphin-desktop/release/*.AppImage
             dolphin-desktop/release/*.deb
+            dolphin-desktop/release/*.rpm
             dolphin-desktop/release/*.dmg
-            dolphin-desktop/release/latest-linux.yml
+            dolphin-desktop/release/*.zip
+            dolphin-desktop/release/*.blockmap
+            dolphin-desktop/release/*-linux*.yml
           if-no-files-found: error
 
   release:
@@ -170,15 +182,46 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
       - uses: actions/download-artifact@v7
         with:
           pattern: app-*
           merge-multiple: true
           path: release
 
+      # The hero comes only from the clean Linux x64 first run; without it the
+      # release is still made (see the copy below).
+      - uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          name: first-run-linux-x64
+          path: shots
+
+      - name: Mac update feed and Homebrew cask
+        run: |
+          version="${GITHUB_REF_NAME#desktop-v}"
+          node dolphin-desktop/scripts/mac-update-feed.mjs release "$version"
+          # Stable releases only; the tap is updated by hand (docs/desktop.md, "Homebrew").
+          case "$version" in *-*) ;; *) node dolphin-desktop/scripts/render-cask.mjs release "$version" > release/dolphin-desktop.rb ;; esac
+          # The README's hero (public/overlay/README.md); a missing one is skipped, not fatal.
+          if [ -f shots/dolphin-hero.gif ]; then cp shots/dolphin-hero.gif release/; else echo "::notice::No dolphin-hero.gif from the Linux x64 first run; the release has no hero"; fi
+
+      # Notes: dolphin-desktop/release-notes/<version>.md when it exists (the
+      # What's New toast links this release's page), else GitHub's own. A
+      # version with a prerelease part (0.2.1-beta.1) is a GitHub prerelease,
+      # which only the beta channel offers.
       - name: Create a draft release with the installers
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          version="${GITHUB_REF_NAME#desktop-v}"
+          notes="dolphin-desktop/release-notes/$version.md"
+          if [ -f "$notes" ]; then args=(--notes-file "$notes"); else args=(--generate-notes); fi
+          case "$version" in *-*) args+=(--prerelease) ;; esac
           gh release create "${GITHUB_REF_NAME}" release/* \
-            --repo "${GITHUB_REPOSITORY}" --draft --title "Dolphin ${GITHUB_REF_NAME#desktop-v}" --generate-notes
+            --repo "${GITHUB_REPOSITORY}" --draft --title "Dolphin ${version}" "${args[@]}"

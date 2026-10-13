@@ -2,6 +2,8 @@ export type ThemeChoice = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
 export const THEME_STORAGE_KEY = 'dolphin.theme';
+/** Fired on window whenever a setting (including the theme) changes. */
+export const SETTINGS_EVENT = 'dolphin:settings';
 
 const CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
 
@@ -47,6 +49,7 @@ export function persistTheme(choice: ThemeChoice): void {
   } catch {
     // Storage may be unavailable. Ignore — the applied theme is unaffected.
   }
+  globalThis.dispatchEvent?.(new Event(SETTINGS_EVENT));
 }
 
 /** Applies the resolved theme to <html>. Safe to call repeatedly. */

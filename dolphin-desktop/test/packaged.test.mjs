@@ -5,11 +5,12 @@
 // Runs when DOLPHIN_DESKTOP_APP is the packaged executable (CI sets it).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { teardown } from './support.mjs';
 
 const executable = process.env.DOLPHIN_DESKTOP_APP;
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -23,10 +24,13 @@ function bundledHelper(exe) {
 
 test('the packaged app works on first run', { timeout: 480_000, skip: !executable && 'DOLPHIN_DESKTOP_APP is not set' }, async () => {
   const home = mkdtempSync(path.join(tmpdir(), 'dclean-'));
+  // A git repository to open, and a scratch tmux socket for its terminal.
+  const tmuxDir = path.join(home, 'tmux');
+  for (const dir of [path.join(home, 'demo', '.git'), tmuxDir]) mkdirSync(dir, { recursive: true });
   const helper = bundledHelper(executable);
   assert.ok(existsSync(helper), `no bundled helper at ${helper}`);
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DOLPHIN_') && key !== 'TMUX' && key !== 'TMUX_PANE'));
-  const env = { ...clean, HOME: home, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
+  const env = { ...clean, HOME: home, TMUX_TMPDIR: tmuxDir, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
   const app = await electron.launch({ executablePath: executable, args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--user-data-dir=${path.join(home, 'profile')}`], env });
   try {
     const window = await app.firstWindow();
@@ -38,7 +42,9 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
       try { execFileSync('screencapture', ['-x', path.join(shots, 'packaged-window.png')]); } catch { /* no screen access */ }
     }
 
-    // Memory sets itself up in the background, then answers remember and recall.
+    // Memory is opt-in: the checklist turns it on, then it sets itself up in
+    // the background and answers remember and recall.
+    await window.getByRole('region', { name: 'Setup checklist' }).getByRole('button', { name: 'Turn on memory' }).click();
     const memory = window.getByRole('region', { name: 'Memory' });
     await memory.getByText('Memory is ready').waitFor({ timeout: 300_000 });
     await window.screenshot({ path: path.join(shots, 'packaged-memory-ready.png') });
@@ -49,6 +55,16 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     assert.equal(brain('remember', { fact: 'First-run test fact.', entity: 'user', provenance: 'packaged test' }).status, 'inserted');
     assert.equal(brain('recall', { query: 'first-run' }).facts[0].fact, 'First-run test fact.');
 
+    // A project and a terminal, for the README's hero (scripts/make-hero.sh).
+    const start = window.getByRole('region', { name: 'Get started' });
+    await start.getByRole('button', { name: /demo/ }).click({ timeout: 30_000 });
+    await start.waitFor({ state: 'detached', timeout: 15_000 });
+    await window.locator('details', { hasText: 'demo' }).getByRole('button', { name: 'New session' }).click({ timeout: 30_000 });
+    await window.getByRole('dialog', { name: 'New session in demo' }).getByRole('button', { name: /Shell/ }).click();
+    await window.locator('.xterm').first().waitFor({ timeout: 30_000 });
+    await window.waitForTimeout(2000);
+    await window.screenshot({ path: path.join(shots, 'packaged-terminal.png') });
+
     await window.getByRole('link', { name: 'System Health' }).click();
     await window.getByText(/CPU/).first().waitFor({ timeout: 30_000 });
     await window.waitForTimeout(3000);
@@ -56,10 +72,16 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     assert.doesNotMatch(await window.locator('body').innerText(), /Netdata is unavailable|Backend unavailable/);
     assert.ok(existsSync(path.join(home, '.dolphin-server', 'token')), 'the helper did not use ~/.dolphin-server');
   } finally {
-    const exited = new Promise((resolve) => app.process().once('exit', resolve));
-    await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-    await exited;
-    try { execFileSync(helper, ['stop'], { env }); } catch { /* not running */ }
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [[path.join(home, '.dolphin-server'), { command: [helper], cwd: undefined, env }]],
+      // Only this test's tmux servers, each on an explicit socket under the scratch TMUX_TMPDIR.
+      // The host tmux uses .../default; the bundled one (wrapper: -L dolphin) uses .../dolphin.
+      cleanup: ['default', 'dolphin'].map((name) => () => {
+        const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, name);
+        const binary = name === 'dolphin' ? path.join(home, '.dolphin-server', 'bin', 'tmux') : 'tmux';
+        try { execFileSync(binary, ['-S', socket, 'kill-server'], { env, encoding: 'utf8', stdio: 'pipe' }); } catch (error) {
+          if (!/no server running|No such file|error connecting|ENOENT/.test(String(error.stderr ?? '') + String(error.message))) throw error;
+        }
+      }),
+      remove: [home] });
   }
 });

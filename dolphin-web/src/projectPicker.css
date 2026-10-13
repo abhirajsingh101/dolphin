@@ -284,6 +284,19 @@
   gap: var(--sp-2);
 }
 
+.picker-new-folder {
+  display: flex;
+  flex: 1 1 280px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.picker-new-folder .dt-input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
 /* ==========================================================================
    Touch minimums — docs/design-contract.md §4, "Touch targets at 390px
    coarse-pointer ≥44×44".
@@ -304,6 +317,10 @@
    matching prop would overlap rows instead of growing them.
    ========================================================================= */
 @media (max-width: 820px) and (pointer: coarse) {
+  .picker-new-folder .dt-input {
+    min-height: 44px;
+  }
+
   .picker-row-button {
     min-height: 44px;
   }

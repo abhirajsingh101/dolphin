@@ -70,3 +70,10 @@ def test_connect_refuses_without_memory_or_the_agent(home, monkeypatch):
         memory.connect(["claude"])
     with pytest.raises(ValueError):
         memory.connect(["vim"])
+
+
+def test_status_says_where_memory_stands(home, monkeypatch):
+    # The setup line above the chat stops polling when memory is simply off.
+    monkeypatch.setattr(brain, "status", lambda: {"state": "off", "optional": True})
+    monkeypatch.setattr(brain, "ready", lambda: False)
+    assert {row["memory_state"] for row in memory.status()} == {"off"}

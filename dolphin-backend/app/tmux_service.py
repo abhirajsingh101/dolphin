@@ -7,12 +7,17 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
+
+from .terminal_attach import DOLPHIN_TITLE_FORMAT, installed_tmux_version
+from .turn_state import OPTION as TURN_STATE_OPTION, parse_turn_state
 
 
 SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -20,6 +25,10 @@ FIELD_SEPARATOR = r"\037"
 RECENT_ACTIVITY_SECONDS = 5
 CODEX_START_TIMEOUT_SECONDS = 30.0
 CODEX_START_POLL_SECONDS = 0.25
+# A tmux call that has not answered in this long is killed. One hung tmux
+# (a wedged server, a stuck pane) used to freeze every caller behind it,
+# because the session scan holds _SESSIONS_CACHE_LOCK while it runs.
+TMUX_TIMEOUT_SECONDS = 5.0
 
 
 class TmuxServiceError(Exception):
@@ -57,6 +66,12 @@ class TmuxSessionInfo:
     tmux_server_id: str | None = None
     tmux_session_id: str | None = None
     pane_observations: tuple["TmuxPaneObservation", ...] | None = None
+    # The active pane's agent ("claude" / "codex"), the turn state its hook
+    # left there (only while that agent runs), and whether its process exited.
+    agent: str | None = None
+    turn_state: str | None = None
+    turn_at: datetime | None = None
+    pane_dead: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +88,23 @@ def workspace_roots() -> list[Path]:
         if raw_root.strip():
             roots.append(Path(raw_root).expanduser().resolve())
     return roots
+
+
+WORKTREES_DIRNAME = ".dolphin-worktrees"
+
+
+def worktrees_dir(workspace: Path) -> Path:
+    """Where Dolphin keeps a repository's worktrees: beside it, under the same
+    workspace root (app/session_worktrees.py explains the choice)."""
+    return workspace.parent / WORKTREES_DIRNAME / workspace.name
+
+
+def path_in_workspace(path: Path, workspace: Path) -> bool:
+    """A session belongs to a project when it works in the project's folder or
+    in one of that folder's Dolphin worktrees. Pure path arithmetic: no git."""
+    if path == workspace or workspace in path.parents:
+        return True
+    return worktrees_dir(workspace) in path.parents
 
 
 def workspace_path_status(raw_path: str | None) -> WorkspacePathStatus:
@@ -134,11 +166,51 @@ def tmux_binary() -> str:
     return _tmux_binary()
 
 
+def agent_socket_link() -> Path | None:
+    """Dolphin Desktop with SSH agent forwarding on for this machine: the
+    stable path it keeps pointed at the forwarded agent (<DOLPHIN_HOME>/run/
+    agent.sock). New sessions get it as SSH_AUTH_SOCK, so `git push` from an
+    agent there uses the laptop's keys, and keeps working across reconnects
+    because only the link's target changes. None outside helper mode.
+
+    A dangling link counts (the app re-points it on connect). A link that
+    resolves to something that is not a socket owned by this user does not."""
+    if not os.getenv("DOLPHIN_HELPER_VERSION"):
+        return None
+    from .helper import _paths, home
+
+    link = _paths(home())["run"] / "agent.sock"
+    if not os.path.lexists(link):
+        return None
+    try:
+        target = os.stat(link)
+    except FileNotFoundError:
+        return link
+    except OSError:
+        return None
+    if not stat.S_ISSOCK(target.st_mode) or target.st_uid != os.getuid():
+        return None
+    return link
+
+
 def _tmux_server_is_absent(stderr: str) -> bool:
     error = stderr.lower()
     return "no server running" in error or (
         "error connecting to" in error and "no such file or directory" in error
     )
+
+
+async def _communicate(process, input_bytes: bytes | None = None) -> tuple[bytes, bytes]:
+    try:
+        return await asyncio.wait_for(process.communicate(input_bytes), timeout=TMUX_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(process.wait(), timeout=1)
+        raise TmuxServiceError(
+            f"tmux did not answer within {TMUX_TIMEOUT_SECONDS:g} seconds.", 504
+        ) from None
 
 
 async def _run_tmux(*args: str, check: bool = True) -> tuple[int, str, str]:
@@ -148,7 +220,7 @@ async def _run_tmux(*args: str, check: bool = True) -> tuple[int, str, str]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate()
+    stdout, stderr = await _communicate(process)
     out = stdout.decode(errors="replace")
     err = stderr.decode(errors="replace")
     code = process.returncode
@@ -168,7 +240,7 @@ async def _run_tmux_with_input(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate(input_text.encode())
+    stdout, stderr = await _communicate(process, input_text.encode())
     out = stdout.decode(errors="replace")
     err = stderr.decode(errors="replace")
     code = process.returncode
@@ -469,6 +541,9 @@ class TmuxPaneObservation:
     pane_id: str | None = None
     pane_process_start_ticks: int | None = None
     gaps: tuple[str, ...] = ()
+    active: bool = False
+    dead: bool = False
+    turn_state: tuple[str, datetime] | None = None
 
 
 # Compatibility for existing internal tests and callers while the richer
@@ -894,6 +969,10 @@ async def _load_all_pane_observations() -> tuple[
             "#{pane_current_path}",
             "#{pane_current_command}",
             "#{pane_pid}",
+            "#{pane_active}",
+            "#{window_active}",
+            "#{pane_dead}",
+            "#{" + TURN_STATE_OPTION + "}",
         ]
     )
     code, out, err = await _run_tmux(
@@ -912,6 +991,7 @@ async def _load_all_pane_observations() -> tuple[
     for line in out.splitlines():
         parts = line.split(FIELD_SEPARATOR)
         legacy_row = len(parts) == 4
+        raw_active = raw_window_active = raw_dead = raw_turn = ""
         if legacy_row:
             # Keep the pre-08-09 observation contract consumable by isolated
             # callers while treating every absent stable identity as a typed
@@ -919,7 +999,7 @@ async def _load_all_pane_observations() -> tuple[
             # format; this branch never weakens exact attribution.
             session_name, raw_path, raw_command, raw_pid = parts
             socket_path = raw_server_pid = session_id = pane_id = ""
-        elif len(parts) == 8:
+        elif len(parts) in (8, 12):
             (
                 socket_path,
                 raw_server_pid,
@@ -929,7 +1009,9 @@ async def _load_all_pane_observations() -> tuple[
                 raw_path,
                 raw_command,
                 raw_pid,
-            ) = parts
+            ) = parts[:8]
+            if len(parts) == 12:
+                raw_active, raw_window_active, raw_dead, raw_turn = parts[8:]
         else:
             malformed = True
             continue
@@ -985,6 +1067,9 @@ async def _load_all_pane_observations() -> tuple[
                 pane_id=pane_id or None,
                 pane_process_start_ticks=pane_start,
                 gaps=tuple(gaps),
+                active=raw_active == "1" and raw_window_active == "1",
+                dead=raw_dead == "1",
+                turn_state=parse_turn_state(raw_turn),
             )
         )
 
@@ -1072,6 +1157,18 @@ async def _build_session_info(
         and observation.pid in detected_claude_code_pids
         for observation in observations
     )
+    # The session's active pane speaks for it; a row without the active flag
+    # (older formats) falls back to the first pane.
+    focused = next((o for o in observations if o.active), observations[0] if observations else None)
+    agent: str | None = None
+    if focused is not None and focused.pid is not None:
+        if focused.pid in detected_claude_code_pids:
+            agent = "claude"
+        elif focused.pid in detected_codex_pids:
+            agent = "codex"
+    # A turn state outlives the agent that wrote it (quit, crashed, killed
+    # mid-turn); without that agent in the pane it says nothing.
+    turn = focused.turn_state if focused is not None and agent else None
     pane_paths = tuple(
         dict.fromkeys(
             observation.path
@@ -1118,6 +1215,10 @@ async def _build_session_info(
         tmux_server_id=tmux_server_id,
         tmux_session_id=tmux_session_id,
         pane_observations=tuple(observations),
+        agent=agent,
+        turn_state=turn[0] if turn else None,
+        turn_at=turn[1] if turn else None,
+        pane_dead=bool(focused and focused.dead),
     )
 
 
@@ -1213,7 +1314,7 @@ async def _session_matches_workspace(
         session_paths.extend(
             Path(path).expanduser().resolve() for path in session.pane_paths
         )
-    if any(path == resolved or resolved in path.parents for path in session_paths):
+    if any(path_in_workspace(path, resolved) for path in session_paths):
         return session
     return None
 
@@ -1379,19 +1480,30 @@ async def pane_contains_executable(
     return False
 
 
+async def _has_session(session_name: str) -> bool:
+    code, _, _ = await _run_tmux("has-session", "-t", f"={session_name}", check=False)
+    return code == 0
+
+
 async def require_workspace_session(
-    workspace_path: Path, session_name: str
+    workspace_path: Path, session_name: str, *, fresh: bool = True
 ) -> TmuxSessionInfo:
+    """The named session, if it belongs to this workspace.
+
+    `fresh=False` is for opening a terminal: it reads the shared 2 s scan, so
+    twenty terminals opening at once cost one scan, not twenty in a row. A
+    session newer than that scan is confirmed with `has-session` first, and
+    only then re-scanned.
+    """
     if not _session_name_is_valid(session_name):
         raise TmuxServiceError("Invalid tmux session name.")
-    session = next(
-        (
-            candidate
-            for candidate in await _refresh_sessions_cache()
-            if candidate.name == session_name
-        ),
-        None,
-    )
+    sessions = await (_refresh_sessions_cache() if fresh else list_all_sessions())
+    session = next((candidate for candidate in sessions if candidate.name == session_name), None)
+    if session is None and not fresh and await _has_session(session_name):
+        session = next(
+            (candidate for candidate in await _refresh_sessions_cache() if candidate.name == session_name),
+            None,
+        )
     if session is None:
         raise TmuxServiceError("That tmux session is no longer available.", 404)
     matched = await _session_matches_workspace(
@@ -1427,7 +1539,27 @@ async def create_session(
         session_name,
         "-c",
         str(workspace_path),
+        # Sessions Dolphin creates hand their pane title (set by the agent
+        # with OSC 0/2) to attached terminals, so it reaches the window
+        # title. Sessions the user made keep their own settings.
+        ";",
+        "set-option",
+        "-t",
+        session_name,
+        "set-titles",
+        "on",
+        ";",
+        "set-option",
+        "-t",
+        session_name,
+        "set-titles-string",
+        DOLPHIN_TITLE_FORMAT,
     ]
+    # Per session only (`-e` and `set-environment -t`): the user's tmux
+    # server's global environment is never changed.
+    agent_link = agent_socket_link()
+    if agent_link is not None and await installed_tmux_version(_tmux_binary()) >= (3, 2):
+        args[1:1] = ["-e", f"SSH_AUTH_SOCK={agent_link}"]
 
     wait_task = await _spawn_tmux_detached(*args)
     asyncio.create_task(_discard_task_exception(wait_task))
@@ -1451,6 +1583,8 @@ async def create_session(
             workspace_path,
             session_name,
         )
+    if agent_link is not None:
+        await _run_tmux("set-environment", "-t", session_name, "SSH_AUTH_SOCK", str(agent_link), check=False)
     if mode == "codex":
         await start_codex(workspace_path, session_name)
         return await require_workspace_session(workspace_path, session_name)
@@ -1513,6 +1647,15 @@ async def kill_session(workspace_path: Path, session_name: str) -> None:
     await require_workspace_session(workspace_path, session_name)
     await _run_tmux("kill-session", "-t", session_name)
     _invalidate_sessions_cache()
+
+
+async def run_in_session(workspace_path: Path, session_name: str, command: str) -> None:
+    """Type one command line into the session's shell and press Enter, as a
+    person would. For commands Dolphin starts without waiting for them
+    (a worktree's setup before its agent, a resumed transcript)."""
+    await require_workspace_session(workspace_path, session_name)
+    await _run_tmux("send-keys", "-t", session_name, "-l", command)
+    await _run_tmux("send-keys", "-t", session_name, "Enter")
 
 
 async def send_input(
@@ -1723,6 +1866,97 @@ def build_agent_command(
     return command
 
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_LAUNCH_STALE_SECONDS = 24 * 3600
+RESUME_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$")
+
+
+def sanitize_prompt(text: str) -> str:
+    """Drop control characters except newline and tab. Defence in depth: the
+    prompt travels in a file, never as typed keys, but a terminal escape or a
+    ^C has no place in a prompt either way."""
+    # A lone surrogate (JSON "\\ud800") is not valid UTF-8; replace it here,
+    # before any session or file exists.
+    text = text.encode("utf-8", "replace").decode("utf-8")
+    return _CONTROL_CHARS.sub("", text)
+
+
+def _launch_root() -> Path:
+    home = Path(os.getenv("DOLPHIN_HOME") or Path.home() / ".dolphin-server")
+    return home / "launch"
+
+
+def prepare_agent_command(
+    binary: str,
+    *,
+    initial_prompt: str | None,
+    run_id: str | None,
+    setup: str | None = None,
+    resume_id: str | None = None,
+) -> str:
+    """The one line to type into a session's shell to start an agent.
+
+    User text is never typed. A prompt is written to a 0600 file in a private
+    0700 directory and read by a small launcher whose only content is fixed
+    text and paths Dolphin generated; the launcher removes both files after
+    reading. The typed line is `sh '<launcher>'`, which every login shell
+    (bash, zsh, fish) accepts. `setup` is a ready-made, already-quoted command
+    to run first (the repository's own script); the agent starts only if it
+    succeeds.
+    """
+    if binary not in {"claude", "codex", "shell"}:
+        raise TmuxServiceError("Unsupported agent.")
+    if binary == "shell" and initial_prompt is not None:
+        raise TmuxServiceError("A shell has no prompt.")
+    if resume_id is not None:
+        if binary not in {"claude", "codex"} or initial_prompt is not None or not RESUME_ID.fullmatch(resume_id):
+            raise TmuxServiceError("Cannot resume that session.", 422)
+    if initial_prompt is None and setup is None and resume_id is None and binary != "shell":
+        return build_agent_command(binary, initial_prompt=None, run_id=run_id)
+
+    root = _launch_root()
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)
+    cutoff = time.time() - _LAUNCH_STALE_SECONDS
+    for old in root.iterdir():
+        try:
+            if old.is_dir() and old.stat().st_mtime < cutoff:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    directory = root / uuid.uuid4().hex
+    directory.mkdir(mode=0o700)
+    lines = ["#!/bin/sh"]
+    if initial_prompt is not None:
+        fd = os.open(directory / "prompt.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(sanitize_prompt(initial_prompt))
+        # printf x keeps trailing newlines that $(...) would strip.
+        lines += [
+            f'prompt=$(cat {shlex.quote(str(directory / "prompt.txt"))}; printf x)',
+            'prompt=${prompt%x}',
+        ]
+    lines.append(f"rm -rf {shlex.quote(str(directory))}")
+    if run_id:
+        lines.append(f"export DOLPHIN_RUN_ID={shlex.quote(run_id)}")
+    if binary == "shell":
+        start = 'exec "${SHELL:-/bin/sh}" -l'
+    elif resume_id is not None:
+        # The id is its own argv element, validated and quoted.
+        start = f"exec claude --resume {shlex.quote(resume_id)}" if binary == "claude" else f"exec codex resume {shlex.quote(resume_id)}"
+    elif initial_prompt is not None:
+        # `--` ends option parsing: a prompt that starts with "-" stays a prompt.
+        start = f'exec {binary} -- "$prompt"'
+    else:
+        start = f"exec {binary}"
+    lines.append(f"{setup} && {start}" if setup else start)
+    launcher = directory / "launch.sh"
+    fd = os.open(launcher, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    return f"sh {shlex.quote(str(launcher))}"
+
+
 async def start_codex(
     workspace_path: Path,
     session_name: str,
@@ -1732,7 +1966,7 @@ async def start_codex(
     session = await require_workspace_session(workspace_path, session_name)
     if session.is_codex_running:
         return
-    command = build_agent_command("codex", initial_prompt=initial_prompt, run_id=run_id)
+    command = prepare_agent_command("codex", initial_prompt=initial_prompt, run_id=run_id)
     await _run_tmux("send-keys", "-t", session_name, "-l", command)
     await _run_tmux("send-keys", "-t", session_name, "Enter")
     readiness_checks = (
@@ -1791,7 +2025,7 @@ async def start_claude(
     if session.is_claude_code_running:
         return
 
-    command = build_agent_command(
+    command = prepare_agent_command(
         "claude", initial_prompt=initial_prompt, run_id=run_id
     )
     await _run_tmux("send-keys", "-t", session_name, "-l", command)
@@ -1826,13 +2060,19 @@ async def start_claude(
     )
 
 
+# Find in a terminal searches this snapshot, because under tmux the browser's
+# own buffer is the alternate screen and holds no history. tmux's
+# history-limit (2000 by default) still bounds what a pane keeps.
+MAX_SNAPSHOT_LINES = 10_000
+
+
 async def capture_session(
     workspace_path: Path,
     session_name: str,
     lines: int = 300,
 ) -> TmuxSnapshot:
     await require_workspace_session(workspace_path, session_name)
-    bounded_lines = max(40, min(lines, 2000))
+    bounded_lines = max(40, min(lines, MAX_SNAPSHOT_LINES))
     _, out, _ = await _run_tmux(
         "capture-pane",
         "-p",

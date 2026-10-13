@@ -31,6 +31,13 @@ from sqlalchemy import case, func, inspect as sa_inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from .terminal_attach import (
+    PREVIEW_FIXED_SIZE,
+    await_initial_size,
+    installed_tmux_version,
+    tmux_attach_command,
+    tmux_attach_env,
+)
 from . import (
     backup,
     migrations,
@@ -41,7 +48,7 @@ from . import (
     task_workflow_service,
 )
 from .database import async_session, get_db, init_db
-from . import brain, brain_api, desktop_api
+from . import brain, brain_api, desktop_api, workflow_api
 
 
 def _optional_module(name: str):
@@ -218,6 +225,7 @@ from .tmux_service import (
 app = FastAPI(title="Dolphin Tasks API", version="3.0.0")
 app.include_router(brain_api.router)
 app.include_router(desktop_api.router)
+app.include_router(workflow_api.router)
 logger = logging.getLogger(__name__)
 _managed_workspace_cleanup_task: asyncio.Task | None = None
 _terminal_attachment_cleanup_task: asyncio.Task | None = None
@@ -238,10 +246,19 @@ async def _sanitized_request_validation(
     """Never echo rejected browser-controlled values at the Chief boundary."""
 
     if not request.url.path.startswith("/api/chief/"):
-        return JSONResponse(
+        response = JSONResponse(
             status_code=422,
-            content={"detail": jsonable_encoder(error.errors())},
+            content={"detail": "Invalid request"},
         )
+        try:
+            # The default detail echoes the rejected input; a lone surrogate
+            # in it cannot be encoded, which used to turn this 422 into a 500.
+            return JSONResponse(
+                status_code=422,
+                content={"detail": jsonable_encoder(error.errors())},
+            )
+        except UnicodeEncodeError:
+            return response
     return JSONResponse(
         status_code=422,
         content={"detail": "Invalid request"},
@@ -509,6 +526,50 @@ def coalesce_pty_output(
         chunks.append(following)
         total += len(following)
     return b"".join(chunks)
+
+
+# How much PTY output may wait for a slow websocket. Above the high-water mark
+# the PTY reader is removed, so tmux blocks on a full pty instead of the
+# helper buffering a big log in memory; it resumes below the low-water mark.
+_PTY_HIGH_WATER_BYTES = 1024 * 1024
+_PTY_LOW_WATER_BYTES = 256 * 1024
+
+
+class PtyOutputQueue:
+    """PTY output waiting for the websocket, bounded by bytes. Nothing is dropped."""
+
+    def __init__(self, pause, resume, high: int = _PTY_HIGH_WATER_BYTES, low: int = _PTY_LOW_WATER_BYTES) -> None:
+        self.queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self.size = 0
+        self.paused = False
+        self.ended = False
+        self._pause = pause
+        self._resume = resume
+        self._high = high
+        self._low = low
+
+    def put(self, data: bytes) -> None:
+        self.queue.put_nowait(data)
+        self.size += len(data)
+        if not self.paused and self.size >= self._high:
+            self.paused = True
+            self._pause()
+
+    def end(self) -> None:
+        self.ended = True
+        self.queue.put_nowait(None)
+
+    async def get(self) -> bytes | None:
+        data = await self.queue.get()
+        if data is None:
+            return None
+        data = coalesce_pty_output(self.queue, data)
+        self.size -= len(data)
+        if self.paused and self.size <= self._low:
+            self.paused = False
+            if not self.ended:
+                self._resume()
+        return data
 
 
 @app.on_event("startup")
@@ -956,6 +1017,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
         )
         .outerjoin(task_counts, task_counts.c.project_id == Project.id)
         .outerjoin(ResearchBinding, ResearchBinding.project_id == Project.id)
+        .where(Project.is_hidden.is_(False))
         .order_by(Project.position, Project.created_at)
     )
     return [
@@ -1259,7 +1321,9 @@ async def _project_already_linked_to(
     target = _resolved_workspace_path(raw_path)
     if target is None:
         return None
-    result = await db.execute(select(Project).where(Project.path.isnot(None)))
+    result = await db.execute(
+        select(Project).where(Project.path.isnot(None), Project.is_hidden.is_(False))
+    )
     for project in result.scalars():
         if exclude_id is not None and project.id == exclude_id:
             continue
@@ -1847,7 +1911,8 @@ async def send_project_tmux_input(
 ):
     _, workspace_path = await _workspace_path_for_project(project_id, db)
     try:
-        await send_input(workspace_path, session_name, data.text, enter=data.enter)
+        await send_input(workspace_path, session_name, data.text, enter=data.enter,
+                         require_agent=data.require_agent)
     except TmuxServiceError as error:
         raise _tmux_error(error)
     return {"status": "ok"}
@@ -2082,30 +2147,45 @@ async def _stream_tmux_attach(
     project_id: str,
     workspace_path: Path,
     session_name: str,
+    *,
+    preview: bool = False,
 ) -> None:
+    # Spawn the tmux client at the browser's real size. The first resize is
+    # sent the moment the socket opens; see terminal_attach.await_initial_size.
+    initial = await await_initial_size(websocket.receive)
+    if initial.disconnected:
+        return
+
     master_fd, slave_fd = pty.openpty()
-    current_pty_size = (120, 36)
+    binary = tmux_binary()
+    version = await installed_tmux_version(binary)
+    # Before tmux 3.2 a preview cannot ignore-size, so its pty size would count
+    # toward the session. It sits at a fixed large size and never follows the browser.
+    current_pty_size = initial.size
+    if preview and version < (3, 2):
+        current_pty_size = PREVIEW_FIXED_SIZE
     _resize_pty(master_fd, *current_pty_size)
-
-    env = os.environ.copy()
-    env["TERM"] = "xterm-256color"
-
     process = await asyncio.create_subprocess_exec(
-        tmux_binary(),
-        "attach-session",
-        "-t",
-        session_name,
+        *tmux_attach_command(binary, session_name, version, preview=preview),
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
-        env=env,
+        env=tmux_attach_env(os.environ),
         start_new_session=True,
     )
     os.close(slave_fd)
     os.set_blocking(master_fd, False)
 
+    if not preview:
+        for data in initial.early_input:
+            await _write_websocket_human_input(
+                project_id=project_id,
+                session_name=session_name,
+                master_fd=master_fd,
+                data=data,
+            )
+
     loop = asyncio.get_running_loop()
-    output_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
 
     def on_pty_readable() -> None:
         try:
@@ -2115,25 +2195,32 @@ async def _stream_tmux_attach(
         except OSError:
             with contextlib.suppress(ValueError):
                 loop.remove_reader(master_fd)
-            output_queue.put_nowait(None)
+            output.end()
             return
 
         if data:
-            output_queue.put_nowait(data)
+            output.put(data)
         else:
             with contextlib.suppress(ValueError):
                 loop.remove_reader(master_fd)
-            output_queue.put_nowait(None)
+            output.end()
 
+    def pause_reading() -> None:
+        with contextlib.suppress(ValueError):
+            loop.remove_reader(master_fd)
+
+    def resume_reading() -> None:
+        with contextlib.suppress(ValueError, OSError):
+            loop.add_reader(master_fd, on_pty_readable)
+
+    output = PtyOutputQueue(pause_reading, resume_reading)
     loop.add_reader(master_fd, on_pty_readable)
 
     async def pty_to_websocket() -> None:
         while True:
-            data = await output_queue.get()
+            data = await output.get()
             if data is None:
                 return
-
-            data = coalesce_pty_output(output_queue, data)
             try:
                 await websocket.send_bytes(data)
             except (RuntimeError, WebSocketDisconnect):
@@ -2151,6 +2238,8 @@ async def _stream_tmux_attach(
                 return
 
             if message.get("bytes") is not None:
+                if preview:
+                    continue
                 await _write_websocket_human_input(
                     project_id=project_id,
                     session_name=session_name,
@@ -2169,7 +2258,7 @@ async def _stream_tmux_attach(
                 continue
 
             message_type = payload.get("type")
-            if message_type == "input":
+            if message_type == "input" and not preview:
                 data = str(payload.get("data", ""))
                 if data:
                     await _write_websocket_human_input(
@@ -2178,7 +2267,7 @@ async def _stream_tmux_attach(
                         master_fd=master_fd,
                         data=data.encode(),
                     )
-            elif message_type == "resize":
+            elif message_type == "resize" and not preview:
                 cols = max(20, min(int(payload.get("cols") or 120), 300))
                 rows = max(8, min(int(payload.get("rows") or 36), 120))
                 next_pty_size = (cols, rows)
@@ -2230,12 +2319,14 @@ async def stream_project_tmux_session(
     websocket: WebSocket,
     project_id: str,
     session_name: str,
+    view: Optional[str] = None,
 ):
     await websocket.accept()
     async with async_session() as db:
         try:
             _, workspace_path = await _workspace_path_for_project(project_id, db)
-            await require_workspace_session(workspace_path, session_name)
+            # The cached scan: a launch that opens twenty terminals costs one.
+            await require_workspace_session(workspace_path, session_name, fresh=False)
         except HTTPException as error:
             await websocket.send_json({"type": "error", "message": error.detail})
             await websocket.close(code=1008)
@@ -2251,6 +2342,7 @@ async def stream_project_tmux_session(
             project_id,
             workspace_path,
             session_name,
+            preview=view == "preview",
         )
     except WebSocketDisconnect:
         return
@@ -2332,6 +2424,7 @@ async def tasks_today(db: AsyncSession = Depends(get_db)):
             selectinload(Task.project),
             selectinload(Task.workflow),
         )
+        .where(Task.project.has(Project.is_hidden.is_(False)))
         .where(Task.is_done == False)
         .where(or_(Task.due_date <= today, Task.due_date == None))
         .order_by(Task.due_date.asc().nullslast(), Task.priority, Task.position)
@@ -2352,6 +2445,7 @@ async def tasks_upcoming(days: int = 14, db: AsyncSession = Depends(get_db)):
             selectinload(Task.project),
             selectinload(Task.workflow),
         )
+        .where(Task.project.has(Project.is_hidden.is_(False)))
         .where(Task.is_done == False)
         .where(Task.due_date != None)
         .where(Task.due_date >= today)
@@ -2390,7 +2484,7 @@ async def list_tasks(
         selectinload(Task.labels),
         selectinload(Task.project),
         selectinload(Task.workflow),
-    )
+    ).where(Task.project.has(Project.is_hidden.is_(False)))
 
     if project_id:
         query = query.where(Task.project_id == project_id)
@@ -2426,7 +2520,7 @@ async def list_tasks(
 async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db)):
     if data.project_id:
         project = await db.scalar(
-            select(Project).where(Project.id == data.project_id)
+            select(Project).where(Project.id == data.project_id, Project.is_hidden.is_(False))
         )
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")

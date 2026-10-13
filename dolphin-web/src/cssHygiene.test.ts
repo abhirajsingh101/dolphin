@@ -133,6 +133,35 @@ describe.each(SHEETS)('%s', (_name, css) => {
   });
 });
 
+// The glass sheets name every text size from the --fs-* scale (design
+// contract section 5). A literal pixel size is how a scale stops being the
+// scale. Other sheets join this list as they are cleaned.
+const TYPE_SCALE_SHEETS = ['glass.css'];
+const TYPE_SCALE_TOKENS = ['--fs-display', '--fs-xl', '--fs-lg', '--fs-md', '--fs-sm', '--fs-xs', '--fs-2xs'];
+
+describe('type scale', () => {
+  it.each(TYPE_SCALE_SHEETS)('%s sizes text only with --fs-* tokens', (name) => {
+    const css = readSheet(name).replace(/\/\*[\s\S]*?\*\//g, '');
+    const offenders = [...css.matchAll(/(?<![\w-])font(?:-size)?\s*:\s*([^;{}]+)/g)]
+      .filter((match) => /\d(?:\.\d+)?px/.test(match[1].split('/')[0]))
+      .map((match) => match[0].trim());
+    expect(offenders).toEqual([]);
+  });
+
+  it.each(TYPE_SCALE_SHEETS)('%s uses only steps the scale defines', (name) => {
+    const used = new Set([...readSheet(name).matchAll(/var\((--fs-[a-z0-9]+)\)/g)].map((match) => match[1]));
+    expect([...used].filter((token) => !TYPE_SCALE_TOKENS.includes(token))).toEqual([]);
+  });
+
+  it.each(['glass.css', 'sidebar.css'])('%s: small glass text uses the darker muted token', (name) => {
+    const css = readSheet(name).replace(/\/\*[\s\S]*?\*\//g, '');
+    const offenders = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter(([, , body]) => /font-size:\s*var\(--fs-(?:xs|2xs)\)/.test(body) && /color:\s*var\(--glass-muted\)/.test(body))
+      .map(([, selector]) => selector.trim());
+    expect(offenders).toEqual([]);
+  });
+});
+
 // ES modules evaluate each import statement's module — and everything IT
 // transitively imports — to completion, in declaration order. main.tsx used
 // to import App (which pulls in commandPalette.css and kanban.css through

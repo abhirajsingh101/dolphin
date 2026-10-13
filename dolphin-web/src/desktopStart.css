@@ -45,11 +45,17 @@
   transition: background 120ms, border-color 120ms;
 }
 
-.desktop-start .desktop-start-open {
+.desktop-start .desktop-start-primary {
   justify-content: center;
-  border-color: var(--glass-edge);
-  background: var(--glass-bubble);
+  border-color: transparent;
+  background: var(--glass-accent);
+  color: var(--glass-solid);
   font-weight: var(--fw-strong);
+}
+
+.desktop-start .desktop-start-primary:hover:not(:disabled),
+.desktop-start .desktop-start-primary:focus-visible {
+  background: var(--glass-accent-strong);
 }
 
 .desktop-start button > span {
@@ -88,6 +94,6 @@
 
 .desktop-start .desktop-start-connect {
   justify-content: center;
-  color: var(--glass-accent);
-  font-weight: 500;
+  color: var(--glass-muted-small);
+  font-weight: 400;
 }

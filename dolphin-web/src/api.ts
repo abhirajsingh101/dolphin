@@ -1,4 +1,8 @@
 import type {
+  LaunchRequest,
+  LaunchResult,
+  SessionLink,
+  WorktreeOptions,
   NotificationList,
   ControlCenterSnapshot,
   HarnessMap,
@@ -32,6 +36,11 @@ import type {
   WorkspaceDirectoryList,
   WorkspaceRoot,
   WorkspaceStatus,
+  GitStatuses,
+  SessionDiff,
+  ListeningPort,
+  UsageReport,
+  HistoryItem,
 } from './types';
 
 const browserLocation =
@@ -40,6 +49,9 @@ const browserLocation =
     : window.location;
 
 /** Where a Dolphin backend answers, and the token it wants (helper mode). */
+export type ImportedProject = { id: string; name: string; path: string; sessions: string[] };
+export type PendingImport = { path: string; name: string; sessions: string[] };
+
 export type Endpoint = { base: string; token: string };
 
 /* Dolphin Desktop's preload hands the window its own computer's helper: a
@@ -52,11 +64,18 @@ const desktopConfig: DesktopConfig | undefined =
     ? undefined
     : (window as { dolphinDesktop?: { config?: DesktopConfig } }).dolphinDesktop?.config;
 
+/** The discard port. Dolphin Desktop with no helper of its own (it did not
+    start) must fail fast here, never reach the web install's :8400, which has
+    no authentication. */
+export const NO_LOCAL_HELPER = 'http://127.0.0.1:9';
+const inDesktop = typeof window !== 'undefined' && Boolean((window as { dolphinDesktop?: unknown }).dolphinDesktop);
+
 const defaultEndpoint: Endpoint = {
   base:
     desktopConfig?.apiBase ??
-    import.meta.env.VITE_API_URL ??
-    `${browserLocation.protocol}//${browserLocation.hostname}:8400`,
+    (inDesktop
+      ? NO_LOCAL_HELPER
+      : import.meta.env.VITE_API_URL ?? `${browserLocation.protocol}//${browserLocation.hostname}:8400`),
   token: desktopConfig?.token ?? '',
 };
 
@@ -516,11 +535,40 @@ function makeApi(endpoint: Endpoint) {
     });
   }
 
-  function sendTmuxInput(projectId: string, sessionName: string, text: string): Promise<unknown> {
+  function fetchSessionDiff(projectId: string, sessionName: string): Promise<SessionDiff> {
+    return request<SessionDiff>(
+      `/api/projects/${encodeURIComponent(projectId)}/tmux/sessions/${encodeURIComponent(sessionName)}/diff`,
+    );
+  }
+
+  /** `requireAgent`: the helper refuses (409) unless Codex or Claude runs in the pane, so a shell never runs the text. */
+  function sendTmuxInput(projectId: string, sessionName: string, text: string, options: { requireAgent?: boolean } = {}): Promise<unknown> {
     return request(`/api/projects/${projectId}/tmux/sessions/${encodeURIComponent(sessionName)}/input`, {
       method: 'POST',
-      body: JSON.stringify({ text, enter: true }),
+      body: JSON.stringify(options.requireAgent ? { text, enter: true, require_agent: true } : { text, enter: true }),
     });
+  }
+
+  function launchSession(projectId: string, body: LaunchRequest): Promise<LaunchResult> {
+    return request<LaunchResult>(`/api/projects/${encodeURIComponent(projectId)}/launch`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  function fetchSessionLinks(projectId: string): Promise<SessionLink[]> {
+    return request<SessionLink[]>(`/api/projects/${encodeURIComponent(projectId)}/session-links`);
+  }
+
+  function getWorktreeOptions(projectId: string): Promise<WorktreeOptions> {
+    return request<WorktreeOptions>(`/api/projects/${encodeURIComponent(projectId)}/worktree-options`);
+  }
+
+  function archiveWorktree(projectId: string, sessionName: string): Promise<SessionLink> {
+    return request<SessionLink>(
+      `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(sessionName)}/archive`,
+      { method: 'POST' },
+    );
   }
 
   /** Dolphin Desktop: which agent CLIs this host has, and how to install the rest. */
@@ -529,13 +577,22 @@ function makeApi(endpoint: Endpoint) {
     return request<AgentCli[]>('/api/desktop/agents');
   }
 
-  /** Dolphin Desktop: make projects of the folders this machine's tmux sessions
-   * run in. Each folder is imported once; returns the projects just added. */
-  function importTmuxProjects(): Promise<{ id: string; name: string; path: string; sessions: string[] }[]> {
-    return request<{ added: { id: string; name: string; path: string; sessions: string[] }[] }>(
-      '/api/desktop/tmux-projects',
+  function openOtherSession(sessionName: string): Promise<{ project_id: string; project_name: string }> {
+    return request<{ project_id: string; project_name: string }>(
+      `/api/tmux/other-sessions/${encodeURIComponent(sessionName)}/open`,
       { method: 'POST' },
-    ).then((body) => body.added);
+    );
+  }
+
+  /** Dolphin Desktop: make projects of the folders this machine's tmux sessions
+   * run in. More than five new folders come back as `pending` until `paths`
+   * names the ones to add (an empty list declines them all). `offered` is the
+   * list the user was shown: only those are remembered as answered. */
+  function importTmuxProjects(paths?: string[], offered?: string[]): Promise<{ added: ImportedProject[]; pending: PendingImport[] }> {
+    return request<{ added: ImportedProject[]; pending: PendingImport[] }>('/api/desktop/tmux-projects', {
+      method: 'POST',
+      ...(paths ? { body: JSON.stringify(offered ? { paths, offered } : { paths }) } : {}),
+    });
   }
 
   function renameTmuxSession(
@@ -722,8 +779,31 @@ function makeApi(endpoint: Endpoint) {
 
   const notificationStreamUrl = withToken(`${API_BASE}/api/notifications/stream`);
 
+  function getListeningPorts(): Promise<ListeningPort[]> {
+    return request<ListeningPort[]>('/api/desktop/ports');
+  }
+
+  function searchHistory(projectId: string, query: string, signal?: AbortSignal): Promise<HistoryItem[]> {
+    return request<HistoryItem[]>(
+      `/api/desktop/history?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(query)}`,
+      { signal },
+    );
+  }
+
+  function getUsage(): Promise<UsageReport> {
+    return request<UsageReport>('/api/desktop/usage');
+  }
+
+  function fetchGitStatus(): Promise<GitStatuses> {
+    return request<GitStatuses>('/api/git/status');
+  }
+
   return {
     API_BASE,
+    getListeningPorts,
+    getUsage,
+    searchHistory,
+    fetchGitStatus,
     API_TOKEN,
     WS_BASE,
     authHeaders,
@@ -765,8 +845,14 @@ function makeApi(endpoint: Endpoint) {
     fetchSystemHealthWorkloads,
     createTmuxSession,
     sendTmuxInput,
+    launchSession,
+    fetchSessionLinks,
+    getWorktreeOptions,
+    archiveWorktree,
+    fetchSessionDiff,
     getAgentClis,
     importTmuxProjects,
+    openOtherSession,
     renameTmuxSession,
     closeTmuxSession,
     fetchTmuxSnapshot,
@@ -801,6 +887,14 @@ export function apiFor(endpoint: Endpoint): Api {
     clients.set(id, client);
   }
   return client;
+}
+
+/** Forget the clients for endpoints no machine uses any more (a reconnect
+    gives a machine a new token, and each token had a client forever). The
+    window's own `api` and its NO_LOCAL_HELPER address are not in this map. */
+export function pruneClients(keep: Endpoint[]): void {
+  const wanted = new Set(keep.map((endpoint) => `${endpoint.base} ${endpoint.token}`));
+  for (const id of [...clients.keys()]) if (!wanted.has(id)) clients.delete(id);
 }
 
 export const {
@@ -846,8 +940,14 @@ export const {
   fetchSystemHealthWorkloads,
   createTmuxSession,
   sendTmuxInput,
+  launchSession,
+  fetchSessionLinks,
+  getWorktreeOptions,
+  archiveWorktree,
+  fetchSessionDiff,
   getAgentClis,
   importTmuxProjects,
+  openOtherSession,
   renameTmuxSession,
   closeTmuxSession,
   fetchTmuxSnapshot,

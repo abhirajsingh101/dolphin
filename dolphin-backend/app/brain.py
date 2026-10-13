@@ -13,9 +13,17 @@ The brain starts keyless: keyword search and the memory verbs work with no API
 key and no cost. The chat reaches it through `gbrain call <tool> <json>`, one
 short-lived process per call, so nothing listens on a port.
 
-DOLPHIN_GBRAIN selects the mode: "auto" (install and use Dolphin's own brain;
-the helper's default) or "off" (the web install's default). DOLPHIN_GBRAIN_COMMAND
-points Dolphin at an existing GBrain instead, e.g. "/opt/gbrain/bin/gbrain".
+DOLPHIN_GBRAIN selects the mode:
+
+- "ask" (the helper's default since 0.2.0): off until the user turns memory on
+  in Dolphin Desktop, which records the choice in <DOLPHIN_HOME>/gbrain/consent.json
+  (POST /api/brain/consent). A brain set up before 0.2.0, with no choice on
+  record, stays on.
+- "auto": install and use Dolphin's own brain unasked (tests and the smoke test).
+- "off": the web install's default.
+
+DOLPHIN_GBRAIN_COMMAND points Dolphin at an existing GBrain instead, e.g.
+"/opt/gbrain/bin/gbrain".
 """
 
 from __future__ import annotations
@@ -53,6 +61,13 @@ class BrainError(RuntimeError):
     pass
 
 
+class _Declined(Exception):
+    """The user turned memory off while setup was running."""
+
+
+_child: subprocess.Popen | None = None  # the setup step running now, so a "no" can stop it
+
+
 # --- where things live -----------------------------------------------------------
 
 def base() -> Path:
@@ -76,10 +91,29 @@ def _paths() -> dict[str, Path]:
     }
 
 
+def consent() -> bool | None:
+    """The user's recorded choice, or None when they have not made one."""
+    try:
+        value = json.loads((base() / "consent.json").read_text()).get("memory")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
 def mode() -> str:
     if os.getenv("DOLPHIN_GBRAIN_COMMAND"):
         return "external"
-    return "auto" if os.getenv("DOLPHIN_GBRAIN", "off") == "auto" else "off"
+    setting = os.getenv("DOLPHIN_GBRAIN", "off")
+    if setting == "auto":
+        return "auto"
+    if setting == "ask":
+        chosen = consent()
+        if chosen is None:
+            # Before 0.2.0 the helper set memory up unasked; a brain that is
+            # already there stays on until the user turns it off.
+            chosen = _read_state().get("state") == "ready" and _paths()["cli"].exists()
+        return "auto" if chosen else "off"
+    return "off"
 
 
 def _platform_key() -> str | None:
@@ -109,7 +143,7 @@ def status() -> dict[str, Any]:
     """What the UI shows: off, installing (with the current step), ready or failed."""
     current = mode()
     if current == "off":
-        return {"state": "off"}
+        return {"state": "off", "optional": True} if os.getenv("DOLPHIN_GBRAIN") == "ask" else {"state": "off"}
     if current == "external":
         return {"state": "ready", "source": "external"}
     state = _read_state()
@@ -156,12 +190,24 @@ def _environment() -> dict[str, str]:
 def _run(arguments: list[str], *, timeout: float, cwd: Path | None = None, command: list[str] | None = None,
          stdin: str | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run([*(command or _command()), *arguments], cwd=cwd, env=_environment(),
-                              input=stdin, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired as error:
-        raise BrainError(f"GBrain did not answer within {timeout:g} seconds.") from error
+        process = subprocess.Popen([*(command or _command()), *arguments], cwd=cwd, env=_environment(),
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except OSError as error:
         raise BrainError(f"GBrain could not start: {error}") from error
+    global _child
+    with _lock:
+        _child = process
+    try:
+        stdout, stderr = process.communicate(input=stdin, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        process.kill()
+        process.communicate()
+        raise BrainError(f"GBrain did not answer within {timeout:g} seconds.") from error
+    finally:
+        with _lock:
+            if _child is process:
+                _child = None
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 
 
 def _parse(stdout: str) -> Any:
@@ -207,8 +253,7 @@ def _step(text: str) -> None:
 def _download(url: str, target: Path) -> None:
     # curl, not urllib: a frozen helper's Python may not find the system's CA
     # certificates on macOS; curl always does.
-    result = subprocess.run(["curl", "-fsSL", "--retry", "3", "-o", str(target), url],
-                            capture_output=True, text=True, timeout=300)
+    result = _run(["-fsSL", "--retry", "3", "-o", str(target), url], timeout=300, command=["curl"])
     if result.returncode != 0:
         raise BrainError(f"Download failed ({url}): {result.stderr.strip()[:200]}")
 
@@ -274,26 +319,64 @@ def _self_test(paths: dict[str, Path]) -> None:
     _parse(result.stdout)
 
 
+def _still_wanted() -> None:
+    if mode() != "auto":
+        raise _Declined()
+
+
+def _decline(paths: dict[str, Path], created: list[Path]) -> None:
+    """Setup stopped because the user said no: remove only what this run made."""
+    _log("stopped: memory was turned off")
+    for path in created:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    shutil.rmtree(paths["cache"], ignore_errors=True)
+    _write_state(state="off")
+
+
 def install() -> None:
-    """Install Bun and GBrain, create the brain, and check it. Safe to re-run."""
+    """Install Bun and GBrain, create the brain, and check it. Safe to re-run.
+    Stops cleanly, between steps, if the user turns memory off meanwhile."""
     paths = _paths()
     key = _platform_key()
+    created: list[Path] = []
+
+    def begin(step: str, *targets: Path) -> None:
+        _still_wanted()
+        created.extend(target for target in targets if not target.exists())
+        step_function[step]()
+        _still_wanted()
+
     try:
         if key is None or key not in BUN_SHA256:
             raise BrainError(f"Dolphin's memory does not support {platform.system()} {platform.machine()} yet.")
         if shutil.which("curl") is None:
             raise BrainError("Setting up memory needs curl, which this machine does not have.")
+        if not paths["root"].exists():
+            created.append(paths["root"])
         paths["root"].mkdir(parents=True, exist_ok=True)
         os.chmod(paths["root"], 0o700)
-        _install_bun(paths, key)
-        if not paths["cli"].exists():
-            _install_gbrain(paths)
-        _initialise(paths)
-        _self_test(paths)
+        step_function = {
+            "bun": lambda: _install_bun(paths, key),
+            "gbrain": lambda: None if paths["cli"].exists() else _install_gbrain(paths),
+            "init": lambda: _initialise(paths),
+            "check": lambda: _self_test(paths),
+        }
+        begin("bun", paths["bun"].parent)
+        begin("gbrain", paths["runtime"])
+        begin("init", paths["home"])
+        begin("check")
         shutil.rmtree(paths["cache"], ignore_errors=True)  # Bun's download cache: ~150 MB, not needed again
         _log("ready")
         _write_state(state="ready", version=GBRAIN_VERSION)
+    except _Declined:
+        _decline(paths, created)
     except BrainError as error:
+        if mode() != "auto":  # a killed step looks like a failure; it was a "no"
+            _decline(paths, created)
+            return
         _log(f"failed: {error}")
         _write_state(state="failed", error=str(error))
     except Exception as error:  # setup must never take the helper down
@@ -315,3 +398,29 @@ def start_install(force: bool = False) -> dict[str, Any]:
         _worker = threading.Thread(target=install, name="gbrain-install", daemon=True)
         _worker.start()
     return status()
+
+
+
+def set_consent(on: bool) -> dict[str, Any]:
+    """Record the user's choice and act on it. Turning memory off stops a setup
+    that is running (removing only its partial files) and keeps the rest; turning
+    it on starts setup (or retries one that failed). Outside "ask" mode the
+    environment decides, and this changes nothing."""
+    if os.getenv("DOLPHIN_GBRAIN") != "ask" or os.getenv("DOLPHIN_GBRAIN_COMMAND"):
+        return status()
+    path = base() / "consent.json"
+    with _lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, name = tempfile.mkstemp(prefix=".consent-", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(json.dumps({"memory": on, "at": time.time()}))
+            os.replace(name, path)
+        except BaseException:
+            Path(name).unlink(missing_ok=True)
+            raise
+        if not on and _child is not None:
+            _child.kill()
+    if not on:
+        return status()
+    return start_install(force=_read_state().get("state") == "failed")

@@ -93,3 +93,11 @@ def test_shim_runs_the_helper_hook():
                             cwd=BACKEND, input=b'{"last_assistant_message":"x"}', capture_output=True, timeout=30,
                             env=environ)
     assert result.returncode == 0 and result.stdout == b"{}\n"
+
+
+def test_the_shim_tells_the_hook_where_its_helper_lives(home):
+    import shlex
+
+    text = setup.shim_path().read_text()
+    assert f"DOLPHIN_HOME={shlex.quote(str(home / '.dolphin-server'))}; export DOLPHIN_HOME\n" in text
+    assert text.rstrip().endswith('hook "$@"')

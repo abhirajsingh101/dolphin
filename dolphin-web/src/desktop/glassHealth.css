@@ -17,44 +17,17 @@
   --text-3: var(--glass-muted);
   --accent: var(--glass-accent);
   --sh-1: inset 0 1px 0 var(--glass-edge);
-  position: relative;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
   isolation: isolate;
   display: flex;
-  height: 100dvh;
   flex-direction: column;
   padding: 0 18px 18px;
   overflow: clip;
   color: var(--glass-text);
   font: 13px/1.5 var(--font-sans);
-  background:
-    radial-gradient(ellipse at 50% -25%, var(--glass-glow), transparent 65%),
-    radial-gradient(ellipse at 100% 85%, var(--glass-glow), transparent 60%),
-    linear-gradient(155deg, transparent 53%, var(--glass-ridge) 54%, transparent 58%),
-    var(--glass-bg);
-}
-.glass-health::before {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse at 22% 26%, var(--glass-glow), transparent 48%),
-    radial-gradient(ellipse at 95% 70%, var(--glass-tint), transparent 45%);
-  content: '';
-  pointer-events: none;
-}
-.glass-health::after {
-  position: absolute;
-  top: -63vh;
-  left: 12vw;
-  z-index: -1;
-  width: 125vw;
-  height: 85vh;
-  border: 50px solid var(--glass-ridge);
-  border-radius: 50%;
-  box-shadow: 0 18px 45px var(--glass-glow), inset 0 -4px 22px var(--glass-glow);
-  content: '';
-  pointer-events: none;
-  transform: rotate(24deg);
+  background: var(--glass-bg);
 }
 
 /* The header: the workspace's, so moving between the two does not jump. */
@@ -169,3 +142,6 @@
     display: none;
   }
 }
+
+.glass-health-unavailable { max-width: 52ch; margin: 12vh auto 0; text-align: center; color: var(--glass-muted); }
+.glass-health-unavailable strong { color: var(--glass-text); }

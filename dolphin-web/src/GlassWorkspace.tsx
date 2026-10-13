@@ -1,31 +1,46 @@
-import { DndContext, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
-import { SortableContext, useSortable, arrayMove, horizontalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import type { ReactNode } from 'react';
-import { Fragment, Suspense, lazy, useEffect, useLayoutEffect, useState, useRef } from 'react';
-import { animate, AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { trustedInstallStart } from './agentInstall';
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels';
 import GlassSessionWindow from './GlassSessionWindow';
-import GlassProjectTasks from './GlassProjectTasks';
 import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
 import AgentSetupPrompt from './AgentSetupPrompt';
+import { currentPlatform, isMacPlatform, shortcutLabel } from './shortcutLabel';
+import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, writeLayout } from './workspace/layoutMemory';
+import { CHAT_MIN_WIDTH, chatFits, clampChatWidth, foldShortcut } from './workspace/chatColumn';
 import BrainStatus from './BrainStatus';
 import UpdateControl, { canUpdate, type AboutAnchor } from './UpdateControl';
-import MachineSection from './MachineSection';
-import { canConnect, machineBridge, useMachineLinks, type MachineLink } from './machines';
+import StatusGlyph from './StatusGlyph';
+import { mergeGit } from './gitStatus';
+import { glassDocumentTitle } from './documentTitle';
+import { forgetTerminalActivity, forgetTerminalActivityUnder, useTerminalActivity } from './terminal/activity';
+import { terminalKey } from './terminal/terminalKey';
+import { markSeen, seenAt, sessionState, useSeenTurns, type SessionState } from './sessionState';
+import MachineSection, { type WorkflowPanelKind } from './MachineSection';
+import SidebarProject, { useNow } from './SidebarProject';
+import PinnedList from './workspace/PinnedList';
+import { GlancePopover, useGlance, type GlanceTarget } from './workspace/HoverGlance';
+import { targetKey, type Target } from './workspace/targets';
+import { nextRow, visibleProjects } from './sidebarModel';
+import { canConnect, machineBridge, terminalReconnectKey, useMachineLinks, type MachineLink } from './machines';
 import { ApiContext } from './apiContext';
+import { useSetting } from './settings';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
 const ConnectMachineDialog = lazy(() => import('./ConnectMachineDialog'));
 const DesktopStart = lazy(() => import('./DesktopStart'));
+const SettingsDialog = lazy(() => import('./SettingsDialog'));
+const GlassProjectTasks = lazy(() => import('./GlassProjectTasks'));
+const DiffPanel = lazy(() => import('./DiffPanel'));
+const PortsPanel = lazy(() => import('./PortsPanel'));
+const UsagePanel = lazy(() => import('./UsagePanel'));
+const HistoryPanel = lazy(() => import('./HistoryPanel'));
 import NotificationBell from './NotificationBell';
 import {
-  ArrowUp,
   ChevronDown,
-  Folder,
-  FolderMinus,
   Search,
   Plus,
   Sun,
@@ -36,56 +51,55 @@ import {
   Server,
   ArrowUpRight,
   PanelLeft,
+  MessageSquare,
+  PanelRightClose,
 } from 'lucide-react';
 import {
   api,
   apiFor,
+  pruneClients,
   request,
   DolphinApiError,
   type Api,
+  type PendingImport,
 } from './api';
 import type { SessionChoice } from './NewSessionDialog';
-import { applyTheme, persistTheme, readStoredTheme } from './theme';
+import { resolveTheme } from './theme';
+import { chooseTheme, syncThemeSetting } from './workspace/themeChoice';
+import { onDesktopCommand, type CommandId } from './desktop/bridge';
+import { adjacentTab } from './workspace/tabCycle';
+import { runTerminalCommand } from './terminal/commands';
 import type {
   ControlCenterProject,
   ControlCenterSession,
+  TmuxSession,
+  GitStatuses,
+  HistoryItem,
+  OtherSession,
 } from './types';
+/** The seen-turns project key for sessions in no project, in the row and in the tab. */
+const OTHER_PROJECT_KEY = 'other';
+const OtherSessions = lazy(() => import('./OtherSessions'));
+const ImportSessionsDialog = lazy(() => import('./ImportSessionsDialog'));
 import './glass.css';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import MarkdownReply, { prefetchMarkdown } from './workspace/MarkdownReply';
+import { loadTerminalFeatures, loadTerminalPane, prefetchWhenIdle } from './workspace/prefetch';
+import { sameProjects } from './workspace/snapshots';
 import CommandPalette from './CommandPalette';
 import DolphinIcon from './DolphinIcon';
-import type { PaletteItem } from './commandPaletteModel';
+import { paletteCommands } from './workspace/paletteCommands';
 import { isTerminalLikeTarget } from './shortcutTarget';
+import { sessionsInViewLabel } from './sessionsInView';
+import type { Message, ToolActivity, TrackedWork, Thread } from './workspace/chatTypes';
+import ChatComposer, { type ComposerHandle } from './workspace/ChatComposer';
+import LiveReply from './workspace/LiveReply';
+import { useStable } from './workspace/useStable';
+import { trackPanelOpeners } from './useModalPanel';
+
+trackPanelOpeners();
 type DashboardContext = { open_windows: { project_id: string; session_name: string; minimized: boolean; tab_hidden?: boolean }[]; pinned_sessions: { project_id: string; session_name: string }[]; focused_session: { project_id: string; session_name: string } | null };
-/** A session on a machine. `machine` is the machine's id (`local` for this
-    computer); targets saved before it existed find theirs by project. */
-type Target = { projectId: string; projectName: string; sessionName: string; machine?: string };
 type MachineProject = ControlCenterProject & { machine: string };
-type ToolActivity = { id: string; tool: string; status: string; arguments: Record<string, unknown>; result: unknown };
-type Message = { id: string; created_at?: string; role: 'user' | 'assistant'; text: string; payload?: { work_summary_receipt?: string; engine?: { provider: string; model: string; fallback: boolean } | null; uncertainty_note?: string | null; tool_activity?: ToolActivity[] } };
-type TrackedWork = { id: string; project_id: string; session_name: string; state: string; finished_at: string | null; summary_status?: string | null };
-type Thread = { id: string; title: string };
-const key = (t: Target) => JSON.stringify([t.projectId, t.sessionName]);
-function status(s: ControlCenterSession) {
-  return s.observation_state === 'degraded'
-    ? 'Status unavailable'
-    : s.has_recent_activity
-      ? 'Recent activity'
-      : s.is_codex_running
-        ? 'Agent connected'
-        : s.attached
-          ? 'Attached'
-          : 'Idle';
-}
-function FocusItem({ id, selected, activity, label, onOpen, onUnpin, children }: { id: string; selected: boolean; activity: boolean; label: string; onOpen: () => void; onUnpin: () => void; children: ReactNode }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
-  return <div ref={setNodeRef} data-activity={activity} className={`glass-focus-item ${selected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
-    style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 2 : undefined }}>
-    <button ref={setActivatorNodeRef} {...attributes} {...listeners} aria-label={`Open focused ${label}`} title={label} onClick={onOpen}>{children}</button>
-    <button aria-label={`Unpin ${label}`} onClick={onUnpin}><X size={12} /></button>
-  </div>;
-}
+const key = targetKey;
 /** `desktop`: Dolphin Desktop's build, which has no Missions or legacy views
     but does have System Health. */
 /** What fetch says when the backend can't be reached at all (Chromium, Firefox, Safari). */
@@ -94,7 +108,7 @@ const NETWORK_ERROR = /Failed to fetch|NetworkError|Load failed/i;
 /** The web app's one backend, as a machine, so both builds list projects the same way. */
 const LOCAL: MachineLink = {
   id: 'local', kind: 'local', target: null, label: 'This Computer', hostname: null, state: 'connected',
-  status: null, error: null, reason: null, offerKey: false, apiBase: null, token: null,
+  status: null, error: null, reason: null, offerKey: false, apiBase: null, token: null, epoch: 0,
 };
 
 export default function GlassWorkspace({ desktop = false, renderSignals }: {
@@ -102,11 +116,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   /** The web app's suggestion tray, shown above the composer. The desktop app has none. */
   renderSignals?: (onDiscuss: (text: string) => void) => ReactNode;
 } = {}) {
+  const storage = useRef(browserStorage()).current;
   // Dolphin Desktop has no legacy project page, so + opens the folder picker
   // here. It browses the connected machine, which works for SSH hosts too.
   // Each holds the machine (or that machine's project) it was opened for.
   const [pickingProject, setPickingProject] = useState<string | null>(null);
   const [choosingSession, setChoosingSession] = useState<MachineProject | null>(null);
+  const [reviewing, setReviewing] = useState<Target | null>(null);
+  type WorkflowPanel =
+    | { kind: WorkflowPanelKind; machine: string }
+    | { kind: 'history'; machine: string; projectId: string; projectName: string };
+  const [panel, setPanel] = useState<WorkflowPanel | null>(null);
   const [removingProject, setRemovingProject] = useState<MachineProject | null>(null);
   const [restored] = useState(() => {
     const empty = { windows: [] as Target[], minimized: [] as string[], active: null as Target | null };
@@ -127,19 +147,30 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     } catch { return empty; }
   });
 
-  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   // Dolphin Desktop: every machine in this window, this computer first. Each
   // one's projects come from its own helper, through its own client.
   const links = useMachineLinks(desktop);
   const sections: MachineLink[] = desktop && links.length ? links : [LOCAL];
   const clientOf = (link: MachineLink | undefined): Api | null => {
     if (!link) return null;
-    if (link.id === 'local') return api;
+    // This computer failed: its section says so; nothing asks it for projects.
+    if (link.id === 'local') return desktop && link.state === 'failed' ? null : api;
     return link.apiBase && link.token !== null && link.state !== 'failed' ? apiFor({ base: link.apiBase, token: link.token }) : null;
   };
+  // Each connected machine's client; another machine carries its name. One list
+  // for the bell and the agent setup line.
+  const machineSources = sections.flatMap((link) => {
+    const client = clientOf(link);
+    return client ? [{ id: link.id, label: link.id === 'local' ? undefined : link.label, api: client }] : [];
+  });
+  /** Each machine's Inbox: where the first-run checklist opens its terminals. */
+  const inboxOf = (machine: string) => projects.find((project) => project.machine === machine && project.is_inbox);
   const apiOf = (machine: string | undefined) => (machine === 'local' ? api : clientOf(sections.find((link) => link.id === machine)));
   const labelOf = (machine: string | undefined) => sections.find((link) => link.id === machine)?.label ?? '';
   const [projectsBy, setProjectsBy] = useState<Record<string, ControlCenterProject[]>>({});
+  const [otherBy, setOtherBy] = useState<Record<string, OtherSession[]>>({});
+  const openingOther = useRef(new Set<string>());
+  const [, bumpOpening] = useState(0);
   const projects: MachineProject[] = sections.flatMap((link) => (projectsBy[link.id] ?? []).map((project) => ({ ...project, machine: link.id })));
   const machineOfTarget = (target: Target) => target.machine ?? projects.find((project) => project.id === target.projectId)?.machine ?? (desktop ? undefined : 'local');
   const [collapsedMachines, setCollapsedMachines] = useState<string[]>(() => {
@@ -147,11 +178,31 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     catch { return []; }
   });
   useEffect(() => { try { localStorage.setItem('dolphin.glass.collapsed-machines', JSON.stringify(collapsedMachines)); } catch { /* Storage is optional. */ } }, [collapsedMachines]);
+  const [collapsedProjects, setCollapsedProjects] = useState<string[]>(() => {
+    try { const saved: unknown = JSON.parse(localStorage.getItem('dolphin.glass.collapsed-projects') ?? '[]'); return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; }
+    catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem('dolphin.glass.collapsed-projects', JSON.stringify(collapsedProjects)); } catch { /* Storage is optional. */ } }, [collapsedProjects]);
+  // Projects linked in this window stay in view while they have no sessions yet.
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
+  // Machines whose empty projects the user asked to see.
+  const [showEmpty, setShowEmpty] = useState<string[]>([]);
+  const now = useNow(30_000);
+  // The row to focus once the reveal button has made it exist (the button unmounts on click).
+  const [focusProject, setFocusProject] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusProject) return;
+    document.querySelector<HTMLElement>(`.glass-tree summary[data-project-key="${window.CSS.escape(focusProject)}"]`)?.focus();
+    setFocusProject(null);
+  }, [focusProject, showEmpty]);
   const [query, setQuery] = useState(''),
     [focus, setFocus] = useState<Target[]>(() => {
       try {
+        // Opening used to pin, so the old list (dolphin.glass.focus) holds every
+        // session ever opened; pins start empty under their own key.
+        try { localStorage.removeItem('dolphin.glass.focus'); } catch { /* optional */ }
         const saved: unknown = JSON.parse(
-          localStorage.getItem('dolphin.glass.focus') ?? '[]',
+          localStorage.getItem('dolphin.glass.pins') ?? '[]',
         );
         return Array.isArray(saved)
           ? saved
@@ -188,11 +239,18 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   });
   // Fullscreen belongs to the project window, not to one terminal, so its tab
   // strip stays reachable and switching tabs keeps the window fullscreen.
-  const [fullscreenProject, setFullscreenProject] = useState<string | null>(null);
+  const [fullscreenProject, setFullscreenProject] = useState<string | null>(() => readFullscreenProject(storage));
+  useEffect(() => writeLayout(storage, LAYOUT_KEYS.fullscreen, fullscreenProject), [storage, fullscreenProject]);
   const fullscreenGroup = projectWindows.find(group => group.projectId === fullscreenProject);
+  // Motion measures the window stack only when the window list changes, not on every render.
+  const layoutKey = `${projectWindows.map((group) => `${group.projectId}:${group.collapsed}:${group.sessions.length}`).join('|')}|${fullscreenProject ?? ''}`;
+  // A remembered fullscreen waits for its window; it is dropped only once the
+  // window is known to be gone or minimized.
   useEffect(() => {
-    if (fullscreenProject && (!fullscreenGroup || fullscreenGroup.collapsed)) setFullscreenProject(null);
-  }, [fullscreenProject, fullscreenGroup]);
+    if (!fullscreenProject) return;
+    const present = windows.some((target) => target.projectId === fullscreenProject);
+    if (!present || (fullscreenGroup && fullscreenGroup.collapsed)) setFullscreenProject(null);
+  }, [fullscreenProject, fullscreenGroup, windows]);
   useEffect(() => {
     if (!fullscreenProject) return;
     const exit = (event: KeyboardEvent) => {
@@ -212,10 +270,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   }, [windows, minimized, active]);
   const windowStack = useRef<HTMLDivElement>(null);
   const [scrollTarget, setScrollTarget] = useState<{ key: string } | null>(restored.active ? { key: key(restored.active) } : null);
-  const rightPanel = usePanelRef();
-  const [revealWindow, setRevealWindow] = useState(0);
-  const lastSplit = useRef(38);
   const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    const stopPane = prefetchWhenIdle(() => Promise.all([loadTerminalPane(), loadTerminalFeatures()]));
+    const stopMarkdown = prefetchWhenIdle(prefetchMarkdown, 3000);
+    return () => { stopPane(); stopMarkdown(); };
+  }, []);
   useEffect(() => {
     if (!scrollTarget) return;
     const frame = requestAnimationFrame(() => {
@@ -235,19 +295,76 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     return () => media.removeEventListener('change', change);
   }, []);
   const hasWindows = shownWindows.some((target) => !minimized.includes(key(target)));
-  useEffect(() => {
-    const panel = rightPanel.current;
-    if (!panel) return;
-    const start = panel.getSize().asPercentage;
-    if (!hasWindows && start > 0) lastSplit.current = Math.min(90, Math.max(25, start));
-    const control = animate(start, hasWindows ? lastSplit.current : 0, {
-      duration: reduceMotion ? 0 : 0.32,
-      ease: [0.22, 1, 0.36, 1],
-      onUpdate: (size) => panel.resize(`${size}%`),
-    });
-    return () => control.stop();
-  }, [hasWindows, reduceMotion, rightPanel, revealWindow]);
+  // Terminal first: windows take the centre, the chat is a column at its right.
+  const windowsPanel = usePanelRef();
+  const chatPanel = usePanelRef();
+  const centre = useRef<HTMLDivElement>(null);
+  const savedChat = useRef(readChatLayout(storage)).current;
+  const chatWidth = useRef(savedChat.width);
+  const [chatCollapsed, setChatCollapsed] = useState(savedChat.collapsed);
+  const chatCollapsedRef = useRef(chatCollapsed);
+  chatCollapsedRef.current = chatCollapsed;
+  // Every person-made change to the chat column is remembered; the narrow-window
+  // auto-fold calls setChatCollapsed directly and is not.
+  function rememberChat(collapsed: boolean) {
+    setChatCollapsed(collapsed);
+    writeLayout(storage, LAYOUT_KEYS.chat, { width: chatWidth.current, collapsed });
+  }
+  const mac = isMacPlatform(currentPlatform());
+  const hasWindowsRef = useRef(hasWindows);
+  hasWindowsRef.current = hasWindows;
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+  const windowsShowing = useRef(false);
+  useLayoutEffect(() => {
+    const windows = windowsPanel.current;
+    const chat = chatPanel.current;
+    if (!windows || !chat) return;
+    if (!hasWindows) {
+      windowsShowing.current = false;
+      if (chat.isCollapsed()) chat.expand();
+      // The windows panel's 30% floor lifts once the group re-registers it
+      // (a render later), so the chat takes the whole centre on the next frame.
+      const frame = requestAnimationFrame(() => { if (!hasWindowsRef.current) chatPanel.current?.resize('100%'); });
+      return () => cancelAnimationFrame(frame);
+    }
+    // Windows just appeared: in a narrow window the chat steps aside, so the
+    // terminal keeps its 80 columns. Show chat brings it back.
+    const appeared = !windowsShowing.current;
+    windowsShowing.current = true;
+    const fold = chatCollapsed || (appeared && !narrow && !chatFits(centre.current?.getBoundingClientRect().width ?? 0, chatWidth.current));
+    if (fold && !chatCollapsed) setChatCollapsed(true);
+    if (fold) { if (!chat.isCollapsed()) chat.collapse(); return; }
+    if (chat.isCollapsed()) chat.expand();
+    chat.resize(narrow ? '40%' : `${chatWidth.current}px`);
+  }, [hasWindows, chatCollapsed, narrow]);
+  function showChat() {
+    rememberChat(false);
+    focusChat();
+  }
+  const chatMain = useRef<HTMLElement>(null);
+  const showChatButton = useRef<HTMLButtonElement>(null);
+  // Folding hides the column that may hold focus; hand it to the terminal in
+  // view (the active window's first), or to Show chat, never to <body>.
+  function foldChat() {
+    if (chatMain.current?.contains(document.activeElement)) {
+      const open = '.glass-session-window:not(:has([data-collapsed="true"]))';
+      const input = '.glass-project-terminal:not([hidden]) .xterm-helper-textarea';
+      const stack = windowStack.current;
+      const terminal = stack?.querySelector<HTMLElement>(`${open}[data-active="true"] ${input}`) ?? stack?.querySelector<HTMLElement>(`${open} ${input}`);
+      (terminal ?? showChatButton.current)?.focus();
+    }
+    rememberChat(true);
+  }
+  const toggleChat = useRef(() => undefined as void);
+  toggleChat.current = () => {
+    if (!hasWindowsRef.current) return;
+    if (chatCollapsedRef.current) rememberChat(false);
+    else foldChat();
+  };
   function closeWindow(target: Target) {
+    // A parked pane keeps its bell; closing the tab is what forgets it.
+    forgetTerminalActivity(terminalKey(machineOfTarget(target), target.projectId, target.sessionName));
     setMinimized((ids) => ids.filter((id) => id !== key(target)));
     setWindows((items) => items.filter((item) => key(item) !== key(target)));
     setActive((current) => current && key(current) === key(target) ? null : current);
@@ -255,15 +372,56 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   function focusChat() {
     // Focusing chat must not close the terminal views described in its context.
     setActive(null);
-    composerInput.current?.focus();
+    rememberChat(false);
+    requestAnimationFrame(() => composer.current?.focus());
   }
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsReturn = useRef<HTMLElement | null>(null);
+  const paletteTrigger = useRef<HTMLButtonElement>(null);
+  const openSettings = (from: HTMLElement | null) => { settingsReturn.current = from; setSettingsOpen(true); };
+  useEffect(() => syncThemeSetting(), []);
+  // Menu commands (spec: "Keyboard"). The ref always holds the current state;
+  // this is the one subscription to onDesktopCommand.
+  const command = useRef<(id: CommandId) => void>(() => undefined);
+  command.current = (id) => {
+    // A modal dialog owns the keyboard: nothing acts on the view behind it.
+    const modal = document.querySelector<HTMLElement>('[aria-modal="true"]');
+    // The palette toggles itself shut; any other modal blocks even that.
+    const otherModal = document.querySelector('[aria-modal="true"]:not(.cp-panel)');
+    if (modal && !(id === 'palette' && !otherModal)) {
+      if (id === 'settings' && settingsOpen) (modal.matches('[role="dialog"]') ? modal : modal.querySelector<HTMLElement>('[role="dialog"]'))?.focus();
+      return;
+    }
+    if (id === 'palette') { setPaletteOpen((value) => !value); return; }
+    if (id === 'settings') { openSettings(document.activeElement instanceof HTMLElement ? document.activeElement : null); return; }
+    // Find and zoom belong to the terminal area; find needs the session in front.
+    if (id === 'zoom-in' || id === 'zoom-out' || id === 'zoom-reset') { runTerminalCommand(id); return; }
+    if (id === 'find') { if (active) runTerminalCommand('find', terminalKey(machineOfTarget(active), active.projectId, active.sessionName)); return; }
+    if (id === 'close-view') { if (active) closeWindow(active); return; }
+    if (id === 'new-session') {
+      const project = (active && projects.find((p) => p.id === active.projectId && p.machine === (machineOfTarget(active) ?? p.machine)))
+        || projects.find((p) => !p.is_inbox && p.path);
+      if (project) void create(project);
+      return;
+    }
+    if (id === 'prev-tab' || id === 'next-tab') {
+      const next = adjacentTab(projectWindows.map((group) => group.sessions.map(key)), active ? key(active) : null, id === 'next-tab' ? 1 : -1);
+      const target = next ? shownWindows.find((t) => key(t) === next) : undefined;
+      if (target) open(target, { scroll: !active || target.projectId !== active.projectId });
+      return;
+    }
+    const pinned = focus[Number(id.slice('session-'.length)) - 1];
+    if (pinned) open(pinned);
+  };
+  useEffect(() => onDesktopCommand((id) => command.current(id)), []);
   const [aboutOpen, setAboutOpen] = useState<AboutAnchor | null>(null);
   const [connecting, setConnecting] = useState(false);
   // Connect to Machine… in the menu opens this window's dialog.
   useEffect(() => (desktop ? machineBridge()?.onConnectOpen?.(() => setConnecting(true)) ?? undefined : undefined), [desktop]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(storage));
+  useEffect(() => writeLayout(storage, LAYOUT_KEYS.sidebar, sidebarCollapsed), [storage, sidebarCollapsed]);
   const sessionTargets: Target[] = projects.flatMap((p) =>
     p.sessions.map((s) => ({
       projectId: p.id,
@@ -272,44 +430,89 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       machine: p.machine,
     })),
   );
+  useSeenTurns();
+  // A session in no project opens under its machine's hidden root project,
+  // which `projects` never lists; its state and seen key come from other_sessions.
+  const isHidden = (target: Target) => !projects.some((project) => project.machine === machineOfTarget(target) && project.id === target.projectId);
+  const sessionOf = (target: Target): ControlCenterSession | undefined => (isHidden(target)
+    ? otherBy[machineOfTarget(target) ?? 'local']?.find((session) => session.name === target.sessionName)
+    : projects
+      .find((project) => project.machine === machineOfTarget(target) && project.id === target.projectId)
+      ?.sessions.find((session) => session.name === target.sessionName));
+  const seenProjectOf = (target: Target) => (isHidden(target) && sessionOf(target) ? OTHER_PROJECT_KEY : target.projectId);
+  /** A target's state; one whose session is not in view yet claims nothing. */
+  const stateOfTarget = (target: Target): SessionState => {
+    const session = sessionOf(target);
+    return session ? sessionState(session, seenAt(machineOfTarget(target) ?? 'local', seenProjectOf(target), target.sessionName)) : 'idle';
+  };
+  const markTargetSeen = (target: Target) => markSeen(machineOfTarget(target) ?? 'local', seenProjectOf(target), target.sessionName, sessionOf(target)?.turn_at);
+  // A system notification's click (Dolphin Desktop): open that session as soon
+  // as its machine's projects are here. A request older than a minute is dropped.
+  const requestedOpen = useRef<{ target: { machine: string; projectId: string; session: string }; at: number } | null>(null);
+  const [openRequests, setOpenRequests] = useState(0);
+  useEffect(() => machineBridge()?.onOpenSession?.((target) => {
+    requestedOpen.current = { target, at: Date.now() };
+    setOpenRequests((value) => value + 1);
+  }) ?? undefined, []);
+  useEffect(() => {
+    const request = requestedOpen.current;
+    if (!request) return;
+    if (Date.now() - request.at > 60_000) { requestedOpen.current = null; return; }
+    if (!(request.target.machine in projectsBy)) return;
+    const project = projectsBy[request.target.machine].find((item) => item.id === request.target.projectId);
+    requestedOpen.current = null;
+    if (!project) { setError('That notification names a project that is no longer here.'); return; }
+    open({ projectId: project.id, projectName: project.name, sessionName: request.target.session, machine: request.target.machine });
+  }, [openRequests, projectsBy]);
+  // The main process raises system notifications; it follows this setting.
+  const [systemNotifications] = useSetting('notifications.system');
+  useEffect(() => { machineBridge()?.setSystemNotifications?.(systemNotifications); }, [systemNotifications]);
   // Another machine's name goes before its sessions wherever they are listed together.
   const onMachine = (target: Target) => {
     const machine = machineOfTarget(target);
     return desktop && machine && machine !== 'local' ? `${labelOf(machine)} · ` : '';
   };
-  const paletteItems: PaletteItem[] = [
-    {
-      id: 'dolphin',
-      kind: 'action',
-      label: 'Open Dolphin chat',
-      hint: 'Your assistant',
-    },
-    ...(desktop && canConnect() ? [{ id: 'connect-machine', kind: 'action' as const, label: 'Connect to a Machine…', hint: 'Work on another computer over SSH' }] : []),
-    ...(desktop && canUpdate() ? [{ id: 'check-updates', kind: 'action' as const, label: 'Check for Updates', hint: 'About Dolphin' }] : []),
-    ...sessionTargets.map((t) => ({
-      id: key(t),
-      kind: 'session' as const,
-      label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`,
-      hint: focus.some((f) => key(f) === key(t)) ? 'In Focus' : 'Open and pin',
-    })),
-  ];
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (isTerminalLikeTarget(event.target as HTMLElement)) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      const inTerminal = isTerminalLikeTarget(event.target as HTMLElement);
+      const mod = event.metaKey || event.ctrlKey;
+      // Ctrl+key inside a terminal belongs to the program (^_ undo, ^K kill-line);
+      // on macOS Cmd never reaches it, so Cmd+/ and Cmd+K work there too.
+      const fromTerminal = !inTerminal || (isMacPlatform(currentPlatform()) && event.metaKey);
+      if (mod && !event.shiftKey && !event.altKey && event.key === '/' && fromTerminal) {
         event.preventDefault();
-        setPaletteOpen((value) => !value);
+        toggleChat.current();
+        return;
       }
+      if (mod && event.key.toLowerCase() === 'k' && fromTerminal) {
+        event.preventDefault();
+        if (document.querySelector('[aria-modal="true"]:not(.cp-panel)')) return;
+        setPaletteOpen((value) => !value);
+        return;
+      }
+      if (inTerminal) return;
       if (event.key === 'Escape') setSidebarOpen(false);
     };
     window.addEventListener('keydown', keyboard);
     return () => window.removeEventListener('keydown', keyboard);
   }, []);
+  const activeTitle = useTerminalActivity(active ? terminalKey(machineOfTarget(active), active.projectId, active.sessionName) : null).title;
   useEffect(() => {
-    document.title = active
-      ? `${active.sessionName} · ${active.projectName} — Dolphin`
-      : 'Dolphin — Workspace';
-  }, [active]);
+    document.title = glassDocumentTitle(active, activeTitle);
+  }, [active, activeTitle]);
+  // A turn that ends while you are looking at it is seen.
+  const activeTurnAt = active ? sessionOf(active)?.turn_at ?? null : null;
+  useEffect(() => {
+    if (active && activeTurnAt && document.hasFocus()) markTargetSeen(active);
+  }, [active ? key(active) : '', activeTurnAt]);
+  // Returning to the app after a turn finished clears what you are looking at.
+  const markActiveSeen = useRef(() => {});
+  markActiveSeen.current = () => { if (active && activeTurnAt) markTargetSeen(active); };
+  useEffect(() => {
+    const onFocus = () => markActiveSeen.current();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
   const chatTabs = useChatTabs();
   const tabId = chatTabs.active;
   const retry = useTabRef<{ text: string; thread: string; id: string; dashboard_context: DashboardContext } | null>(
@@ -318,15 +521,22 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [pending, setPending, tabPending, setPendingFor] = useTabState(tabId, false);
   const [optimistic, setOptimistic] = useTabState<{ text: string; previousIds: string[] } | null>(tabId, null);
   const [failedMessage, setFailedMessage] = useTabState<string | null>(tabId, null);
-  const [theme, setTheme] = useState(() => applyTheme(readStoredTheme())),
-    [error, setError] = useTabState(tabId, ''),
+  const [themeChoice] = useSetting('theme');
+  const theme = resolveTheme(themeChoice, typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const pinnedKey = (t: Target) => focus.some((f) => key(f) === key(t));
+  const palette = paletteCommands({
+    desktop, mac, canConnect: canConnect(), canUpdate: canUpdate(), theme: themeChoice,
+    machines: sections.map((link) => ({ id: link.id, label: link.label, kind: link.kind, state: link.state, target: link.target })),
+    projects: projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineLabel: labelOf(p.machine), isInbox: p.is_inbox, sessionCount: p.sessions.length })),
+    sessions: sessionTargets.map((t) => ({ id: key(t), label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`, pinned: pinnedKey(t) })),
+    active: active ? { id: key(active), label: `${active.projectName} / ${active.sessionName}`, pinned: pinnedKey(active) } : null,
+  });
+  const [error, setError] = useTabState(tabId, ''),
     [threads, setThreads] = useState<Thread[]>([]),
     [thread, setThread, tabThreads, setThreadFor] = useTabState(tabId, '', 'dolphin.glass.chat-thread'),
     [messages, setMessages, , setMessagesFor] = useTabState<Message[]>(tabId, []),
-    [draft, setDraft] = useTabState(tabId, '', 'dolphin.glass.chat-draft'),
     [busy, setBusy, tabBusy] = useTabState(tabId, false),
     [creating, setCreating] = useState(false);
-  const [toolActivity, setToolActivity] = useTabState<ToolActivity[]>(tabId, []);
   const [trackedWork, setTrackedWork, , setTrackedWorkFor] = useTabState<TrackedWork[]>(tabId, []);
   const [closingWork, setClosingWork] = useTabState(tabId, '');
   const [trackingError, setTrackingError] = useTabState(tabId, false);
@@ -358,36 +568,6 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     } catch (error) { setError(String(error)); }
     finally { setClosingWork(''); }
   }
-  const [liveReply, setLiveReply] = useTabState(tabId, '');
-  useEffect(() => {
-    setLiveReply('');
-    if (!thread || !(busy || pending)) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    async function poll() {
-      try {
-        const progress = await request<{ turn_id?: string; text?: string }>(`/api/dolphin/threads/${encodeURIComponent(thread)}/progress`);
-        if (alive && progress.turn_id && typeof progress.text === 'string') setLiveReply(progress.text);
-      } catch { /* Saved conversation polling still recovers the final reply. */ }
-      if (alive) timer = setTimeout(poll, 150);
-    }
-    void poll();
-    return () => { alive = false; clearTimeout(timer); };
-  }, [tabId, thread, busy, pending]);
-  useEffect(() => {
-    setToolActivity([]);
-    if (!thread || !(busy || pending)) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const activity = await request<ToolActivity[]>(`/api/dolphin/threads/${encodeURIComponent(thread)}/activity`);
-        if (alive && Array.isArray(activity)) setToolActivity(activity);
-      } catch { /* The final response still carries durable receipts. */ }
-    };
-    void poll();
-    const timer = setInterval(poll, 1500);
-    return () => { alive = false; clearInterval(timer); };
-  }, [tabId, thread, busy, pending]);
   function renderActivity(items: ToolActivity[]) {
     return <div className="glass-tool-activity" aria-label="Dolphin tool activity">{items.map(item => {
       // The chat runs on this computer, so the projects it names are this computer's.
@@ -412,7 +592,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   }
   useEffect(() => {
     try {
-      localStorage.setItem('dolphin.glass.focus', JSON.stringify(focus));
+      localStorage.setItem('dolphin.glass.pins', JSON.stringify(focus));
     } catch {
       /* Storage is optional. */
     }
@@ -420,18 +600,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const conversation = useRef<HTMLDivElement>(null);
   const savedScroll = useTabRef(tabId, 0);
   const followTail = useTabRef(tabId, true);
-  const composerInput = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    const input = composerInput.current;
-    if (!input) return;
-    const fit = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 144)}px`; };
-    fit();
-    // Dragging the chat panel rewraps the draft, so refit on width changes too.
-    let width = input.clientWidth;
-    const observer = new ResizeObserver(() => { if (input.clientWidth !== width) { width = input.clientWidth; fit(); } });
-    observer.observe(input);
-    return () => observer.disconnect();
-  }, [draft, active]);
+  const composer = useRef<ComposerHandle>(null);
   useLayoutEffect(() => {
     const element = conversation.current;
     if (!element) return;
@@ -439,7 +608,14 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     // scrolling through the history. Readers retain their position in each tab.
     element.scrollTop = followTail.current && (messages.length || busy)
       ? element.scrollHeight : savedScroll.current;
-  }, [tabId, messages, busy, optimistic, liveReply, trackedWork.map(work => `${work.id}:${work.state}`).join('|')]);
+  }, [tabId, messages, busy, optimistic, trackedWork.map(work => `${work.id}:${work.state}`).join('|')]);
+  // The live reply grows on its own; it asks the conversation to follow it.
+  const followTailRef = useRef(followTail);
+  followTailRef.current = followTail;
+  const followIfTailing = useCallback(() => {
+    const element = conversation.current;
+    if (element && followTailRef.current.current) element.scrollTop = element.scrollHeight;
+  }, []);
   const [inventoryAvailable, setInventoryAvailable] = useState<boolean | null>(
     null,
   );
@@ -450,7 +626,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     if (!client) return Promise.resolve();
     return client.fetchControlCenter()
       .then((snapshot) => {
-        setProjectsBy((current) => ({ ...current, [link.id]: snapshot.projects }));
+        setProjectsBy((current) => (sameProjects(current[link.id], snapshot.projects) ? current : { ...current, [link.id]: snapshot.projects }));
+        setOtherBy((current) => ({ ...current, [link.id]: snapshot.other_sessions ?? [] }));
         if (link.id !== 'local') return;
         setInventoryAvailable(true);
         // The backend answers again: a banner that only said it couldn't be reached is stale.
@@ -465,11 +642,47 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       });
   };
   const refresh = () => Promise.all(linksRef.current.map(refreshMachine)).then(() => undefined);
+  // One refresh at a time per machine; a turn event during one runs one more after it.
+  const refreshing = useRef(new Map<string, 'running' | 'again'>());
+  const refreshSoon = (machine: string) => {
+    const link = linksRef.current.find((item) => item.id === machine);
+    if (!link) return;
+    if (refreshing.current.has(machine)) { refreshing.current.set(machine, 'again'); return; }
+    refreshing.current.set(machine, 'running');
+    void refreshMachine(link).finally(() => {
+      const again = refreshing.current.get(machine) === 'again';
+      refreshing.current.delete(machine);
+      if (again) refreshSoon(machine);
+    });
+  };
   // Dolphin Desktop: the folders of tmux sessions already running on a
   // machine become projects (once each), so their sessions show up too.
+  const [importAsk, setImportAsk] = useState<{ machine: string; label: string; pending: PendingImport[] } | null>(null);
+  // Asked at most once per machine per launch; "Not now" waits for the next launch.
+  const importAsked = useRef(new Set<string>());
+  // Machines whose Agent setup line is unanswered; null until it has reported.
+  const [setupHolding, setSetupHolding] = useState<string[] | null>(null);
   const importSessions = (link: MachineLink) => clientOf(link)?.importTmuxProjects()
-    .then((added) => { if (added.length) void refreshMachine(link); })
+    .then((result) => {
+      if (result.added.length) void refreshMachine(link);
+      if (result.pending.length && !importAsked.current.has(link.id)) {
+        importAsked.current.add(link.id);
+        setImportAsk({ machine: link.id, label: link.label, pending: result.pending });
+      }
+    })
     .catch(() => undefined);
+  // Rejects when the answer could not be sent, so the dialog stays and says why.
+  const answerImport = async (paths: string[] | null) => {
+    const ask = importAsk;
+    if (!ask) return;
+    if (paths === null) { setImportAsk(null); return; }
+    const link = sections.find((item) => item.id === ask.machine);
+    const client = link && clientOf(link);
+    if (!client || !link) { setImportAsk(null); return; }
+    await client.importTmuxProjects(paths, ask.pending.map((item) => item.path));
+    setImportAsk(null);
+    void refreshMachine(link);
+  };
   useEffect(() => {
     let tick = 0;
     const timer = setInterval(() => {
@@ -501,6 +714,33 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       void refreshMachine(link);
       if (desktop) void importSessions(link);
     }
+  }, [linkKeys]);
+  // Git state (workflow): one request per machine every 30 s, only for machines
+  // that are connected and either expanded in the list or showing a window, and
+  // never while the window is hidden. Unchanged statuses keep their identity so
+  // the memoised session windows do not re-render.
+  const [gitBy, setGitBy] = useState<Record<string, GitStatuses>>({});
+  const gitWantedRef = useRef<(link: MachineLink) => boolean>(() => true);
+  gitWantedRef.current = (link) => link.state === 'connected'
+    && (!collapsedMachines.includes(link.id) || windows.some((target) => machineOfTarget(target) === link.id));
+  const refreshGit = (link: MachineLink) => clientOf(link)?.fetchGitStatus()
+    .then((statuses) => setGitBy((current) => ({ ...current, [link.id]: mergeGit(current[link.id], statuses) })))
+    .catch(() => undefined);
+  const refreshGitOf = (machine: string) => { const link = linksRef.current.find((item) => item.id === machine); if (link) void refreshGit(link); };
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      linksRef.current.filter((link) => gitWantedRef.current(link)).forEach((link) => void refreshGit(link));
+    };
+    tick();
+    const timer = setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
+  }, [linkKeys]);
+  // Clients for addresses and tokens no machine has any more are dropped.
+  useEffect(() => {
+    if (!desktop) return;
+    pruneClients(sections.flatMap((link) => (link.id !== 'local' && link.apiBase && link.token !== null ? [{ base: link.apiBase, token: link.token }] : [])));
   }, [linkKeys]);
   useEffect(() => {
     request<Thread[]>('/api/chief/threads')
@@ -578,15 +818,74 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   // Switching a window's own tab keeps the stack where it is; every other way
   // of opening a session brings its window to the top.
   function open(t: Target, { scroll = true }: { scroll?: boolean } = {}) {
-    if ((rightPanel.current?.getSize().asPercentage ?? 0) < 1) setRevealWindow((value) => value + 1);
     setSidebarOpen(false);
     setError('');
-    setFocus((old) => (old.some((x) => key(x) === key(t)) ? old : [...old, t]));
     setActive(t);
+    markTargetSeen(t);
     if (scroll) setScrollTarget({ key: key(t) });
     setMinimized(ids => ids.filter(id => !windows.some(item => item.projectId === t.projectId && key(item) === id) && id !== key(t)));
     setWindows((old) => old.some((item) => key(item) === key(t)) ? old : [...old, t]);
   }
+  function togglePin(t: Target) {
+    setFocus((old) => (old.some((item) => key(item) === key(t)) ? old.filter((item) => key(item) !== key(t)) : [...old, t]));
+  }
+  // The window map hands these to every window; each takes its target.
+  const selectTab = (t: Target) => open(t, { scroll: false });
+  const toggleFullscreen = (projectId: string) => setFullscreenProject((current) => (current === projectId ? null : projectId));
+  const newSessionIn = (projectId: string) => { const project = projects.find((item) => item.id === projectId); if (project) void create(project); };
+  const toggleCollapsed = (projectId: string) => {
+    const group = projectWindows.find((item) => item.projectId === projectId);
+    if (!group) return;
+    setMinimized((ids) => (group.collapsed ? ids.filter((id) => !group.sessions.some((s) => key(s) === id)) : [...new Set([...ids, ...group.sessions.map(key)])]));
+  };
+  const terminated = (t: Target) => { closeWindow(t); setFocus((items) => items.filter((item) => key(item) !== key(t))); };
+  // A session counts as seen when its terminal is focused (status area).
+  const focusTarget = (t: Target) => { setActive(t); markTargetSeen(t); };
+  const refreshAll = () => void refresh();
+  // Stable identities, so a memoised window renders only when its own props change.
+  const selectTabStable = useStable(selectTab);
+  const closeWindowStable = useStable(closeWindow);
+  const toggleFullscreenStable = useStable(toggleFullscreen);
+  const newSessionInStable = useStable(newSessionIn);
+  const toggleCollapsedStable = useStable(toggleCollapsed);
+  const togglePinStable = useStable(togglePin);
+  const reviewStable = useStable((target: Target) => setReviewing(target));
+  const terminatedStable = useStable(terminated);
+  const focusTargetStable = useStable(focusTarget);
+  const refreshAllStable = useStable(refreshAll);
+  // The server decides whether a worktree may be archived and says why not in
+  // plain words; a refusal leaves the session and its folder exactly as they were.
+  async function archive(project: MachineProject, session: ControlCenterSession) {
+    const client = apiOf(project.machine);
+    if (!client) return;
+    try {
+      await client.archiveWorktree(project.id, session.name);
+      terminated({ projectId: project.id, projectName: project.name, sessionName: session.name, machine: project.machine });
+      await refresh();
+      refreshGitOf(project.machine);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+  const archiveStable = useStable(archive);
+  // A session in no project opens through the machine's hidden root project. A
+  // double-click opens once; a refusal shows in the workspace's error line.
+  async function openOther(link: MachineLink, session: OtherSession) {
+    const client = clientOf(link);
+    const id = `${link.id} ${session.name}`;
+    if (!client || openingOther.current.has(id)) return;
+    openingOther.current.add(id); bumpOpening((n) => n + 1);
+    try {
+      const found = await client.openOtherSession(session.name);
+      open({ projectId: found.project_id, projectName: found.project_name, sessionName: session.name, machine: link.id });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      openingOther.current.delete(id); bumpOpening((n) => n + 1);
+    }
+  }
+  const glance = useGlance();
+  const creatingNow = useRef(new Set<string>());
   async function create(project: MachineProject, choice?: SessionChoice) {
     // Dolphin Desktop asks what to run first: an agent, an install, or a shell.
     if (desktop && !choice) {
@@ -595,28 +894,45 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     }
     const client = apiOf(project.machine);
     if (!client) return;
+    // A second call for the same project and choice while one is under way (a double click) is the same click.
+    const inFlight = `${project.machine} ${project.id} ${choice?.mode ?? 'shell'} ${choice?.startup ?? ''} ${choice?.worktree?.branch ?? ''}`;
+    if (creatingNow.current.has(inFlight)) return;
+    creatingNow.current.add(inFlight);
     setCreating(true);
     setError('');
     try {
-      const s = await client.createTmuxSession(project.id, undefined, choice?.mode ?? 'shell');
-      if (choice?.startup) await client.sendTmuxInput(project.id, s.name, choice.startup);
+      let s: TmuxSession;
+      let warning: string | null = null;
+      if (choice?.worktree) {
+        const launched = await client.launchSession(project.id, {
+          mode: choice.mode,
+          worktree: { branch: choice.worktree.branch, run_setup: choice.worktree.runSetup },
+        });
+        s = launched.session;
+        warning = launched.warning;
+      } else {
+        s = await client.createTmuxSession(project.id, undefined, choice?.mode ?? 'shell');
+        if (choice?.startup) await client.sendTmuxInput(project.id, s.name, choice.startup);
+      }
       await refresh();
+      refreshGitOf(project.machine);
       open({
         projectId: project.id,
         projectName: project.name,
         sessionName: s.name,
         machine: project.machine,
       });
+      if (warning) setError(warning);
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
+      creatingNow.current.delete(inFlight);
       setCreating(false);
     }
   }
-  async function send(retryText?: string) {
-    const text = (retryText ?? draft).trim();
+  async function send(text: string) {
     if (!text || busy || pending) return;
-    if (!retryText || draft.trim() === text) setDraft('');
+    const sentFrom = tabId;
     setFailedMessage(null);
     setOptimistic({ text, previousIds: messages.map((message) => message.id) });
     followTail.current = true;
@@ -663,12 +979,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       void refresh();
       if (result.status === 'in_progress') setPending(true);
       if (result.status !== 'completed' && result.status !== 'in_progress') {
-        setDraft((current) => current || text);
+        composer.current?.restore(text, sentFrom);
         setFailedMessage(text);
         setError(`Response ${result.status}. ${result.display_text}`);
       }
     } catch (e) {
-      setDraft((current) => current || text);
+      composer.current?.restore(text, sentFrom);
       setFailedMessage(text);
       // Terminal model failures are persisted; replaying their key cannot regenerate.
       // Keep keys for ambiguous network failures to avoid duplicate accepted turns.
@@ -725,87 +1041,101 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     const client = apiOf(machine);
     if (!client) return Promise.resolve();
     return client.createProject({ name, path })
-      .then(() => refresh())
+      .then((project) => {
+        setRevealed((old) => new Set(old).add(`${machine} ${project.id}`));
+        return refresh();
+      })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
   }
+  // The glance reads the session's own machine, never the local backend; a session already on screen needs none.
+  const glanceTarget = (t: Target): GlanceTarget | null => {
+    const client = apiOf(machineOfTarget(t));
+    const onScreen = projectWindows.some((group) => !group.collapsed && key(group.selected) === key(t));
+    return client && !onScreen ? { key: key(t), label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`, projectId: t.projectId, sessionName: t.sessionName, api: client } : null;
+  };
+  // One launch per transcript at a time: a second click before the first
+  // resolves must not start a second session.
+  const resuming = useRef(new Set<string>());
+  async function resume(machine: string, projectId: string, projectName: string, item: HistoryItem) {
+    const client = apiOf(machine);
+    const guard = `${machine} ${projectId} ${item.agent}:${item.id}`;
+    if (!client || resuming.current.has(guard)) return;
+    resuming.current.add(guard);
+    setPanel(null);
+    setError('');
+    try {
+      const launched = await client.launchSession(projectId, { mode: item.agent, resume: { agent: item.agent, id: item.id } });
+      await refresh();
+      open({ projectId, projectName, sessionName: launched.session.name, machine });
+      if (launched.warning) setError(launched.warning);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      resuming.current.delete(guard);
+    }
+  }
   function renderProject(p: MachineProject) {
+    const id = `${p.machine} ${p.id}`;
     return (
-      <details key={`${p.machine} ${p.id}`} open>
-        <summary>
-          <ChevronDown size={13} />
-          <Folder size={16} />
-          <strong>{p.name}</strong>
-          <small>{p.sessions.length}</small>
-          {!p.is_inbox && (
-            <button
-              type="button"
-              className="glass-project-remove"
-              aria-label={`Remove ${p.name} from Dolphin`}
-              title="Remove from Dolphin (the folder stays)"
-              onClick={(event) => { event.preventDefault(); event.stopPropagation(); setRemovingProject(p); }}
-            >
-              <FolderMinus size={14} />
-            </button>
-          )}
-        </summary>
-        <div className="glass-sessions">
-          {p.sessions.map((s) => (
-            <button
-              className={
-                active?.projectId === p.id &&
-                active.sessionName === s.name
-                  ? 'selected'
-                  : ''
-              }
-              key={s.name}
-              data-activity={s.observation_state !== 'degraded' && s.has_recent_activity}
-              aria-label={`Open ${p.name} / ${s.name}`}
-              onClick={() =>
-                open({
-                  projectId: p.id,
-                  projectName: p.name,
-                  sessionName: s.name,
-                  machine: p.machine,
-                })
-              }
-            >
-              <Terminal size={15} />
-              <span>
-                {s.name}
-                <small>
-                  <i className={s.has_recent_activity ? 'live' : ''} />
-                  {status(s)}
-                </small>
-              </span>
-            </button>
-          ))}
-          <button
-            className="glass-new-session"
-            disabled={creating}
-            onClick={() => void create(p)}
-          >
-            <Plus size={13} />
-            New session
-          </button>
-        </div>
-      </details>
+      <SidebarProject
+        key={id}
+        project={p}
+        machine={p.machine}
+        machineLabel={desktop && sections.length > 1 ? labelOf(p.machine) : undefined}
+        collapsed={collapsedProjects.includes(id)}
+        selectedSession={active && active.projectId === p.id && machineOfTarget(active) === p.machine ? active.sessionName : null}
+        stateOf={(s) => sessionState(s, seenAt(p.machine, p.id, s.name))}
+        now={now}
+        creating={creating}
+        onToggle={(next) => setCollapsedProjects((ids) => (next ? [...new Set([...ids, id])] : ids.filter((item) => item !== id)))}
+        onOpen={(s) => open({ projectId: p.id, projectName: p.name, sessionName: s.name, machine: p.machine })}
+        pinned={(name) => focus.some((f) => f.projectId === p.id && f.sessionName === name)}
+        onTogglePin={(s) => togglePin({ projectId: p.id, projectName: p.name, sessionName: s.name, machine: p.machine })}
+        rowProps={(s) => glance.bind(glanceTarget({ projectId: p.id, projectName: p.name, sessionName: s.name, machine: p.machine }))}
+        onNewSession={() => void create(p)}
+        onRemove={p.is_inbox ? undefined : () => setRemovingProject(p)}
+        git={gitBy[p.machine]?.projects?.[p.id]}
+        worktreeOf={(name) => gitBy[p.machine]?.sessions?.[name]}
+        onArchive={(s) => void archiveStable(p, s)}
+        onHistory={desktop ? () => setPanel({ kind: 'history', machine: p.machine, projectId: p.id, projectName: p.name }) : undefined}
+      />
     );
   }
   return (
     <MotionConfig reducedMotion="user"><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed}>
       <CommandPalette
-        items={paletteItems}
+        items={palette.items}
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onSelect={(item) => {
-          if (item.id === 'dolphin') focusChat();
-          else if (item.id === 'connect-machine') setConnecting(true);
-          else if (item.id === 'check-updates') {
-            setAboutOpen('brand');
-            void (window as { dolphinDesktop?: { checkUpdates?: () => Promise<unknown> } }).dolphinDesktop?.checkUpdates?.();
-          } else {
-            const t = sessionTargets.find((t) => key(t) === item.id);
-            if (t) open(t);
+          const command = palette.commands.get(item.id);
+          if (!command) return;
+          switch (command.kind) {
+            case 'chat': focusChat(); break;
+            case 'settings': openSettings(paletteTrigger.current); break;
+            case 'connect': setConnecting(true); break;
+            case 'updates':
+              setAboutOpen('brand');
+              void (window as { dolphinDesktop?: { checkUpdates?: () => Promise<unknown> } }).dolphinDesktop?.checkUpdates?.();
+              break;
+            case 'theme': chooseTheme(command.theme); break;
+            case 'add-project': setPickingProject(command.machine); break;
+            case 'health': window.location.hash = command.machine === 'local' ? '#/health' : `#/health/${encodeURIComponent(command.machine)}`; break;
+            case 'disconnect': if (command.target !== 'local') { machineBridge()?.closeMachine?.(command.target); forgetTerminalActivityUnder(`${command.target}|`); } break;
+            case 'pin': {
+              const t = sessionTargets.find((s) => key(s) === command.sessionId) ?? (active && key(active) === command.sessionId ? active : undefined);
+              if (t) togglePin(t);
+              break;
+            }
+            case 'project': {
+              const project = projects.find((p) => p.id === command.projectId && p.machine === command.machine);
+              if (!project) break;
+              const last = project.sessions.find((s) => s.name === projectTabs[project.id]) ?? project.sessions[0];
+              if (last) open({ projectId: project.id, projectName: project.name, sessionName: last.name, machine: project.machine });
+              else void create(project);
+              break;
+            }
+            case 'session': { const t = sessionTargets.find((s) => key(s) === command.sessionId); if (t) open(t); break; }
           }
         }}
       />
@@ -839,6 +1169,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               const removed = removingProject.id;
               setRemovingProject(null);
               // Its windows and dock shortcuts go with it; the tmux sessions stay.
+              for (const item of windows) if (item.projectId === removed) forgetTerminalActivity(terminalKey(machineOfTarget(item), item.projectId, item.sessionName));
+              forgetTerminalActivityUnder(`${removingProject.machine ?? 'local'}|${removed}|`);
               setWindows((items) => items.filter((item) => item.projectId !== removed));
               setFocus((items) => items.filter((item) => item.projectId !== removed));
               setMinimized((ids) => ids.filter((id) => (JSON.parse(id) as string[])[0] !== removed));
@@ -848,10 +1180,33 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </ApiContext.Provider>
         </Suspense>
       )}
+      {panel && apiOf(panel.machine) && (
+        <Suspense fallback={null}>
+          <ApiContext.Provider value={apiOf(panel.machine) ?? api}>
+            {panel.kind === 'ports' && (
+              <PortsPanel machineId={panel.machine} machineLabel={labelOf(panel.machine)} remote={panel.machine !== 'local'} onClose={() => setPanel(null)} />
+            )}
+            {panel.kind === 'usage' && <UsagePanel machineLabel={labelOf(panel.machine)} onClose={() => setPanel(null)} />}
+            {panel.kind === 'history' && (
+              <HistoryPanel projectId={panel.projectId} projectName={panel.projectName} onClose={() => setPanel(null)}
+                onResume={(item) => void resume(panel.machine, panel.projectId, panel.projectName, item)} />
+            )}
+          </ApiContext.Provider>
+        </Suspense>
+      )}
+      {reviewing && apiOf(machineOfTarget(reviewing)) && (
+        <Suspense fallback={null}>
+          <ApiContext.Provider value={apiOf(machineOfTarget(reviewing)) ?? api}>
+            <DiffPanel projectId={reviewing.projectId} sessionName={reviewing.sessionName}
+              hasAgent={Boolean(sessionOf(reviewing)?.agent ?? sessionOf(reviewing)?.is_codex_running)} onClose={() => setReviewing(null)} />
+          </ApiContext.Provider>
+        </Suspense>
+      )}
       {choosingSession && (
         <Suspense fallback={null}>
           <ApiContext.Provider value={apiOf(choosingSession.machine) ?? api}>
           <NewSessionDialog
+            projectId={choosingSession.id}
             projectName={choosingSession.name}
             onClose={() => setChoosingSession(null)}
             onChoose={(choice) => {
@@ -861,6 +1216,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             }}
           />
           </ApiContext.Provider>
+        </Suspense>
+      )}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog returnFocus={settingsReturn.current} onClose={() => setSettingsOpen(false)} machines={desktop ? sections : []} onConnect={desktop && canConnect() ? () => setConnecting(true) : undefined} />
+        </Suspense>
+      )}
+      {/* Held back while the machine's Agent setup line needs a click: a modal over it blocks the button. */}
+      {importAsk && setupHolding && !setupHolding.includes(importAsk.machine) && (
+        <Suspense fallback={null}>
+          <ImportSessionsDialog machineLabel={importAsk.label} pending={importAsk.pending} onAnswer={answerImport} />
         </Suspense>
       )}
       <header className="glass-top">
@@ -887,46 +1253,48 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             <span className="dolphin-mark">
               <DolphinIcon />
             </span>
-            Dolphin
           </button>
         ) : (
-          <a className="glass-brand" href="#/workspace">
+          <a className="glass-brand" href="#/workspace" aria-label="Dolphin">
             <span className="dolphin-mark">
               <DolphinIcon />
             </span>
-            Dolphin
           </a>
         )}
         {!desktop && <a className="glass-fleet-link" href="#/fleet">Missions</a>}
         <button
+          ref={paletteTrigger}
           className="glass-global-search"
           onClick={() => setPaletteOpen(true)}
           aria-label="Open command palette"
         >
           <Search size={15} />
           <span>Search projects, sessions, or jump to…</span>
-          <kbd>⌘ K</kbd>
+          <kbd>{shortcutLabel('K')}</kbd>
         </button>
         <span className="glass-connected">
           {inventoryAvailable && <i />}
           {inventoryAvailable
-            ? `${count} sessions in view`
+            ? sessionsInViewLabel(count)
             : inventoryAvailable === false
               ? 'Backend unavailable'
               : 'Connecting…'}
         </span>
         {desktop && <UpdateControl open={aboutOpen} onOpenChange={setAboutOpen} />}
-        <NotificationBell onOpen={open} sources={desktop ? sections.flatMap((link) => {
-          const client = clientOf(link);
-          return client ? [{ id: link.id, label: link.id === 'local' ? undefined : link.label, api: client }] : [];
-        }) : undefined} />
+        <button
+          ref={showChatButton}
+          className="glass-chat-toggle"
+          aria-label="Show chat"
+          data-chat-folded={hasWindows && chatCollapsed}
+          title={`Dolphin chat (${foldShortcut(mac)})`}
+          onClick={showChat}
+        >
+          <MessageSquare size={17} aria-hidden="true" />
+        </button>
+        <NotificationBell onOpen={open} onTurn={refreshSoon} sources={desktop ? machineSources : undefined} />
         <button
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-          onClick={() => {
-            const t = theme === 'light' ? 'dark' : 'light';
-            persistTheme(t);
-            setTheme(applyTheme(t));
-          }}
+          onClick={() => chooseTheme(theme === 'light' ? 'dark' : 'light')}
         >
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
@@ -955,14 +1323,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           setSidebarTab(next);
           document.getElementById(`glass-${next}-tab`)?.focus();
         }}>
-          <button role="tab" id="glass-projects-tab" tabIndex={sidebarTab === 'projects' ? 0 : -1} aria-selected={sidebarTab === 'projects'} aria-controls="glass-projects-panel" onClick={() => setSidebarTab('projects')}>Projects</button>
+          <button role="tab" id="glass-projects-tab" tabIndex={sidebarTab === 'projects' ? 0 : -1} aria-selected={sidebarTab === 'projects'} aria-controls="glass-projects-panel" title={`${projects.length} ${projects.length === 1 ? 'project' : 'projects'}`} onClick={() => setSidebarTab('projects')}><span>Projects</span><span className="glass-tab-count" aria-hidden="true">{projects.length}</span></button>
           <button role="tab" id="glass-tasks-tab" tabIndex={sidebarTab === 'tasks' ? 0 : -1} aria-selected={sidebarTab === 'tasks'} aria-controls="glass-tasks-panel" onClick={() => setSidebarTab('tasks')}>Tasks</button>
-        </div>
-        {sidebarTab === 'tasks' ? <div key="tasks" id="glass-tasks-panel" role="tabpanel" aria-labelledby="glass-tasks-tab" className="glass-sidebar-panel">
-          {active && apiOf(machineOfTarget(active)) ? <ApiContext.Provider value={apiOf(machineOfTarget(active)) ?? api}><GlassProjectTasks key={active.projectId} projectId={active.projectId} projectName={active.projectName} sessionName={active.sessionName} /></ApiContext.Provider> : <p className="glass-task-empty">Select an open terminal window to see its project’s tasks.</p>}
-        </div> : <div key="projects" id="glass-projects-panel" role="tabpanel" aria-labelledby="glass-projects-tab" className="glass-sidebar-panel">
-        <div className="glass-section-title">
-          Projects <span>{projects.length}</span>
           <button
             className="glass-close-projects"
             aria-label="Close projects"
@@ -976,6 +1338,20 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             </a>
           )}
         </div>
+        {sidebarTab === 'tasks' ? <div key="tasks" id="glass-tasks-panel" role="tabpanel" aria-labelledby="glass-tasks-tab" className="glass-sidebar-panel">
+          {active && apiOf(machineOfTarget(active)) ? <ApiContext.Provider value={apiOf(machineOfTarget(active)) ?? api}><Suspense fallback={null}><GlassProjectTasks
+            key={active.projectId}
+            projectId={active.projectId}
+            projectName={active.projectName}
+            sessionName={active.sessionName}
+            machine={machineOfTarget(active) ?? 'local'}
+            sessions={projects.find((project) => project.id === active.projectId && project.machine === (machineOfTarget(active) ?? 'local'))?.sessions ?? []}
+            onOpenSession={(name) => {
+              const target = { projectId: active.projectId, projectName: active.projectName, sessionName: name, machine: machineOfTarget(active) };
+              void refresh().then(() => open(target));
+            }}
+          /></Suspense></ApiContext.Provider> : <p className="glass-task-empty">Select an open terminal window to see its project’s tasks.</p>}
+        </div> : <div key="projects" id="glass-projects-panel" role="tabpanel" aria-labelledby="glass-projects-tab" className="glass-sidebar-panel">
         <label className="glass-project-filter">
           <Search size={14} />
           <input
@@ -985,7 +1361,38 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <div className="glass-tree">
+        <div className="glass-tree" onKeyDown={(event) => {
+          // j/k move between rows only while a row has focus; anywhere else they are letters.
+          if (event.altKey || event.ctrlKey || event.metaKey || (event.key !== 'j' && event.key !== 'k')) return;
+          const target = event.target as HTMLElement;
+          if (!target.matches('[data-nav-row]')) return;
+          const rows = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-nav-row]')].filter((item) => item.getClientRects().length > 0);
+          const index = nextRow(rows.length, rows.indexOf(target), event.key === 'j' ? 1 : -1);
+          if (index < 0) return;
+          event.preventDefault();
+          rows[index].focus();
+        }}>
+          <PinnedList
+            glance={(id) => { const t = focus.find((item) => key(item) === id); return t ? glance.bind(glanceTarget(t)) : {}; }}
+            items={focus.map((t, index) => ({
+              id: key(t),
+              label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`,
+              project: `${onMachine(t)}${t.projectName}`,
+              session: t.sessionName,
+              selected: !!active && key(active) === key(t),
+              glyph: <StatusGlyph state={stateOfTarget(t)} />,
+              shortcut: desktop && index < 9 ? `${mac ? '⌘' : 'Ctrl+'}${index + 1}` : null,
+              activityKey: terminalKey(machineOfTarget(t), t.projectId, t.sessionName),
+            }))}
+            onOpen={(id) => { const t = focus.find((item) => key(item) === id); if (t) open(t); }}
+            onUnpin={(id) => setFocus((items) => items.filter((item) => key(item) !== id))}
+            onReorder={(ids) => {
+              const ordered = ids.map((id) => focus.find((item) => key(item) === id)).filter((t): t is Target => !!t);
+              setFocus(ordered);
+              const rank = (target: Target) => { const index = ordered.findIndex((item) => key(item) === key(target)); return index < 0 ? ordered.length : index; };
+              setWindows((items) => [...items].sort((a, b) => rank(a) - rank(b)));
+            }}
+          />
           {inventoryAvailable === false && (
             <div className="glass-inventory-error">
               <p>Session inventory unavailable.</p>
@@ -999,7 +1406,20 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           )}
           {sections.map((link) => {
             const own = projects.filter((p) => p.machine === link.id);
-            const list = own.filter(matches).map(renderProject);
+            const revealedHere = new Set([...revealed].filter((item) => item.startsWith(`${link.id} `)).map((item) => item.slice(link.id.length + 1)));
+            const { shown, hiddenEmpty } = visibleProjects(own.filter(matches), { revealed: revealedHere, showEmpty: showEmpty.includes(link.id), filtering: query.trim() !== '' });
+            const list = [
+              ...shown.map(renderProject),
+              hiddenEmpty > 0 && (
+                <button key="reveal" type="button" data-nav-row className="sidebar-reveal" onClick={() => {
+                  const first = own.filter(matches).find((p) => p.sessions.length === 0 && !p.is_inbox);
+                  if (first) setFocusProject(`${link.id} ${first.id}`);
+                  setShowEmpty((ids) => (ids.includes(link.id) ? ids : [...ids, link.id]));
+                }}>
+                  {hiddenEmpty} {hiddenEmpty === 1 ? 'project' : 'projects'} with no sessions
+                </button>
+              ),
+            ];
             if (!desktop) {
               return <Fragment key={link.id}>
                 {inventoryAvailable && own.length === 0 && (
@@ -1008,6 +1428,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                   </p>
                 )}
                 {list}
+                {!query && (otherBy[link.id]?.length ?? 0) > 0 && (
+                  <Suspense fallback={null}>
+                    <OtherSessions
+                      machine={link.id}
+                      sessions={otherBy[link.id]}
+                      stateOf={(s) => sessionState(s, seenAt(link.id, OTHER_PROJECT_KEY, s.name))}
+                      opening={new Set([...openingOther.current].filter((item) => item.startsWith(`${link.id} `)).map((item) => item.slice(link.id.length + 1)))}
+                      onOpen={(session) => void openOther(link, session)}
+                    />
+                  </Suspense>
+                )}
               </Fragment>;
             }
             const collapsed = collapsedMachines.includes(link.id);
@@ -1020,6 +1451,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 collapsed={collapsed}
                 onToggle={() => setCollapsedMachines((ids) => collapsed ? ids.filter((id) => id !== link.id) : [...ids, link.id])}
                 onAddProject={() => setPickingProject(link.id)}
+                onOpenPanel={(kind) => setPanel({ kind, machine: link.id })}
               >
                 {link.state === 'connected' && loadedHere && !own.some((p) => p.path && !p.is_inbox) && !query && (
                   <Suspense fallback={null}>
@@ -1029,11 +1461,34 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                         onOpenFolder={() => setPickingProject(link.id)}
                         onConnect={link.id === 'local' && canConnect() ? () => setConnecting(true) : undefined}
                         onLink={(repo) => linkProject(link.id, repo.path, repo.name)}
+                        onInstall={(agent) => {
+                          const startup = trustedInstallStart(agent);
+                          if (!startup) { setError(`Dolphin does not know this installer for ${agent.name}. ${agent.install_hint ?? 'Install it yourself.'}`); return; }
+                          const inbox = inboxOf(link.id);
+                          if (!inbox) { setError('This machine has no Inbox project yet, so there is nowhere to open a terminal.'); return; }
+                          return create(inbox, { mode: 'shell', startup });
+                        }}
+                        onSignIn={(agent) => {
+                          const inbox = inboxOf(link.id);
+                          if (!inbox) { setError('This machine has no Inbox project yet, so there is nowhere to open a terminal.'); return; }
+                          return create(inbox, { mode: agent });
+                        }}
                       />
                     </ApiContext.Provider>
                   </Suspense>
                 )}
                 {list}
+                {!query && (otherBy[link.id]?.length ?? 0) > 0 && (
+                  <Suspense fallback={null}>
+                    <OtherSessions
+                      machine={link.id}
+                      sessions={otherBy[link.id]}
+                      stateOf={(s) => sessionState(s, seenAt(link.id, OTHER_PROJECT_KEY, s.name))}
+                      opening={new Set([...openingOther.current].filter((item) => item.startsWith(`${link.id} `)).map((item) => item.slice(link.id.length + 1)))}
+                      onOpen={(session) => void openOther(link, session)}
+                    />
+                  </Suspense>
+                )}
               </MachineSection>
             );
           })}
@@ -1045,14 +1500,76 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           )}
         </div>
         </div>}
-        <footer>
-          <span>Everything in context.</span>
-          <small>One place to keep moving.</small>
-        </footer>
       </motion.aside>
-      <Group className="glass-center" orientation={narrow ? 'vertical' : 'horizontal'} resizeTargetMinimumSize={{ coarse: 24, fine: 8 }}>
-      <Panel id="dolphin-chat" defaultSize="100%" minSize="10%">
-      <main className="glass-stage glass-surface">
+      <Group
+        className="glass-center"
+        elementRef={centre}
+        orientation={narrow ? 'vertical' : 'horizontal'}
+        resizeTargetMinimumSize={{ coarse: 24, fine: 8 }}
+        onLayoutChanged={(_layout, meta) => {
+          // Only a person's drag or key press sets the remembered width.
+          if (!meta.isUserInteraction || !hasWindowsRef.current || narrowRef.current) return;
+          const chat = chatPanel.current;
+          if (!chat) return;
+          if (chat.isCollapsed()) rememberChat(true);
+          else {
+            chatWidth.current = clampChatWidth(chat.getSize().inPixels);
+            writeLayout(storage, LAYOUT_KEYS.chat, { width: chatWidth.current, collapsed: false });
+          }
+        }}
+      >
+      {/* Never collapsible: a drag to the edge stops at 30% while windows are open. */}
+      <Panel id="dolphin-windows" panelRef={windowsPanel} minSize={hasWindows ? '30%' : '0%'} defaultSize="0%">
+        <div ref={windowStack} className="glass-window-stack" data-multiple={projectWindows.length > 1}>
+          <AnimatePresence initial={false}>
+            {projectWindows.map(group => <motion.section layout="position" layoutDependency={layoutKey} key={group.projectId} className="glass-session-window glass-surface" data-session-key={key(group.selected)} data-project-id={group.projectId} data-active={active?.projectId === group.projectId} data-fullscreen={fullscreenProject === group.projectId || undefined} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.22 }}>
+              {group.sessions.map(target => <div key={key(target)} className="glass-project-terminal" hidden={key(target) !== key(group.selected)}>
+                <ApiContext.Provider value={apiOf(machineOfTarget(target)) ?? api}>
+                <GlassSessionWindow
+                  target={target}
+                  sessions={group.sessions}
+                  machineId={machineOfTarget(target)}
+                  machine={desktop && machineOfTarget(target) !== 'local' ? labelOf(machineOfTarget(target)) : undefined}
+                  visible={key(target) === key(group.selected)}
+                  collapsed={group.collapsed}
+                  fullscreen={fullscreenProject === group.projectId}
+                  pinned={focus.some((item) => key(item) === key(target))}
+                  state={stateOfTarget(target)}
+                  states={Object.fromEntries(group.sessions.map((t) => [key(t), stateOfTarget(t)]))}
+                  reconnectKey={terminalReconnectKey(target, projects, sections, desktop)}
+                  git={gitBy[machineOfTarget(target) ?? '']?.sessions?.[target.sessionName] ?? gitBy[machineOfTarget(target) ?? '']?.projects?.[target.projectId] ?? null}
+                  creating={creating}
+                  onSelectTab={selectTabStable}
+                  onCloseTab={closeWindowStable}
+                  onToggleFullscreen={toggleFullscreenStable}
+                  onNewSession={newSessionInStable}
+                  onToggleCollapsed={toggleCollapsedStable}
+                  onTogglePin={togglePinStable}
+                  onReviewChanges={reviewStable}
+                  onClose={closeWindowStable}
+                  onTerminated={terminatedStable}
+                  onFocus={focusTargetStable}
+                  onChanged={refreshAllStable}
+                />
+                </ApiContext.Provider>
+              </div>)}
+            </motion.section>)}
+          </AnimatePresence>
+        </div>
+      </Panel>
+      <Separator
+        className="glass-window-separator"
+        aria-label="Resize chat and session windows"
+        disabled={!hasWindows || chatCollapsed}
+        style={{
+          visibility: hasWindows && !chatCollapsed ? 'visible' : 'hidden',
+          width: narrow ? undefined : (hasWindows && !chatCollapsed ? 6 : 0),
+          height: narrow ? (hasWindows && !chatCollapsed ? 6 : 0) : undefined,
+        }}
+      />
+      <Panel id="dolphin-chat" panelRef={chatPanel} collapsible collapsedSize="0%" minSize={narrow ? '20%' : `${CHAT_MIN_WIDTH}px`} defaultSize="100%" groupResizeBehavior={hasWindows && !narrow ? 'preserve-pixel-size' : 'preserve-relative-size'}>
+      {/* Folded, the chat stays mounted (its drafts and replies keep running) but out of sight. */}
+      <main ref={chatMain} className="glass-stage glass-surface" hidden={hasWindows && chatCollapsed}>
         <header className="glass-stage-header glass-chat-toolbar">
           <div className="glass-stage-name" title="Chat across all projects">
             <h1>Chat</h1><span>Across all projects</span>
@@ -1069,12 +1586,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 setThreads(items => items.filter(item => item.id !== id));
                 chatTabs.tabs.filter(tab => tabThreads[tab.id] === id).forEach(tab => { setThreadFor(tab.id, ''); chatTabs.close(tab.id); });
               }} />
+              {hasWindows && (
+                <button className="glass-chat-fold" aria-label="Hide chat" title={`Hide chat (${foldShortcut(mac)})`} onClick={foldChat}>
+                  <PanelRightClose size={15} aria-hidden="true" />
+                </button>
+              )}
             </div>
         </header>
         {error && (
           <div role="alert" className="glass-error">
             {error}
-            {failedMessage && <button disabled={busy || pending} onClick={() => void send(failedMessage)}>Retry failed message</button>}
+            {failedMessage && <button disabled={busy || pending} onClick={() => { composer.current?.clearIf(failedMessage); void send(failedMessage); }}>Retry failed message</button>}
             <button aria-label="Dismiss error" onClick={() => setError('')}>
               <X size={14} />
             </button>
@@ -1088,30 +1610,14 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             >
               {visibleMessages.length === 0 ? (
                 <div className="glass-welcome">
-                  <span className="dolphin-orb">
-                    <DolphinIcon />
-                  </span>
-                  <p>One thought. Every possibility.</p>
                   <h2>What shall we work on?</h2>
-                  <span>
-                    Your projects, conversations, and terminals.
-                    <br />
-                    Together in one quiet workspace.
-                  </span>
+                  <p>Ask about your projects, or open a session from the list. Replies, and the work they start, show up here.</p>
                   <div>
-                    <button
-                      onClick={() =>
-                        setDraft('Give me an overview of my projects.')
-                      }
-                    >
-                      Get an overview <ArrowUpRight size={14} />
+                    <button onClick={() => composer.current?.setDraft('Give me an overview of my projects.')}>
+                      Get an Overview <ArrowUpRight size={14} />
                     </button>
-                    <button
-                      onClick={() =>
-                        setDraft('Help me decide what to focus on next.')
-                      }
-                    >
-                      Find my next focus <ArrowUpRight size={14} />
+                    <button onClick={() => composer.current?.setDraft('Help me decide what to focus on next.')}>
+                      Find My Next Focus <ArrowUpRight size={14} />
                     </button>
                   </div>
                 </div>
@@ -1130,7 +1636,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                     )}
                     <div>
                       {m.role === 'assistant' ? (
-                        <>{m.payload?.engine && <small className="glass-engine-label" title={m.payload.engine.model}>{m.payload.engine.provider === 'claude' ? 'Claude Code' : 'Codex'}{m.payload.engine.fallback ? ' · fallback' : ''}</small>}{m.payload?.tool_activity && renderActivity(m.payload.tool_activity)}<Markdown remarkPlugins={[remarkGfm]} components={{ table: ({ children }) => <div className="glass-table-scroll" role="region" aria-label="Table, scroll horizontally if needed" tabIndex={0}><table>{children}</table></div> }}>{m.text}</Markdown>{m.payload?.uncertainty_note && <p className="glass-context-note">{m.payload.uncertainty_note}</p>}</>
+                        <>{m.payload?.engine && <small className="glass-engine-label" title={m.payload.engine.model}>{m.payload.engine.provider === 'claude' ? 'Claude Code' : 'Codex'}{m.payload.engine.fallback ? ' · fallback' : ''}</small>}{m.payload?.tool_activity && renderActivity(m.payload.tool_activity)}<MarkdownReply text={m.text} />{m.payload?.uncertainty_note && <p className="glass-context-note">{m.payload.uncertainty_note}</p>}</>
                       ) : (
                         m.text
                       )}
@@ -1141,135 +1647,16 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               )}
               {trackingError && <p className="glass-context-note">Work tracking is temporarily unavailable. Retrying…</p>}
               {renderWorkUpdates(workAt.get(visibleMessages.length) ?? [])}
-              {(busy || pending) && (
-                <>
-                  {renderActivity(toolActivity)}
-                  {liveReply && visibleMessages[visibleMessages.length - 1]?.role !== 'assistant' && <div className="glass-message assistant glass-streaming" aria-label="Dolphin response in progress" aria-busy="true">
-                    <div className="glass-reply-mark"><span className="dolphin-mark"><DolphinIcon /></span></div>
-                    <Markdown remarkPlugins={[remarkGfm]} components={{ table: ({ children }) => <div className="glass-table-scroll" role="region" aria-label="Table, scroll horizontally if needed" tabIndex={0}><table>{children}</table></div> }}>{liveReply}</Markdown>
-                  </div>}
-                  <p role="status" className="glass-thinking">{liveReply ? 'Dolphin is writing…' : 'Dolphin is working…'}</p>
-                </>
-              )}
+              <LiveReply key={tabId} thread={thread} running={busy || pending} lastRole={visibleMessages[visibleMessages.length - 1]?.role} renderActivity={renderActivity} onGrow={followIfTailing} />
             </div>
             <BrainStatus />
-            {desktop && <AgentSetupPrompt />}
-            {renderSignals?.((text) => { setDraft(text); composerInput.current?.focus(); })}
-            <form
-              className="glass-composer"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void send();
-              }}
-            >
-              <textarea
-                aria-label="Message Dolphin"
-                placeholder="Ask Dolphin, or start something…"
-                ref={composerInput}
-                rows={1}
-                maxLength={4000}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (
-                    e.key === 'Enter' &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing
-                  ) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-              />
-              <div>
-                <button
-                  className="glass-send"
-                  aria-label="Send message"
-                  disabled={busy || pending || !draft.trim()}
-                >
-                  <ArrowUp size={19} />
-                </button>
-              </div>
-            </form>
+            {desktop && <AgentSetupPrompt sources={machineSources} onHolding={setSetupHolding} />}
+            {renderSignals?.((text) => composer.current?.setDraft(text))}
+            <ChatComposer ref={composer} tabId={tabId} disabled={busy || pending} onSend={(text) => void send(text)} />
       </main>
       </Panel>
-      <Separator className="glass-window-separator" aria-label="Resize chat and session windows" disabled={!hasWindows} style={{ visibility: hasWindows ? 'visible' : 'hidden', width: narrow ? undefined : (hasWindows ? 10 : 0), height: narrow ? (hasWindows ? 10 : 0) : undefined }} />
-      <Panel id="dolphin-windows" panelRef={rightPanel} defaultSize="0%" minSize="0%" maxSize="90%">
-        <div ref={windowStack} className="glass-window-stack" data-multiple={projectWindows.length > 1}>
-          <AnimatePresence initial={false}>
-            {projectWindows.map(group => <motion.section layout="position" key={group.projectId} className="glass-session-window glass-surface" data-session-key={key(group.selected)} data-project-id={group.projectId} data-active={active?.projectId === group.projectId} data-fullscreen={fullscreenProject === group.projectId || undefined} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.22 }}>
-              {group.sessions.map(target => <div key={key(target)} className="glass-project-terminal" hidden={key(target) !== key(group.selected)}>
-                <ApiContext.Provider value={apiOf(machineOfTarget(target)) ?? api}>
-                <GlassSessionWindow target={target} machine={desktop && machineOfTarget(target) !== 'local' ? labelOf(machineOfTarget(target)) : undefined} visible={key(target) === key(group.selected)} collapsed={group.collapsed}
-                  fullscreen={fullscreenProject === group.projectId} onToggleFullscreen={() => setFullscreenProject(current => current === group.projectId ? null : group.projectId)}
-                  creating={creating} onNewSession={() => { const project = projects.find(item => item.id === group.projectId); if (project) void create(project); }}
-                  tabs={group.sessions.length > 1 ? <div className="glass-terminal-tabs" role="tablist" aria-label={`Terminal tabs for ${target.projectName}`} onKeyDown={event => {
-                    const index = group.sessions.findIndex(item => key(item) === key(group.selected));
-                    const next = event.key === 'ArrowRight' ? (index + 1) % group.sessions.length : event.key === 'ArrowLeft' ? (index - 1 + group.sessions.length) % group.sessions.length : event.key === 'Home' ? 0 : event.key === 'End' ? group.sessions.length - 1 : -1;
-                    if (next >= 0) { event.preventDefault(); open(group.sessions[next], { scroll: false }); requestAnimationFrame(() => { const section = Array.from(windowStack.current?.children ?? []).find(element => (element as HTMLElement).dataset.projectId === group.projectId); section?.querySelector<HTMLElement>('.glass-project-terminal:not([hidden]) [role="tab"][aria-selected="true"]')?.focus(); }); }
-                  }}>
-                    {group.sessions.map(session => <div className="glass-terminal-tab" key={key(session)} data-selected={key(session) === key(group.selected)}>
-                      <button role="tab" aria-label={session.sessionName} aria-selected={key(session) === key(group.selected)} tabIndex={key(session) === key(group.selected) ? 0 : -1} onClick={() => open(session, { scroll: false })} title={session.sessionName}>{session.sessionName}</button>
-                      <button aria-label={`Close terminal tab ${session.sessionName}`} title="Close tab — tmux keeps running" onClick={event => { event.stopPropagation(); closeWindow(session); }}><X size={12} /></button>
-                    </div>)}
-                  </div> : undefined}
-                  onToggleCollapsed={() => setMinimized(ids => group.collapsed ? ids.filter(id => !group.sessions.some(session => key(session) === id)) : [...new Set([...ids, ...group.sessions.map(key)])])}
-                  onClose={() => closeWindow(target)} onTerminated={() => { closeWindow(target); setFocus(items => items.filter(item => key(item) !== key(target))); }} onFocus={() => setActive(target)} onChanged={() => void refresh()} />
-                </ApiContext.Provider>
-              </div>)}
-            </motion.section>)}
-          </AnimatePresence>
-        </div>
-      </Panel>
       </Group>
-      <nav className="glass-dock glass-surface" aria-label="Focus">
-        <button
-          className={`glass-home ${!active ? 'selected' : ''}`}
-          aria-label="Dolphin chat"
-          onClick={focusChat}
-        >
-          <span className="dolphin-mark">
-            <DolphinIcon />
-          </span>
-
-        </button>
-        <div className="glass-dock-divider" />
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active: dragged, over }) => {
-          if (over && dragged.id !== over.id) {
-            const ordered = arrayMove(focus, focus.findIndex((t) => key(t) === dragged.id), focus.findIndex((t) => key(t) === over.id));
-            setFocus(ordered);
-            const rank = (target: Target) => { const index = ordered.findIndex((item) => key(item) === key(target)); return index < 0 ? ordered.length : index; };
-            setWindows((items) => [...items].sort((a, b) => rank(a) - rank(b)));
-          }
-        }}><SortableContext items={focus.map(key)} strategy={horizontalListSortingStrategy}>
-        {focus.map((t) => (
-          <FocusItem id={key(t)} activity={projects.find((p) => p.id === t.projectId)?.sessions.some((s) => s.name === t.sessionName && s.observation_state !== 'degraded' && s.has_recent_activity) ?? false} selected={windows.some((item) => key(item) === key(t))} key={key(t)} label={`${onMachine(t)}${t.projectName} / ${t.sessionName}`} onOpen={() => open(t)} onUnpin={() => { closeWindow(t); setFocus((xs) => xs.filter((x) => key(x) !== key(t))); }}>
-              <Terminal size={19} />
-              <span className="glass-dock-copy">
-                <span className="glass-dock-project">{onMachine(t)}{t.projectName}</span>
-                <span className="glass-dock-session">{t.sessionName}</span>
-              </span>
-              <span className="glass-dock-status" title={status(projects.find((p) => p.id === t.projectId)?.sessions.find((s) => s.name === t.sessionName) ?? ({ observation_state: 'degraded' } as ControlCenterSession))}>
-                <i className="glass-status-dot" />
-                <span className="sr-only">{status(projects.find((p) => p.id === t.projectId)?.sessions.find((s) => s.name === t.sessionName) ?? ({ observation_state: 'degraded' } as ControlCenterSession))}</span>
-              </span>
-          </FocusItem>
-        ))}
-        </SortableContext></DndContext>
-        <button
-          className="glass-pin-session"
-          aria-label="Pin session"
-          onClick={() => setPaletteOpen(true)}
-        >
-          <Plus size={17} />
-          <span>Pin session</span>
-        </button>
-        {focus.length === 0 && (
-          <span className="glass-dock-hint">
-            Open a session from your projects to bring it into focus.
-          </span>
-        )}
-      </nav>
+      {glance.shown && <GlancePopover shown={glance.shown} onClose={glance.hide} />}
     </div></MotionConfig>
   );
 }

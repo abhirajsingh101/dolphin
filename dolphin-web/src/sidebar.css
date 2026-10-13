@@ -1,0 +1,39 @@
+/* The projects list, compact (design contract §4, "Projects list rows"):
+   28px project and session rows. Selectors carry .glass-tree so they win over
+   glass.css whichever loads first (the web and desktop entries differ). */
+.glass-tree .sidebar-project { margin: 0; }
+.glass-tree .sidebar-project > summary { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; }
+.glass-tree .sidebar-project > summary strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sidebar-project-meta { color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.glass-workspace .sidebar-project-add { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: var(--r-sm); color: var(--glass-muted); opacity: 0; }
+.glass-tree .sidebar-project > summary:hover .sidebar-project-add,
+.glass-tree .sidebar-project > summary:focus-within .sidebar-project-add { opacity: 1; }
+.glass-workspace .sidebar-project-add:hover { color: var(--glass-text); background: var(--glass-bubble); }
+@media (hover: none) { .glass-workspace .sidebar-project-add { opacity: 1; } }
+.glass-tree .sidebar-sessions { margin: 0 0 0 13px; padding-left: 4px; border-left: 1px solid var(--glass-edge); }
+.glass-tree .sidebar-session { display: flex; align-items: center; gap: 7px; width: 100%; height: 28px; padding: 0 6px; border-radius: var(--r-sm); text-align: left; white-space: nowrap; }
+.glass-tree .sidebar-session[aria-current='true'] { background: var(--glass-selection); box-shadow: inset 2px 0 0 var(--glass-accent); }
+.sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-session-agent { color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.sidebar-session-time { min-width: 3ch; text-align: right; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
+.glass-workspace .sidebar-reveal { display: block; width: 100%; height: 28px; padding: 0 6px; color: var(--glass-muted-small); font-size: var(--fs-2xs); text-align: left; }
+
+/* The pin button beside a session row; the row itself stays 28px. */
+.glass-tree .sidebar-session-line { display: flex; align-items: center; }
+.glass-tree .sidebar-session-line > .sidebar-session { flex: 1; width: auto; min-width: 0; }
+.glass-workspace .glass-tree .sidebar-session-pin { flex: 0 0 24px; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: var(--r-sm); color: var(--glass-muted); opacity: 0; }
+.glass-tree .sidebar-session-line:hover .sidebar-session-pin,
+.glass-tree .sidebar-session-line:focus-within .sidebar-session-pin,
+.glass-workspace .glass-tree .sidebar-session-pin[aria-pressed='true'] { opacity: 1; }
+.glass-workspace .glass-tree .sidebar-session-pin[aria-pressed='true'] { color: var(--glass-accent); }
+@media (hover: none) { .glass-workspace .glass-tree .sidebar-session-pin { opacity: 1; } }
+
+/* A worktree session's branch and archive, in the session's own 28px line. */
+.glass-tree .sidebar-worktree { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.glass-tree .sidebar-worktree-archive,
+.glass-tree .sidebar-worktree-keep { height: 20px; padding: 0 6px; border: 1px solid var(--glass-muted-small); border-radius: var(--r-sm); background: none; color: var(--glass-muted-small); font-size: var(--fs-2xs); cursor: pointer; }
+.glass-tree .sidebar-worktree-archive:hover,
+.glass-tree .sidebar-worktree-keep:hover { background: var(--glass-selection); color: var(--glass-text); }
+/* While Archive waits for its answer: what else it deletes, on a line of its own under the row. */
+.glass-tree .sidebar-session-line:has(> .sidebar-worktree-note) { flex-wrap: wrap; }
+.glass-tree .sidebar-worktree-note { flex: 0 0 100%; margin: 0 0 4px; padding-left: 24px; color: var(--glass-muted-small); font-size: var(--fs-2xs); overflow-wrap: anywhere; }

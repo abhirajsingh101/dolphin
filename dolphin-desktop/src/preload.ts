@@ -31,6 +31,32 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
     ipcRenderer.on('dolphin:fullscreen', (_event, fullscreen: boolean) => listener(Boolean(fullscreen)));
   },
   setBadge: (count: number) => ipcRenderer.send('dolphin:badge', count),
+  // Finished turns (main.ts): the main process raises system notifications
+  // itself; a click opens the session here. `notify` raises one from the page.
+  notify: (payload: { title: string; body: string; machine: string; projectId: string; session: string }) => ipcRenderer.send('dolphin:notify', payload),
+  onOpenSession: (listener: (target: { machine: string; projectId: string; session: string }) => void) => {
+    // The target waits in the main process until the page takes it: on every
+    // ping, and once now, for a click that opened this window.
+    const take = () => {
+      const target = ipcRenderer.sendSync('dolphin:take-open-session');
+      if (target) listener(target);
+    };
+    ipcRenderer.on('dolphin:open-session', take);
+    take();
+    return () => { ipcRenderer.removeListener('dolphin:open-session', take); };
+  },
+  setSystemNotifications: (enabled: boolean) => ipcRenderer.send('dolphin:system-notifications', enabled),
+  // Desktop settings (settings.ts): update channel, memory, crash reports.
+  settings: {
+    get: () => ipcRenderer.sendSync('dolphin:settings-get'),
+    set: (patch: Record<string, unknown>) => ipcRenderer.invoke('dolphin:settings-set', patch),
+  },
+  // Keyboard commands from the menu (keymap.ts): palette, session-1…9, and the rest.
+  onCommand: (listener: (id: string) => void) => {
+    const heard = (_event: unknown, id: unknown) => listener(String(id));
+    ipcRenderer.on('dolphin:command', heard);
+    return () => { ipcRenderer.removeListener('dolphin:command', heard); };
+  },
   retry: () => ipcRenderer.send('dolphin:retry'),
   openLogs: () => ipcRenderer.send('dolphin:open-logs'),
   sshHosts: (): Promise<string[]> => ipcRenderer.invoke('dolphin:ssh-hosts'),
@@ -50,7 +76,9 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   connection: () => ipcRenderer.sendSync('dolphin:connection-state'),
   reconnect: (target: string) => ipcRenderer.send('dolphin:reconnect', target),
   setupKey: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:setup-key', target),
+  setAgentForwarding: (target: string, on: boolean): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:agent-forwarding', target, on),
   dismissKey: (target: string) => ipcRenderer.send('dolphin:dismiss-key', target),
+  remoteLog: (target: string): Promise<{ ok?: boolean; file?: string; error?: string }> => ipcRenderer.invoke('dolphin:remote-log', target),
   // Connect to Machine… in the menu opens the window's own dialog.
   onConnectOpen: (listener: () => void) => {
     const heard = () => listener();
@@ -58,4 +86,14 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
     return () => { ipcRenderer.removeListener('dolphin:connect-open', heard); };
   },
   connect: (target: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:connect', target),
+  // A port or a web link on a machine, opened in this computer's browser:
+  // forwarded over SSH and rewritten when it is the machine's localhost.
+  openPort: (machine: string, port: number): Promise<{ url?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-port', machine, port),
+  openUrl: (machine: string, url: string): Promise<{ url?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-url', machine, url),
 });
+
+// The network changed (Wi-Fi back, VPN up): every machine link checks at
+// once instead of waiting for its next health check.
+for (const kind of ['online', 'offline'] as const) {
+  window.addEventListener(kind, () => ipcRenderer.send('dolphin:network-changed', kind));
+}

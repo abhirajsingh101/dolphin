@@ -2,7 +2,8 @@ from datetime import date, datetime, time
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .tmux_service import RESUME_ID
 
 
 # --- Projects ---
@@ -415,6 +416,12 @@ class ControlCenterSessionResponse(BaseModel):
     last_activity_at: Optional[datetime] = None
     observation_state: Literal["available", "degraded"] = "available"
     observation_message: Optional[str] = None
+    # The agent in the session's active pane, and the turn state its hook left
+    # there (UserPromptSubmit: working, Stop: finished). Null without hook state.
+    agent: Optional[Literal["claude", "codex"]] = None
+    turn_state: Optional[Literal["working", "finished"]] = None
+    turn_at: Optional[datetime] = None
+    pane_dead: bool = False
 
 
 class ControlCenterProjectResponse(BaseModel):
@@ -444,6 +451,12 @@ class ControlCenterProjectResponse(BaseModel):
     sessions: list[ControlCenterSessionResponse] = Field(default_factory=list)
 
 
+class OtherSessionResponse(ControlCenterSessionResponse):
+    """A tmux session outside every project. `openable`: it works inside a
+    workspace root, so it can be opened (through that root's hidden project)."""
+    openable: bool = False
+
+
 class ControlCenterResponse(BaseModel):
     collected_at: datetime
     status: Literal["ok", "degraded"]
@@ -454,6 +467,7 @@ class ControlCenterResponse(BaseModel):
     codex_session_count: int
     needs_setup_count: int
     projects: list[ControlCenterProjectResponse] = Field(default_factory=list)
+    other_sessions: list[OtherSessionResponse] = Field(default_factory=list)
 
 
 # --- System health ---
@@ -547,6 +561,9 @@ class TmuxSessionRename(BaseModel):
 class TmuxInputRequest(BaseModel):
     text: str = ""
     enter: bool = True
+    # Refuse (409) unless Codex or Claude runs in the pane: a shell would run
+    # the text as commands. The diff review sets it.
+    require_agent: bool = False
 
 
 class TmuxKeyRequest(BaseModel):
@@ -864,3 +881,154 @@ class RunReceiptResponse(BaseModel):
 
 class OwnerTaskCompletion(BaseModel):
     is_done: bool
+
+
+# --- Workflow (Dolphin Desktop 0.2.0) ---
+
+class GitStatusResponse(BaseModel):
+    branch: Optional[str] = None
+    head: Optional[str] = None
+    upstream: Optional[str] = None
+    ahead: int = 0
+    behind: int = 0
+    dirty: int = 0
+    conflicted: int = 0
+
+
+class WorktreeStatusResponse(GitStatusResponse):
+    project_id: str
+    worktree_path: str
+    base_ref: Optional[str] = None
+    merged: bool = False
+    # Filled only when merged (Archive is offered): ignored entries other than
+    # .env* that archiving deletes. Folders count once and end in "/".
+    ignored_count: int = 0
+    ignored_names: list[str] = Field(default_factory=list)
+
+
+class GitStatusesResponse(BaseModel):
+    projects: dict[str, Optional[GitStatusResponse]] = Field(default_factory=dict)
+    sessions: dict[str, WorktreeStatusResponse] = Field(default_factory=dict)
+    errors: dict[str, str] = Field(default_factory=dict)
+
+
+class WorktreeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    branch: str = Field(min_length=1, max_length=100)
+    run_setup: bool = True
+
+
+class ResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent: Literal["claude", "codex"]
+    id: str = Field(pattern=RESUME_ID.pattern)
+
+
+class LaunchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["claude", "codex", "shell"] = "claude"
+    name: Optional[str] = None
+    prompt: Optional[str] = Field(default=None, max_length=8_000)
+    task_id: Optional[str] = None
+    worktree: Optional[WorktreeRequest] = None
+    resume: Optional[ResumeRequest] = None
+
+
+class LaunchedWorktreeResponse(BaseModel):
+    path: str
+    branch: str
+    base_ref: str
+    base_sha: str
+    copied: list[str]
+    setup: bool  # the setup script was started in the terminal, not that it succeeded
+
+
+class LaunchResponse(BaseModel):
+    session: TmuxSessionResponse
+    worktree: Optional[LaunchedWorktreeResponse] = None
+    warning: Optional[str] = None
+
+
+class SessionLinkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    session_name: str
+    project_id: str
+    task_id: Optional[str] = None
+    agent: Optional[str] = None
+    worktree_path: Optional[str] = None
+    branch: Optional[str] = None
+    base_ref: Optional[str] = None
+    base_sha: Optional[str] = None
+    created_at: datetime
+    archived_at: Optional[datetime] = None
+
+
+class WorktreeOptionsResponse(BaseModel):
+    git: bool
+    branch: Optional[str] = None
+    suggested_branch: str
+    setup: bool  # the setup script was started in the terminal, not that it succeeded
+    env_files: list[str]
+
+
+class SessionDiffResponse(BaseModel):
+    repo: str
+    base_ref: str
+    base_sha: str
+    diff: str
+    truncated: bool
+    untracked: int
+    notes: list[str] = []
+
+
+class ListeningPortResponse(BaseModel):
+    port: int
+    address: str
+    pid: int
+    process: str
+    command: str
+    cwd: Optional[str] = None
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+
+
+class UsageWindowResponse(BaseModel):
+    tokens: int
+    started_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    burn_per_minute: Optional[int] = None
+
+
+class UsageLimitResponse(BaseModel):
+    window_minutes: int
+    used_percent: float
+    resets_at: Optional[datetime] = None
+
+
+class AgentUsageResponse(BaseModel):
+    agent: Literal["claude", "codex"]
+    found: bool
+    five_hour: Optional[UsageWindowResponse] = None
+    seven_day: UsageWindowResponse
+    limits: list[UsageLimitResponse] = Field(default_factory=list)
+
+
+class UsageResponse(BaseModel):
+    collected_at: datetime
+    agents: list[AgentUsageResponse]
+
+
+class HistoryItemResponse(BaseModel):
+    agent: Literal["claude", "codex"]
+    id: str
+    cwd: str
+    title: str
+    started_at: Optional[datetime] = None
+    updated_at: datetime
+    message_count: int
+    snippets: list[str]
+
+
+class OtherSessionProjectResponse(BaseModel):
+    project_id: str
+    project_name: str

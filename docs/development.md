@@ -57,10 +57,13 @@ platform.
 cd dolphin-desktop
 ./scripts/build-helper.sh                         # helper-bundles/<platform>-<arch>[.tar.xz]
 ./scripts/smoke-helper.sh helper-bundles/linux-x64
-npm run dist                                      # release/: AppImage and deb, or dmg on macOS
+npm run dist                                      # release/: AppImage, deb and rpm (dmg and zip on macOS)
 DOLPHIN_DESKTOP_APP=$PWD/release/linux-unpacked/dolphin-desktop \
   xvfb-run -a node --test test/packaged.test.mjs  # the packaged app's first run, empty HOME
 ```
+
+The rpm target needs `rpmbuild` (`sudo apt-get install rpm` on Debian and
+Ubuntu). Without it, build the others only: `npx electron-builder --linux AppImage deb --publish never`.
 
 A local build carries only its own platform's helper, so it can reach SSH hosts
 of that platform only. Release builds carry every helper.

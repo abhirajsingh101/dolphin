@@ -3,12 +3,12 @@
 // a one-time "what's new" after an update.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { _electron as electron } from 'playwright';
+import { scratchEnv, teardown } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
@@ -43,20 +43,19 @@ async function launch(home, feed, { lastVersion } = {}) {
   const app = await electron.launch({
     // Its own profile: the last-run version lives there, and must not leak between runs.
     args: ['--no-sandbox', `--user-data-dir=${profile}`, root],
-    env: { ...process.env, DOLPHIN_HOME: home, DOLPHIN_GBRAIN: 'off', DOLPHIN_TMUX_IMPORT: 'off', ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
-      DOLPHIN_DESKTOP_UPDATE_FEED: feed.url, DOLPHIN_DESKTOP_UPDATE_DELAY_MS: '500' },
+    env: scratchEnv(home, { DOLPHIN_HOME: home, DOLPHIN_TMUX_IMPORT: 'off',
+      DOLPHIN_DESKTOP_UPDATE_FEED: feed.url, DOLPHIN_DESKTOP_UPDATE_DELAY_MS: '500' }),
   });
-  const window = await app.firstWindow();
-  await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
-  await window.getByRole('button', { name: 'Open command palette' }).waitFor({ timeout: 60_000 });
-  return { app, window };
-}
-
-async function close(app, home) {
-  const exited = new Promise((resolve) => app.process().once('exit', resolve));
-  await app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-  await exited;
-  try { execFileSync(path.resolve(root, '..', 'dolphin-backend', 'venv', 'bin', 'python'), ['-m', 'app.helper', 'stop'], { cwd: path.resolve(root, '..', 'dolphin-backend'), env: { ...process.env, DOLPHIN_HOME: home } }); } catch { /* not running */ }
+  try {
+    const window = await app.firstWindow();
+    await window.waitForURL(/desktop\.html/, { timeout: 90_000 });
+    await window.getByRole('button', { name: 'Open command palette' }).waitFor({ timeout: 60_000 });
+    return { app, window };
+  } catch (error) {
+    // A failed launch must not leave the app or its helper running.
+    await teardown({ app, helpers: [home] }).catch(() => undefined);
+    throw error;
+  }
 }
 
 test('a newer release shows as a pill; its panel downloads the installer', { timeout: 150_000 }, async () => {
@@ -90,9 +89,7 @@ test('a newer release shows as a pill; its panel downloads the installer', { tim
     await panel.waitFor({ state: 'detached' });
     assert.equal(await pill.isVisible(), true);
   } finally {
-    await close(app, home);
-    feed.close();
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [home], cleanup: [() => feed.close()], remove: [home] });
   }
 });
 
@@ -129,9 +126,7 @@ test('the logo and the menu open About; a check on demand says what it found', {
     });
     await panel.getByText('Dolphin is up to date').waitFor({ timeout: 15_000 });
   } finally {
-    await close(app, home);
-    feed.close();
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [home], cleanup: [() => feed.close()], remove: [home] });
   }
 });
 
@@ -153,8 +148,31 @@ test('after an update, one toast says what is new', { timeout: 150_000 }, async 
     assert.equal(await window.getByRole('status', { name: 'Dolphin updated' }).count(), 0);
     assert.equal(readFileSync(path.join(home, 'profile', 'last-version'), 'utf8'), appVersion);
   } finally {
-    await close(app, home);
-    feed.close();
-    rmSync(home, { recursive: true, force: true });
+    await teardown({ app, helpers: [home], cleanup: [() => feed.close()], remove: [home] });
+  }
+});
+
+test('the beta channel offers prereleases; stable does not, and switching back drops the offer', { timeout: 150_000 }, async () => {
+  const feed = await startFeed();
+  feed.release = [same, { tag_name: 'desktop-v9.9.9-beta.1', prerelease: true, html_url: 'https://example.invalid/beta', assets: newer.assets }];
+  const home = mkdtempSync(path.join(tmpdir(), 'dup-'));
+  const { app, window } = await launch(home, feed);
+  try {
+    await window.waitForTimeout(2_500); // the first quiet check has run
+    const pill = window.getByRole('button', { name: 'Update', exact: true });
+    assert.equal(await pill.count(), 0, 'stable never offers a prerelease');
+
+    await window.evaluate(() => window.dolphinDesktop.settings.set({ updateChannel: 'beta' }));
+    await pill.waitFor({ timeout: 15_000 });
+    await pill.click();
+    const panel = window.getByRole('dialog', { name: 'About Dolphin' });
+    await panel.getByText('Dolphin 9.9.9-beta.1 is available').waitFor();
+    assert.equal(await panel.getByRole('link', { name: 'What’s new' }).getAttribute('href'), 'https://example.invalid/beta');
+    await window.keyboard.press('Escape');
+
+    await window.evaluate(() => window.dolphinDesktop.settings.set({ updateChannel: 'stable' }));
+    await pill.waitFor({ state: 'detached', timeout: 15_000 });
+  } finally {
+    await teardown({ app, helpers: [home], cleanup: [() => feed.close()], remove: [home] });
   }
 });

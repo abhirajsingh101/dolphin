@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Brain } from 'lucide-react';
 import { request } from './api';
+import { BRAIN_CHANGED } from './firstRun';
 import './composerNotice.css';
 
 /* Dolphin's memory (a GBrain on this machine) sets itself up when the helper
@@ -13,6 +14,7 @@ export default function BrainStatus() {
   const [brain, setBrain] = useState<BrainState | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const sawSetup = useRef(false);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
     let stopped = false;
@@ -30,6 +32,13 @@ export default function BrainStatus() {
     };
     void poll();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [round]);
+
+  // The first-run checklist turned memory on (or retried it): look again.
+  useEffect(() => {
+    const again = () => { setDismissed(false); setRound((value) => value + 1); };
+    window.addEventListener(BRAIN_CHANGED, again);
+    return () => window.removeEventListener(BRAIN_CHANGED, again);
   }, []);
 
   const retry = async () => {

@@ -1,0 +1,9 @@
+/* StatusGlyph. Paint from tokens; no motion here (desktop/motion.css turns the
+   working arc in Dolphin Desktop only). */
+.status-glyph { display: inline-grid; place-items: center; width: 12px; height: 12px; flex-shrink: 0; }
+.status-glyph svg { display: block; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.status-glyph[data-state='working'] { color: var(--glass-accent); }
+.status-glyph[data-state='unread'] { color: var(--glass-accent); }
+.status-glyph[data-state='unread'] svg { fill: currentColor; stroke: none; }
+.status-glyph[data-state='error'] { color: var(--danger); }
+.status-glyph[data-state='idle'] { color: var(--glass-muted); }

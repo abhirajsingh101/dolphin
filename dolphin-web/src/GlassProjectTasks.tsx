@@ -1,12 +1,36 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Plus, RefreshCw, Copy, Check } from 'lucide-react';
+import { Check, Copy, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useApi } from './apiContext';
-import type { Task } from './types';
+import StatusGlyph from './StatusGlyph';
+import { seenAt, sessionState } from './sessionState';
+import { getSetting } from './settings';
+import type { ControlCenterSession, SessionLink, Task } from './types';
 
-export default function GlassProjectTasks({ projectId, projectName, sessionName }: { projectId: string; projectName: string; sessionName: string }) {
-  const { createTask, fetchTasks, updateTask } = useApi();
+/* The selected terminal's project's todos. Each open todo can start its own
+   agent session with its text as the first prompt. A todo with a session
+   shows that session's state and opens it. Todos can be edited and deleted. */
+
+export default function GlassProjectTasks({ projectId, projectName, sessionName, machine, sessions, onOpenSession }: {
+  projectId: string;
+  projectName: string;
+  sessionName: string;
+  machine: string;
+  sessions: ControlCenterSession[];
+  onOpenSession: (sessionName: string) => void;
+}) {
+  const { createTask, deleteTask, fetchSessionLinks, fetchTasks, launchSession, updateTask } = useApi();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [links, setLinks] = useState<SessionLink[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [editError, setEditError] = useState('');
+  // A launch's own message; load and the poll never clear it.
+  const [launchMessage, setLaunchMessage] = useState('');
+  // Tasks whose launch is in flight or whose link has not reloaded yet.
+  const launching = useRef(new Set<string>());
+  const [, bump] = useState(0);
+  useEffect(() => { setConfirmDelete(null); }, [tasks]);
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(null), 1800);
@@ -48,8 +72,13 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName 
     let current = true;
     async function load() {
       try {
-        const result = await fetchTasks(projectId);
-        if (current) { setTasks(result); setError(''); }
+        const [result, linked] = await Promise.all([fetchTasks(projectId), fetchSessionLinks(projectId).catch(() => [])]);
+        if (current) {
+          for (const id of [...launching.current]) {
+            if (linked.some((link) => link.task_id === id && !link.archived_at)) launching.current.delete(id);
+          }
+          setTasks(result); setLinks(linked); setError('');
+        }
       } catch (e) { if (current) setError(e instanceof Error ? e.message : 'Could not load tasks.'); }
       finally { if (current) setLoading(false); }
     }
@@ -57,7 +86,7 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName 
     const timer = window.setInterval(load, 15000);
     return () => { current = false; window.clearInterval(timer); };
   }, [projectId, revision]);
-  async function change(action: () => Promise<Task>, created = false) {
+  async function change(action: () => Promise<unknown>, created = false) {
     setBusy(true); setError('');
     try {
       await action();
@@ -66,6 +95,39 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName 
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save task.'); }
     finally { setBusy(false); }
   }
+  async function start(task: Task) {
+    const preferred = getSetting('newSession.defaultAgent');
+    const mode = preferred === 'codex' ? 'codex' : 'claude';
+    if (launching.current.has(task.id)) return;
+    launching.current.add(task.id); bump(n => n + 1);
+    setLaunchMessage('');
+    try {
+      const launched = await launchSession(projectId, { mode, task_id: task.id });
+      setRevision(r => r + 1);
+      onOpenSession(launched.session.name);
+      if (launched.warning) setLaunchMessage(launched.warning);
+    } catch (e) {
+      launching.current.delete(task.id);
+      setLaunchMessage(e instanceof Error ? e.message : 'Could not start a session.');
+    } finally { bump(n => n + 1); }
+  }
+  function saveEdit(task: Task) {
+    if (!editing || editing.id !== task.id) return;
+    const title = editing.title.trim();
+    if (!title) { setEditError('A task needs a title.'); return; }
+    setEditing(null); setEditError('');
+    if (title !== task.title) void change(() => updateTask(task.id, { title }));
+  }
+  // The newest link per todo whose session still runs.
+  const sessionFor = (task: Task) => {
+    const mine = links.filter((link) => link.task_id === task.id && !link.archived_at)
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.session_name.localeCompare(a.session_name));
+    for (const link of mine) {
+      const session = sessions.find((item) => item.name === link.session_name);
+      if (session) return session;
+    }
+    return null;
+  };
   return <section className="glass-project-tasks" aria-label={`Tasks for ${projectName}`}>
     <header><div><strong>{projectName}</strong><small title={sessionName}>{sessionName}</small></div>
       <button aria-label="Refresh tasks" onClick={() => setRevision(r => r + 1)}><RefreshCw size={14} /></button>
@@ -80,16 +142,49 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName 
     </form>
     {copied && <span role="status" className="glass-copy-feedback">Task copied</span>}
     {error && <p role="alert">{error}</p>}
+    {launchMessage && <p role="alert" className="glass-task-message">{launchMessage}<button type="button" aria-label="Dismiss message" onClick={() => setLaunchMessage('')}>×</button></p>}
     {loading ? <p role="status">Loading tasks…</p> : <div className="glass-task-list">
       {!tasks.length && !error && <p>No tasks yet for this project.</p>}
       {[false, true].map(done => {
         const group = tasks.filter(task => task.is_done === done);
         if (!group.length) return null;
         return <details key={String(done)} open={!done}><summary>{done ? 'Completed' : 'To do'} <span>{group.length}</span></summary>
-          {group.map(task => <div className="glass-task-row" key={task.id}><label className="glass-task-content">
-            <input type="checkbox" checked={task.is_done} disabled={busy} onChange={() => void change(() => updateTask(task.id, { is_done: !task.is_done }))} aria-label={`${task.is_done ? 'Reopen' : 'Complete'} ${task.title}`} />
-            <span><span className={task.is_done ? 'glass-task-done' : ''}>{task.title}</span>{task.workflow_state && <small>{task.workflow_state.replace(/_/g, ' ')}</small>}</span>
-          </label><button className="glass-task-copy" type="button" aria-label={`Copy task: ${task.title}`} title={copied === task.id ? 'Copied' : 'Copy task text'} onClick={() => void copyTask(task)}>{copied === task.id ? <Check size={14} /> : <Copy size={14} />}</button></div>)}
+          {group.map(task => {
+            const session = sessionFor(task);
+            if (editing?.id === task.id) {
+              return <form className="glass-task-row glass-task-edit" key={task.id} onSubmit={e => {
+                e.preventDefault();
+                saveEdit(task);
+              }}>
+                <input autoFocus aria-label="Task title" value={editing.title} onChange={e => { setEditError(''); setEditing({ id: task.id, title: e.target.value }); }}
+                  onBlur={() => { if (editing.title.trim()) saveEdit(task); }}
+                  onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setEditError(''); setEditing(null); } }} />
+                {editError && <small role="alert">{editError}</small>}
+              </form>;
+            }
+            return <div className="glass-task-row" key={task.id}>
+              <label className="glass-task-content">
+                <input type="checkbox" checked={task.is_done} disabled={busy} onChange={() => void change(() => updateTask(task.id, { is_done: !task.is_done }))} aria-label={`${task.is_done ? 'Reopen' : 'Complete'} ${task.title}`} />
+                <span><span className={task.is_done ? 'glass-task-done' : ''}>{task.title}</span>{task.workflow_state && <small>{task.workflow_state.replace(/_/g, ' ')}</small>}</span>
+              </label>
+              {session ? (
+                <button className="glass-task-session" type="button" aria-label={`Open session ${session.name} for ${task.title}`} title={`Open ${session.name}`} onClick={() => onOpenSession(session.name)}>
+                  <StatusGlyph state={sessionState(session, seenAt(machine, projectId, session.name))} />
+                </button>
+              ) : null}
+              <div className={`glass-task-actions${confirmDelete === task.id ? ' is-confirming' : ''}`}>
+              {!session && !task.is_done && (
+                <button className="glass-task-start" type="button" disabled={busy || launching.current.has(task.id)} aria-label={`Start ${task.title} in a new session`} title="Start an agent with this todo as its prompt" onClick={() => void start(task)}><Play size={14} /></button>
+              )}
+              <button className="glass-task-copy" type="button" aria-label={`Edit ${task.title}`} title="Edit" onClick={() => setEditing({ id: task.id, title: task.title })}><Pencil size={14} /></button>
+              {confirmDelete === task.id ? <>
+                <button className="glass-task-delete" type="button" aria-label={`Confirm delete ${task.title}`} onClick={() => { setConfirmDelete(null); void change(() => deleteTask(task.id)); }}>Delete</button>
+                <button className="glass-task-copy" type="button" onClick={() => setConfirmDelete(null)}>Keep</button>
+              </> : <button className="glass-task-copy" type="button" aria-label={`Delete ${task.title}`} title="Delete" onClick={() => setConfirmDelete(task.id)}><Trash2 size={14} /></button>}
+              <button className="glass-task-copy" type="button" aria-label={`Copy task: ${task.title}`} title={copied === task.id ? 'Copied' : 'Copy task text'} onClick={() => void copyTask(task)}>{copied === task.id ? <Check size={14} /> : <Copy size={14} />}</button>
+              </div>
+            </div>;
+          })}
         </details>;
       })}
     </div>}
