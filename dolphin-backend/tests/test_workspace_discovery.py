@@ -1,5 +1,5 @@
 """The helper offers the folders a user owns outside their home, like
-/data/<user>, without any setting: discover_workspace_roots."""
+/work/<user>, without any setting: discover_workspace_roots."""
 
 from __future__ import annotations
 
@@ -80,10 +80,10 @@ def test_a_slow_disk_never_holds_up_startup(tmp_path):
 def test_the_helper_offers_the_discovered_folders_unless_roots_are_set(monkeypatch, tmp_path):
     environ = {key: value for key, value in os.environ.items() if key != "DOLPHIN_WORKSPACE_ROOTS"}
     monkeypatch.setattr(os, "environ", environ)
-    monkeypatch.setattr("app.helper.discover_workspace_roots", lambda home: [home, Path("/data/me")])
+    monkeypatch.setattr("app.helper.discover_workspace_roots", lambda home: [home, Path("/work/me")])
 
     configure_environment(tmp_path, "t" * 40)
-    assert environ["DOLPHIN_WORKSPACE_ROOTS"] == os.pathsep.join([str(Path.home()), "/data/me"])
+    assert environ["DOLPHIN_WORKSPACE_ROOTS"] == os.pathsep.join([str(Path.home()), "/work/me"])
 
     environ["DOLPHIN_WORKSPACE_ROOTS"] = "/only/this"
     configure_environment(tmp_path, "t" * 40)

@@ -89,7 +89,7 @@ def discover_workspace_roots(
 ) -> list[Path]:
     """The home folder, then where servers keep a user's own work: a top-level
     folder they own (/scratch), or one named after them a level down
-    (/data/<user>). Found without a setting; symlinks are never followed. A
+    (/work/<user>). Found without a setting; symlinks are never followed. A
     disk that does not answer within `budget` seconds leaves the home folder
     alone rather than slowing startup."""
     import getpass
