@@ -5,7 +5,7 @@
 // Runs when DOLPHIN_DESKTOP_APP is the packaged executable (CI sets it).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -46,7 +46,18 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     // the background and answers remember and recall.
     await window.getByRole('region', { name: 'Setup checklist' }).getByRole('button', { name: 'Turn on memory' }).click();
     const memory = window.getByRole('region', { name: 'Memory' });
-    await memory.getByText('Memory is ready').waitFor({ timeout: 300_000 });
+    try {
+      await memory.getByText('Memory is ready').waitFor({ timeout: 300_000 });
+    } catch (error) {
+      // Setup runs in the helper: say what the panel and the helper's log said.
+      const panel = await memory.innerText().catch(() => '(no Memory panel)');
+      const tail = (file) => existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(-40).join('\n') : '(none)';
+      const server = path.join(home, '.dolphin-server');
+      await window.screenshot({ path: path.join(shots, 'packaged-memory-failed.png') }).catch(() => {});
+      throw new Error(`${error.message}\nMemory panel: ${panel}`
+        + `\nMemory install log:\n${tail(path.join(server, 'gbrain', 'install.log'))}`
+        + `\nHelper log:\n${tail(path.join(server, 'logs', 'helper.log'))}`);
+    }
     await window.screenshot({ path: path.join(shots, 'packaged-memory-ready.png') });
     const gbrain = realpathSync(path.join(home, '.dolphin-server', 'gbrain')); // the real path, as the helper uses
     const brain = (tool, args) => JSON.parse(execFileSync(path.join(gbrain, 'bun', 'bun'),
