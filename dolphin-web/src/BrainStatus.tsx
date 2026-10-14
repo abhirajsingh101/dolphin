@@ -10,11 +10,16 @@ import './composerNotice.css';
 
 type BrainState = { state: 'off' | 'missing' | 'installing' | 'ready' | 'failed'; step?: string; error?: string };
 
+// Turning memory on saves the setting, and the app tells the helper a moment
+// later: for this long after the change, "off" means "not heard yet".
+const TURN_ON_WAIT_MS = 30_000;
+
 export default function BrainStatus() {
   const [brain, setBrain] = useState<BrainState | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const sawSetup = useRef(false);
   const [round, setRound] = useState(0);
+  const waitUntil = useRef(0);
 
   useEffect(() => {
     let stopped = false;
@@ -25,7 +30,8 @@ export default function BrainStatus() {
         if (stopped) return;
         if (next.state === 'installing') sawSetup.current = true;
         setBrain(next);
-        if (next.state === 'installing' || next.state === 'missing') timer = setTimeout(poll, 2000);
+        const notHeardYet = next.state === 'off' && Date.now() < waitUntil.current;
+        if (next.state === 'installing' || next.state === 'missing' || notHeardYet) timer = setTimeout(poll, 2000);
       } catch {
         if (!stopped) setBrain(null);
       }
@@ -36,7 +42,11 @@ export default function BrainStatus() {
 
   // The first-run checklist turned memory on (or retried it): look again.
   useEffect(() => {
-    const again = () => { setDismissed(false); setRound((value) => value + 1); };
+    const again = () => {
+      waitUntil.current = Date.now() + TURN_ON_WAIT_MS;
+      setDismissed(false);
+      setRound((value) => value + 1);
+    };
     window.addEventListener(BRAIN_CHANGED, again);
     return () => window.removeEventListener(BRAIN_CHANGED, again);
   }, []);
