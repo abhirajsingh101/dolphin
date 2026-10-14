@@ -7,6 +7,7 @@ import { machineBridge, type MachineLink } from './machines';
 import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN, useSetting } from './settings';
 import { zoomedFontSize } from './terminal/fontZoom';
 import { chooseTheme } from './workspace/themeChoice';
+import { UpdateSettings } from './UpdateControl';
 import './settingsDialog.css';
 
 /* Settings (⌘, in Dolphin Desktop; "Settings…" in the palette everywhere).
@@ -106,6 +107,7 @@ export default function SettingsDialog({ onClose, machines = [], onConnect, retu
             <>
               <section aria-labelledby="settings-updates">
                 <h3 id="settings-updates">Updates</h3>
+                <UpdateSettings />
                 <Choice name="channel" legend="Channel" value={desktop.updateChannel} onChange={(updateChannel) => saveDesktop({ updateChannel })} options={[['stable', 'Stable'], ['beta', 'Beta']]} />
               </section>
               <section aria-labelledby="settings-memory">

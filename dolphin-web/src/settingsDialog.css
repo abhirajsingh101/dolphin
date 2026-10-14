@@ -16,6 +16,10 @@
 .settings-choice label, .settings-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .settings-choice input, .settings-check input { accent-color: var(--glass-accent); }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.settings-update { margin-bottom: 10px; }
+.settings-update > span { display: grid; min-width: 0; }
+.settings-update small { color: var(--glass-muted-small); font-size: var(--fs-xs); }
+.settings-update button { flex: none; }
 .settings-stepper { display: inline-flex; align-items: center; gap: 8px; }
 .settings-stepper output { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 .settings-note { margin: 6px 0 0; color: var(--glass-muted-small); font-size: var(--fs-xs); }

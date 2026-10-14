@@ -218,3 +218,39 @@ export default function UpdateControl({ open, onOpenChange }: { open: AboutAncho
     </div>
   );
 }
+
+/** Settings → Updates: the version, what the last check found, and the one
+ *  button that moves it along — the same check and update as the About panel,
+ *  for when the header pill never showed up. */
+export function UpdateSettings() {
+  const [update, setUpdate] = useState<UpdateState | null>(() => bridge()?.update?.() ?? null);
+  useEffect(() => {
+    const stop = bridge()?.onUpdate?.(setUpdate);
+    return () => { stop?.(); };
+  }, []);
+  if (!update || !canUpdate()) return null;
+  const check = () => void bridge()?.checkUpdates?.();
+  const apply = () => void bridge()?.applyUpdate?.();
+  const version = update.appVersion || '—';
+  const [title, detail] =
+    update.state === 'checking' ? ['Checking for updates…', ''] :
+    update.state === 'available' ? [`Dolphin ${update.version} is available`, `You have ${version}. Download opens ${installer()}.`] :
+    update.state === 'downloading' ? [`Downloading Dolphin ${update.version}`, `${update.percent}% · You can keep working.`] :
+    update.state === 'ready' ? [`Dolphin ${update.version} is ready`, 'Restart to finish. Your terminal sessions keep running.'] :
+    update.state === 'error' ? ['Could not check for updates', `${update.message}. Check your connection and try again.`] :
+    [update.state === 'current' ? `Dolphin ${version} is up to date` : `Dolphin ${version}`, checkedAgo(update.checkedAt)];
+  return (
+    <div className="settings-row settings-update" data-state={update.state}>
+      <span role="status"><strong>{title}</strong>{detail && <small>{detail}</small>}</span>
+      {update.state === 'ready' ? (
+        <button type="button" onClick={apply}><RotateCw size={13} aria-hidden="true" /> Restart to Update</button>
+      ) : update.state === 'available' ? (
+        <button type="button" aria-label={`Download Dolphin ${update.version}`} onClick={apply}><ArrowDownToLine size={13} aria-hidden="true" /> Download</button>
+      ) : update.state === 'downloading' ? null : (
+        <button type="button" disabled={update.state === 'checking'} onClick={check}>
+          <RefreshCw size={13} aria-hidden="true" /> {update.state === 'error' ? 'Try Again' : 'Check for Updates'}
+        </button>
+      )}
+    </div>
+  );
+}

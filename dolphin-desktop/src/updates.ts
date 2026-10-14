@@ -3,8 +3,8 @@
  * Releases are GitHub releases tagged desktop-vX.Y.Z. Dolphin checks quietly:
  * ten seconds after it starts, every hour, and when the computer wakes or a
  * window comes back to the front after half an hour without a check. A check
- * on demand comes from the About panel (the Dolphin logo, or ⌘K) and from
- * Check for Updates… in the menu. What happens next depends on how it was
+ * on demand comes from the About panel (the Dolphin logo, or ⌘K), from
+ * Settings → Updates, and from Check for Updates… in the menu. What happens next depends on how it was
  * installed:
  *
  * - AppImage, and a signed Mac app: electron-updater downloads the update in
