@@ -71,6 +71,63 @@ def ensure_token(path: Path) -> str:
     return token
 
 
+# Top-level folders that hold the system, other users or mounted volumes,
+# never projects. Linux and macOS names together; neither has the other's.
+_NOT_WORKSPACES = {
+    "bin", "boot", "dev", "etc", "home", "lib", "lib32", "lib64", "libx32", "lost+found",
+    "media", "mnt", "opt", "proc", "root", "run", "sbin", "snap", "srv", "sys", "tmp",
+    "usr", "var", "Applications", "Library", "System", "Users", "Volumes", "cores", "private",
+}
+
+
+def _owned_by_me(path: Path) -> bool:
+    return path.stat().st_uid == os.getuid()
+
+
+def discover_workspace_roots(
+    home: Path, *, user: str | None = None, top: Path = Path("/"), owns=_owned_by_me, budget: float = 2.0
+) -> list[Path]:
+    """The home folder, then where servers keep a user's own work: a top-level
+    folder they own (/scratch), or one named after them a level down
+    (/data/<user>). Found without a setting; symlinks are never followed. A
+    disk that does not answer within `budget` seconds leaves the home folder
+    alone rather than slowing startup."""
+    import getpass
+    import threading
+
+    home = home.resolve()
+    user = user or getpass.getuser()
+    found: list[Path] = []
+
+    def usable(path: Path) -> bool:
+        if path.name.startswith(".") or path.is_symlink() or not path.is_dir():
+            return False
+        if path == home or home in path.parents or path in home.parents:
+            return False
+        return owns(path) and os.access(path, os.R_OK | os.W_OK | os.X_OK)
+
+    def scan() -> None:
+        try:
+            tops = sorted(top.iterdir())
+        except OSError:
+            return
+        for first in tops:
+            if first.name in _NOT_WORKSPACES or first.name.startswith(".") or first.is_symlink():
+                continue
+            try:
+                if usable(first):
+                    found.append(first)
+                elif usable(first / user):
+                    found.append(first / user)
+            except OSError:
+                continue
+
+    worker = threading.Thread(target=scan, name="workspace-roots", daemon=True)
+    worker.start()
+    worker.join(budget)
+    return [home] + (list(found) if not worker.is_alive() else [])
+
+
 def configure_environment(base: Path, token: str) -> None:
     """Helper-mode defaults. Explicit environment always wins."""
     paths = _paths(base)
@@ -78,7 +135,6 @@ def configure_environment(base: Path, token: str) -> None:
         "DATABASE_URL": f"sqlite+aiosqlite:///{paths['data'] / 'dolphin.db'}",
         "DOLPHIN_BACKUP_DIR": str(paths["data"] / "backups"),
         "DOLPHIN_LOG_DIR": str(paths["logs"]),
-        "DOLPHIN_WORKSPACE_ROOTS": str(Path.home()),
         "DOLPHIN_FLEET_ENABLED": "0",
         "DOLPHIN_CORS_ORIGINS": DESKTOP_ORIGIN,
         "DOLPHIN_SYSTEM_HEALTH_SOURCE": "auto",
@@ -87,6 +143,8 @@ def configure_environment(base: Path, token: str) -> None:
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
+    if "DOLPHIN_WORKSPACE_ROOTS" not in os.environ:
+        os.environ["DOLPHIN_WORKSPACE_ROOTS"] = os.pathsep.join(str(root) for root in discover_workspace_roots(Path.home()))
     # Started from inside a tmux pane, the helper would inherit that pane's
     # TMUX and send every tmux command to the pane's server, not the default one.
     os.environ.pop("TMUX", None)
