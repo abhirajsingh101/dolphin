@@ -94,7 +94,9 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     assert.equal(region, 'drag');
 
     await window.getByRole('link', { name: /Back to Workspace/ }).click();
-    await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
+    // The workspace stays mounted beneath System Health, so its message box is
+    // always visible: wait for the overlay itself to go before checking it.
+    await window.locator('.glass-health').waitFor({ state: 'detached' });
     assert.equal(await window.getByRole('textbox', { name: 'Message Dolphin' }).inputValue(), 'Keep this while I check health');
     assert.equal(await window.locator('.glass-workspace').getAttribute('inert'), null);
     // A machine that is not connected: said plainly, never this computer's numbers.
