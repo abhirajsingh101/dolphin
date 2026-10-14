@@ -37,6 +37,11 @@ export function keyBindings(platform: string): KeyBinding[] {
   ];
 }
 
+/** File → New Window. The main process opens it, so it is not a page command.
+ *  Ctrl+N is readline's next-history in the terminal, so off macOS it takes
+ *  Shift, as in GNOME Terminal and Windows Terminal. */
+export const newWindowAccelerator = (platform: string) => (platform === 'darwin' ? 'Cmd+N' : 'Ctrl+Shift+N');
+
 export function commandItem(bindings: KeyBinding[], id: CommandId, send: (id: CommandId) => void): MenuItemConstructorOptions {
   const binding = bindings.find((item) => item.id === id);
   if (!binding) throw new Error(`No key binding for ${id}`);

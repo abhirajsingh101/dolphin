@@ -19,6 +19,18 @@ test('installers are named with their version, platform and architecture', () =>
   assert.deepEqual(pkg.build.mac.target, ['dmg', 'zip']);
 });
 
+test('the .deb and .rpm launchers offer New Window, which runs the installed app with --new-window', () => {
+  // electron-builder installs both at /opt/<productName>/<package name>.
+  const installed = `/opt/${pkg.build.productName}/${pkg.name}`;
+  for (const target of ['deb', 'rpm']) {
+    const desktop = pkg.build[target].desktop;
+    assert.equal(desktop.entry.Actions, 'new-window;', target);
+    assert.deepEqual(desktop.desktopActions['new-window'], { Name: 'New Window', Exec: `${installed} --new-window` }, target);
+  }
+  // An AppImage moves, so its launcher entry carries no fixed path.
+  assert.equal(pkg.build.linux.desktop, undefined);
+});
+
 test('each build target has exactly its installers and update files', () => {
   assert.deepEqual(expectedInstallers('0.2.0', 'linux-arm64'), ['Dolphin-0.2.0-linux-arm64.AppImage', 'Dolphin-0.2.0-linux-arm64.deb', 'Dolphin-0.2.0-linux-aarch64.rpm']);
   assert.deepEqual(checkArtifacts([...expectedInstallers('0.2.0', 'linux-x64'), 'latest-linux.yml', 'builder-debug.yml', 'linux-unpacked',

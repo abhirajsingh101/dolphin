@@ -1,7 +1,7 @@
 import type { PaletteItem } from '../commandPaletteModel';
 
 export type PaletteContext = {
-  desktop: boolean; mac: boolean; canConnect: boolean; canUpdate: boolean;
+  desktop: boolean; mac: boolean; canConnect: boolean; canUpdate: boolean; canOpenWindow: boolean;
   theme: 'system' | 'light' | 'dark';
   machines: { id: string; label: string; kind: 'local' | 'ssh'; state: string; target: string | null }[];
   projects: { id: string; name: string; machine: string; machineLabel: string; isInbox: boolean; sessionCount: number }[];
@@ -9,7 +9,7 @@ export type PaletteContext = {
   active: { id: string; label: string; pinned: boolean } | null;
 };
 export type PaletteCommand =
-  | { kind: 'chat' } | { kind: 'settings' } | { kind: 'connect' } | { kind: 'updates' }
+  | { kind: 'chat' } | { kind: 'settings' } | { kind: 'connect' } | { kind: 'updates' } | { kind: 'new-window' }
   | { kind: 'theme'; theme: 'system' | 'light' | 'dark' }
   | { kind: 'add-project'; machine: string } | { kind: 'project'; machine: string; projectId: string }
   | { kind: 'health'; machine: string } | { kind: 'disconnect'; target: string }
@@ -28,6 +28,7 @@ export function paletteCommands(context: PaletteContext): { items: PaletteItem[]
 
   add({ id: 'dolphin', kind: 'action', label: 'Open Dolphin chat', hint: 'Your assistant' }, { kind: 'chat' });
   add({ id: 'settings', kind: 'action', label: 'Settings…', hint: context.desktop ? (context.mac ? '⌘,' : 'Ctrl+,') : 'Theme, terminal, new sessions' }, { kind: 'settings' });
+  if (context.desktop && context.canOpenWindow) add({ id: 'new-window', kind: 'action', label: 'New Window', hint: context.mac ? '⌘N' : 'Ctrl+Shift+N' }, { kind: 'new-window' });
   if (context.desktop && context.canConnect) add({ id: 'connect-machine', kind: 'action', label: 'Connect to a Machine…', hint: 'Work on another computer over SSH' }, { kind: 'connect' });
   if (context.desktop && context.canUpdate) add({ id: 'check-updates', kind: 'action', label: 'Check for Updates', hint: 'About Dolphin' }, { kind: 'updates' });
   for (const [theme, name] of THEMES) add({ id: `theme:${theme}`, kind: 'action', label: `Theme: ${name}`, hint: context.theme === theme ? 'Current' : undefined }, { kind: 'theme', theme });

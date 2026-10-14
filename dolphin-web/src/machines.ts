@@ -47,6 +47,8 @@ type Bridge = {
   onOpenSession?: (listener: (target: { machine: string; projectId: string; session: string }) => void) => (() => void) | void;
   notify?: (payload: { title: string; body: string; machine: string; projectId: string; session: string }) => void;
   setSystemNotifications?: (enabled: boolean) => void;
+  /** File → New Window: another window over the same machines. */
+  newWindow?: () => void;
 };
 
 export const machineBridge = (): Bridge | undefined => (window as { dolphinDesktop?: Bridge }).dolphinDesktop;
@@ -61,6 +63,9 @@ export function useMachineLinks(enabled: boolean): MachineLink[] {
   }, [enabled]);
   return links;
 }
+
+/** True in Dolphin Desktop builds that can open another window. */
+export const canOpenWindow = () => Boolean(machineBridge()?.newWindow);
 
 /** True in Dolphin Desktop builds that can connect to other machines. */
 export const canConnect = () => Boolean(machineBridge()?.machines);

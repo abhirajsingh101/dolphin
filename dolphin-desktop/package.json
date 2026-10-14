@@ -1,7 +1,7 @@
 {
   "name": "dolphin-desktop",
   "productName": "Dolphin",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Run Claude Code and Codex in tmux, on this computer or any machine over SSH.",
   "main": "dist/main.js",
   "private": true,
@@ -52,6 +52,32 @@
       "icon": "../dolphin-web/public/brand/dolphin-icon.png",
       "maintainer": "Abhiraj Singh <127468045+abhirajsingh101@users.noreply.github.com>",
       "syncDesktopName": true
+    },
+    "deb": {
+      "desktop": {
+        "entry": {
+          "Actions": "new-window;"
+        },
+        "desktopActions": {
+          "new-window": {
+            "Name": "New Window",
+            "Exec": "/opt/Dolphin/dolphin-desktop --new-window"
+          }
+        }
+      }
+    },
+    "rpm": {
+      "desktop": {
+        "entry": {
+          "Actions": "new-window;"
+        },
+        "desktopActions": {
+          "new-window": {
+            "Name": "New Window",
+            "Exec": "/opt/Dolphin/dolphin-desktop --new-window"
+          }
+        }
+      }
     },
     "mac": {
       "target": [

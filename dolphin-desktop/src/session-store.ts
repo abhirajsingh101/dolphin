@@ -5,7 +5,12 @@
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 
 export type Bounds = { x: number; y: number; width: number; height: number };
-export type Saved = { machines?: string[]; bounds?: Bounds; open?: { target: string; bounds?: Bounds }[]; systemNotifications?: boolean; maximized?: boolean; fullScreen?: boolean };
+/** One Dolphin window: its number (which layout it keeps, see the page's
+ *  windowScope.ts), its place, and its maximized and full-screen state. */
+export type SavedWindow = { slot: number; bounds?: Bounds; maximized: boolean; fullScreen: boolean };
+/** `bounds`, `maximized` and `fullScreen` are the front window's, as before
+ *  0.2.3 when there was only one; `windows` is every window, front one last. */
+export type Saved = { machines?: string[]; bounds?: Bounds; open?: { target: string; bounds?: Bounds }[]; systemNotifications?: boolean; maximized?: boolean; fullScreen?: boolean; windows?: SavedWindow[] };
 
 /** A JSON object from `file`, or `fallback` when it is missing, truncated or not an object. */
 export function readJson<T>(file: string, fallback: T): T {
@@ -36,7 +41,7 @@ export function writeJsonAtomic(file: string, value: unknown): void {
   }
 }
 
-export type LiveSession = { machines: string[]; bounds?: Bounds; flags?: { maximized: boolean; fullScreen: boolean } };
+export type LiveSession = { machines: string[]; bounds?: Bounds; flags?: { maximized: boolean; fullScreen: boolean }; windows?: SavedWindow[] };
 
 /** What to write at a save point: the live machines, whether or not a window
  *  is open (macOS keeps them connected after the window closes, so Quit then
@@ -55,7 +60,47 @@ export function sessionToSave(saved: Saved, live: LiveSession): Saved {
   const fullScreen = live.flags?.fullScreen ?? saved.fullScreen;
   if (typeof maximized === 'boolean') state.maximized = maximized;
   if (typeof fullScreen === 'boolean') state.fullScreen = fullScreen;
+  const windows = live.windows ?? saved.windows;
+  if (windows) state.windows = windows;
   return state;
+}
+
+/** More than this many windows in session.json is a damaged or hand-edited file. */
+const MAX_WINDOWS = 12;
+const isBounds = (value: unknown): value is Bounds => Boolean(value) && typeof value === 'object'
+  && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite((value as Record<string, unknown>)[key]));
+
+/** The windows to open at launch, back one first. A session from before 0.2.3
+ *  (or one whose list is unusable) is a single window, number 1, in its old place. */
+export function windowsToRestore(saved: Saved): SavedWindow[] {
+  const seen = new Set<number>();
+  const windows: SavedWindow[] = [];
+  for (const item of Array.isArray(saved.windows) ? saved.windows as unknown[] : []) {
+    if (!item || typeof item !== 'object') continue;
+    const { slot, bounds, maximized, fullScreen } = item as Record<string, unknown>;
+    if (typeof slot !== 'number' || !Number.isInteger(slot) || slot < 1 || seen.has(slot)) continue;
+    seen.add(slot);
+    windows.push({ slot, bounds: isBounds(bounds) ? bounds : undefined, maximized: maximized === true, fullScreen: fullScreen === true });
+    if (windows.length === MAX_WINDOWS) break;
+  }
+  if (windows.length) return windows;
+  return [{ slot: 1, bounds: saved.bounds ?? saved.open?.[0]?.bounds, maximized: saved.maximized === true, fullScreen: saved.fullScreen === true }];
+}
+
+/** A new window's number: the lowest one no open window has. */
+export function freeSlot(used: Iterable<number>): number {
+  const taken = new Set(used);
+  let slot = 1;
+  while (taken.has(slot)) slot += 1;
+  return slot;
+}
+
+/** The windows to save once closes settle (Quit saves them all first, so it
+ *  never gets here): those still open; or, when none is, every window that was
+ *  open before the closes began, so the next launch (or macOS reopening from
+ *  the Dock) brings back the last window, or all of them after a Close All. */
+export function windowsAfterCloses(before: SavedWindow[], open: SavedWindow[]): SavedWindow[] {
+  return open.length ? open : before;
 }
 
 const MIN_VISIBLE = 100;
@@ -78,9 +123,12 @@ export function clampBounds(bounds: Bounds | undefined, workAreas: Bounds[]): Bo
   };
 }
 
-/** A second launch of Dolphin: bring the window forward, or restore the last
- *  session when no window is open (macOS after closing it). */
-export function secondInstanceAction(ready: boolean, hasWindow: boolean): 'show' | 'restore' | 'wait' {
+/** A second launch of Dolphin: bring the front window forward, or restore the
+ *  last session when no window is open (macOS after closing them). Launched
+ *  with --new-window (the Dock menu, a launcher's New Window action), it opens
+ *  another window when one is already open. */
+export function secondInstanceAction(ready: boolean, hasWindow: boolean, argv: readonly string[] = []): 'show' | 'restore' | 'wait' | 'new-window' {
   if (!ready) return 'wait';
-  return hasWindow ? 'show' : 'restore';
+  if (!hasWindow) return 'restore';
+  return argv.includes('--new-window') ? 'new-window' : 'show';
 }

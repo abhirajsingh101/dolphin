@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, type SetStateAction } from 'react';
 import { Plus, RotateCcw, X } from 'lucide-react';
+import { windowKey } from './workspace/windowScope';
 
 type Tab = { id: string; title?: string };
 const STORAGE = 'dolphin.glass.chat-tabs';
 export function useChatTabs() {
   const [layout, setLayout] = useState<{ tabs: Tab[]; active: string; closed: Tab[] }>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE) || 'null');
+      const saved = JSON.parse(localStorage.getItem(windowKey(STORAGE)) || 'null');
       if (saved?.tabs?.length && saved.tabs.every((t: Tab) => typeof t.id === 'string'))
         return { tabs: saved.tabs, active: saved.tabs.some((t: Tab) => t.id === saved.active) ? saved.active : saved.tabs[0].id, closed: Array.isArray(saved.closed) ? saved.closed : [] };
     } catch { /* Storage is optional. */ }
     return { tabs: [{ id: 'initial' }], active: 'initial', closed: [] };
   });
-  useEffect(() => { try { localStorage.setItem(STORAGE, JSON.stringify(layout)); } catch { /* Storage is optional. */ } }, [layout]);
+  useEffect(() => { try { localStorage.setItem(windowKey(STORAGE), JSON.stringify(layout)); } catch { /* Storage is optional. */ } }, [layout]);
   function add() {
     const id = crypto.randomUUID();
     setLayout(old => ({ ...old, tabs: [...old.tabs, { id }], active: id }));
@@ -46,13 +47,13 @@ export function useTabState<T>(id: string, initial: T, storage?: string) {
   const fallback = useRef(initial).current;
   const [values, setValues] = useState<Record<string, T>>(() => {
     try {
-      const saved = storage && JSON.parse(localStorage.getItem(storage) || '{}');
+      const saved = storage && JSON.parse(localStorage.getItem(windowKey(storage)) || '{}');
       if (saved && typeof saved === 'object' && !Array.isArray(saved))
         return Object.fromEntries(Object.entries(saved).filter(([, v]) => typeof v === typeof initial)) as Record<string, T>;
     } catch { /* Storage is optional. */ }
     return {};
   });
-  useEffect(() => { if (storage) try { localStorage.setItem(storage, JSON.stringify(values)); } catch { /* Storage is optional. */ } }, [values, storage]);
+  useEffect(() => { if (storage) try { localStorage.setItem(windowKey(storage), JSON.stringify(values)); } catch { /* Storage is optional. */ } }, [values, storage]);
   function setFor(tab: string, value: SetStateAction<T>) {
     setValues(old => { const previous = old[tab] ?? fallback; const next = typeof value === 'function' ? (value as (v: T) => T)(previous) : value; return Object.is(previous, next) ? old : { ...old, [tab]: next }; });
   }

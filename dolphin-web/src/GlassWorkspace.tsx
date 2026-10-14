@@ -9,6 +9,8 @@ import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatT
 import AgentSetupPrompt from './AgentSetupPrompt';
 import { currentPlatform, isMacPlatform, shortcutLabel } from './shortcutLabel';
 import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, writeLayout } from './workspace/layoutMemory';
+import { windowKey } from './workspace/windowScope';
+import { parseIds, useSharedStorage } from './workspace/sharedStorage';
 import { CHAT_MIN_WIDTH, chatFits, clampChatWidth, foldShortcut } from './workspace/chatColumn';
 import BrainStatus from './BrainStatus';
 import UpdateControl, { canUpdate, type AboutAnchor } from './UpdateControl';
@@ -24,7 +26,7 @@ import PinnedList from './workspace/PinnedList';
 import { GlancePopover, useGlance, type GlanceTarget } from './workspace/HoverGlance';
 import { targetKey, type Target } from './workspace/targets';
 import { nextRow, visibleProjects } from './sidebarModel';
-import { canConnect, machineBridge, terminalReconnectKey, useMachineLinks, type MachineLink } from './machines';
+import { canConnect, canOpenWindow, machineBridge, terminalReconnectKey, useMachineLinks, type MachineLink } from './machines';
 import { ApiContext } from './apiContext';
 import { useSetting } from './settings';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
@@ -100,6 +102,17 @@ trackPanelOpeners();
 type DashboardContext = { open_windows: { project_id: string; session_name: string; minimized: boolean; tab_hidden?: boolean }[]; pinned_sessions: { project_id: string; session_name: string }[]; focused_session: { project_id: string; session_name: string } | null };
 type MachineProject = ControlCenterProject & { machine: string };
 const key = targetKey;
+/** Saved pins: well-formed sessions only, at most 100. */
+function parsePins(raw: string | null): Target[] {
+  try {
+    const saved: unknown = JSON.parse(raw ?? '[]');
+    return Array.isArray(saved)
+      ? saved.filter((t): t is Target => t && ['projectId', 'projectName', 'sessionName'].every((k) => typeof t[k] === 'string')).slice(0, 100)
+      : [];
+  } catch {
+    return [];
+  }
+}
 /** `desktop`: Dolphin Desktop's build, which has no Missions or legacy views
     but does have System Health. */
 /** What fetch says when the backend can't be reached at all (Chromium, Firefox, Safari). */
@@ -131,7 +144,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [restored] = useState(() => {
     const empty = { windows: [] as Target[], minimized: [] as string[], active: null as Target | null };
     try {
-      const saved = JSON.parse(localStorage.getItem('dolphin.glass.windows') ?? 'null');
+      const saved = JSON.parse(localStorage.getItem(windowKey('dolphin.glass.windows')) ?? 'null');
       if (!saved || !Array.isArray(saved.windows)) return empty;
       const seen = new Set<string>();
       const windows: Target[] = saved.windows.filter((t: Target) => {
@@ -173,16 +186,9 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [, bumpOpening] = useState(0);
   const projects: MachineProject[] = sections.flatMap((link) => (projectsBy[link.id] ?? []).map((project) => ({ ...project, machine: link.id })));
   const machineOfTarget = (target: Target) => target.machine ?? projects.find((project) => project.id === target.projectId)?.machine ?? (desktop ? undefined : 'local');
-  const [collapsedMachines, setCollapsedMachines] = useState<string[]>(() => {
-    try { const saved: unknown = JSON.parse(localStorage.getItem('dolphin.glass.collapsed-machines') ?? '[]'); return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; }
-    catch { return []; }
-  });
-  useEffect(() => { try { localStorage.setItem('dolphin.glass.collapsed-machines', JSON.stringify(collapsedMachines)); } catch { /* Storage is optional. */ } }, [collapsedMachines]);
-  const [collapsedProjects, setCollapsedProjects] = useState<string[]>(() => {
-    try { const saved: unknown = JSON.parse(localStorage.getItem('dolphin.glass.collapsed-projects') ?? '[]'); return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; }
-    catch { return []; }
-  });
-  useEffect(() => { try { localStorage.setItem('dolphin.glass.collapsed-projects', JSON.stringify(collapsedProjects)); } catch { /* Storage is optional. */ } }, [collapsedProjects]);
+  // Shared by every Dolphin window (sharedStorage.ts).
+  const [collapsedMachines, setCollapsedMachines] = useSharedStorage('dolphin.glass.collapsed-machines', parseIds);
+  const [collapsedProjects, setCollapsedProjects] = useSharedStorage('dolphin.glass.collapsed-projects', parseIds);
   // Projects linked in this window stay in view while they have no sessions yet.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   // Machines whose empty projects the user asked to see.
@@ -196,40 +202,22 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     setFocusProject(null);
   }, [focusProject, showEmpty]);
   const [query, setQuery] = useState(''),
-    [focus, setFocus] = useState<Target[]>(() => {
-      try {
-        // Opening used to pin, so the old list (dolphin.glass.focus) holds every
-        // session ever opened; pins start empty under their own key.
-        try { localStorage.removeItem('dolphin.glass.focus'); } catch { /* optional */ }
-        const saved: unknown = JSON.parse(
-          localStorage.getItem('dolphin.glass.pins') ?? '[]',
-        );
-        return Array.isArray(saved)
-          ? saved
-              .filter(
-                (t): t is Target =>
-                  t &&
-                  ['projectId', 'projectName', 'sessionName'].every(
-                    (k) => typeof t[k] === 'string',
-                  ),
-              )
-              .slice(0, 100)
-          : [];
-      } catch {
-        return [];
-      }
-    });
+    // Pins are shared by every Dolphin window (sharedStorage.ts).
+    [focus, setFocus] = useSharedStorage('dolphin.glass.pins', parsePins);
+  // Opening used to pin, so the old list (dolphin.glass.focus) holds every
+  // session ever opened; pins start empty under their own key.
+  useEffect(() => { try { localStorage.removeItem('dolphin.glass.focus'); } catch { /* optional */ } }, []);
   const [active, setActive] = useState<Target | null>(restored.active);
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'tasks'>('projects');
   const [windows, setWindows] = useState<Target[]>(restored.windows);
   const [minimized, setMinimized] = useState<string[]>(restored.minimized);
   const [projectTabs, setProjectTabs] = useState<Record<string, string>>(() => {
-    try { const saved = JSON.parse(localStorage.getItem('dolphin.glass.project-tabs') || '{}');
+    try { const saved = JSON.parse(localStorage.getItem(windowKey('dolphin.glass.project-tabs')) || '{}');
       return saved && typeof saved === 'object' && !Array.isArray(saved) ? Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === 'string')) as Record<string, string> : {};
     } catch { return {}; }
   });
   useEffect(() => { if (active) setProjectTabs(old => ({ ...old, [active.projectId]: active.sessionName })); }, [active]);
-  useEffect(() => { try { localStorage.setItem('dolphin.glass.project-tabs', JSON.stringify(projectTabs)); } catch { /* Storage is optional. */ } }, [projectTabs]);
+  useEffect(() => { try { localStorage.setItem(windowKey('dolphin.glass.project-tabs'), JSON.stringify(projectTabs)); } catch { /* Storage is optional. */ } }, [projectTabs]);
   // A window shows once its machine is connected; until then it waits, saved.
   const shownWindows = windows.filter((target) => apiOf(machineOfTarget(target)));
   const projectWindows = Array.from(new Set(shownWindows.map(target => target.projectId))).map(projectId => {
@@ -265,7 +253,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
 
   useEffect(() => {
     try {
-      localStorage.setItem('dolphin.glass.windows', JSON.stringify({ windows, minimized, active: active ? key(active) : null }));
+      localStorage.setItem(windowKey('dolphin.glass.windows'), JSON.stringify({ windows, minimized, active: active ? key(active) : null }));
     } catch { /* The workspace remains usable when browser storage is unavailable. */ }
   }, [windows, minimized, active]);
   const windowStack = useRef<HTMLDivElement>(null);
@@ -525,7 +513,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const theme = resolveTheme(themeChoice, typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
   const pinnedKey = (t: Target) => focus.some((f) => key(f) === key(t));
   const palette = paletteCommands({
-    desktop, mac, canConnect: canConnect(), canUpdate: canUpdate(), theme: themeChoice,
+    desktop, mac, canConnect: canConnect(), canUpdate: canUpdate(), canOpenWindow: canOpenWindow(), theme: themeChoice,
     machines: sections.map((link) => ({ id: link.id, label: link.label, kind: link.kind, state: link.state, target: link.target })),
     projects: projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineLabel: labelOf(p.machine), isInbox: p.is_inbox, sessionCount: p.sessions.length })),
     sessions: sessionTargets.map((t) => ({ id: key(t), label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`, pinned: pinnedKey(t) })),
@@ -590,13 +578,6 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       </details></div>;
     })}</div>;
   }
-  useEffect(() => {
-    try {
-      localStorage.setItem('dolphin.glass.pins', JSON.stringify(focus));
-    } catch {
-      /* Storage is optional. */
-    }
-  }, [focus]);
   const conversation = useRef<HTMLDivElement>(null);
   const savedScroll = useTabRef(tabId, 0);
   const followTail = useTabRef(tabId, true);
@@ -1114,6 +1095,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             case 'chat': focusChat(); break;
             case 'settings': openSettings(paletteTrigger.current); break;
             case 'connect': setConnecting(true); break;
+            case 'new-window': machineBridge()?.newWindow?.(); break;
             case 'updates':
               setAboutOpen('brand');
               void (window as { dolphinDesktop?: { checkUpdates?: () => Promise<unknown> } }).dolphinDesktop?.checkUpdates?.();

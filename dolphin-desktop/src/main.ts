@@ -1,6 +1,7 @@
 /* Dolphin Desktop's main process.
  *
- * One window holds every machine Dolphin works on: this computer, and any
+ * Every window holds every machine Dolphin works on (File → New Window opens
+ * another, each with its own layout): this computer, and any
  * machine added from Connect to a Machine (the projects list, ⌘K, the menu,
  * ⌘/Ctrl+Shift+O), which stays connected: a dropped link comes back by itself
  * (hosts.ts). The machines open when Dolphin last quit come back at launch.
@@ -17,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 
 import { CRASH_DIR, crashReporterOptions } from './crashReports';
 import { startAskpass } from './askpass';
-import { commandItem, CommandId, keyBindings } from './keymap';
+import { commandItem, CommandId, keyBindings, newWindowAccelerator } from './keymap';
 import { checkFromMenu, startUpdateChecks } from './updates';
 import { connectLocal, connectSsh, Connection, fetchRemoteLog, helperDir, HostSpec, installKey, LinkState, setSshEnv, sshConfigHosts } from './hosts';
 import { contentSecurityPolicy } from './csp';
@@ -32,7 +33,7 @@ import { explainRemoteError, remoteLogName } from './remote';
 import { openFeed, type Feed } from './feed';
 import { feedChanges, HeldPopups, isOpenTarget, notificationContent, SeenIds, wantsSystemNotification, type OpenTarget, type TurnNotification } from './notify';
 import { applyWindowFlags, windowFlags } from './windowState';
-import { clampBounds, readJson, Saved, savedSystemNotifications, secondInstanceAction, sessionToSave, writeJsonAtomic } from './session-store';
+import { Bounds, clampBounds, freeSlot, readJson, Saved, savedSystemNotifications, SavedWindow, secondInstanceAction, sessionToSave, windowsAfterCloses, windowsToRestore, writeJsonAtomic } from './session-store';
 
 const APP_ORIGIN = 'app://dolphin';
 const rendererRoot = app.isPackaged
@@ -123,10 +124,38 @@ type MachineState = {
   seen?: LinkSnapshot;
 };
 const machines = new Map<string, MachineState>();
-let mainWindow: BrowserWindow | null = null;
-let workspaceShown = false;
-/** Whether the page was loaded with this computer's helper in its config. */
-let localInPage = false;
+
+/* Every window is the same workspace over the same machines. Each has a number
+   (`slot`) that keeps its layout apart from the others' (the page's
+   windowScope.ts), and its own load state:
+   - shown: the workspace has loaded (until then the launch page shows);
+   - localInPage: the page was loaded with this computer's helper in its config;
+   - fresh: opened with New Window, so the page starts from an empty layout
+     rather than one a closed window with the same number left behind;
+   - closing: its close has begun (closeBurst). */
+type WindowState = { slot: number; shown: boolean; localInPage: boolean; fresh: boolean; closing: boolean };
+const windows = new Map<BrowserWindow, WindowState>();
+/** Every window, the one focused most recently last. */
+let focusOrder: BrowserWindow[] = [];
+const liveWindows = () => focusOrder.filter((window) => !window.isDestroyed() && windows.has(window));
+/** The window menus, commands and notifications act on: the focused one, or the one focused last. */
+function frontWindow(): BrowserWindow | null {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && windows.has(focused)) return focused;
+  return liveWindows().at(-1) ?? null;
+}
+/** The workspace window a page message came from; never the Connect window. */
+function windowOf(sender: Electron.WebContents): BrowserWindow | null {
+  const window = BrowserWindow.fromWebContents(sender);
+  return window && windows.has(window) ? window : null;
+}
+/** Quitting saves every window first; the windows closing after that must not shrink the list. */
+let quitting = false;
+/** Windows closing together (a desktop's Close All, ⌘⌥W, restarting into an
+ *  update) are one decision: what was open before the first of them closed is
+ *  kept until the closes settle, and saved if none is left open. */
+let closeBurst: { before: SavedWindow[]; timer: NodeJS.Timeout } | null = null;
+const CLOSES_SETTLE_MS = 500;
 
 /** Agent forwarding is a saved, per-machine choice, off unless turned on. Kept
  *  in memory (every broadcast asks), refreshed by each settings write here. */
@@ -167,13 +196,12 @@ function broadcast(): void {
   for (const machine of machines.values()) noteEpoch(machine);
   // Every link change, connect, token or address change and removal passes here.
   syncFeeds();
-  const window = mainWindow;
-  if (!window || window.isDestroyed()) return;
-  if (workspaceShown) window.webContents.send('dolphin:machines', machineList());
-  else {
+  const list = machineList();
+  const local = machines.get('local');
+  for (const window of liveWindows()) {
+    if (windows.get(window)?.shown) window.webContents.send('dolphin:machines', list);
     // Still on the launch page: it shows this computer's progress.
-    const local = machines.get('local');
-    if (local?.status) void window.webContents.executeJavaScript(`window.setStatus && window.setStatus(${JSON.stringify(local.status)})`).catch(() => undefined);
+    else if (local?.status) void window.webContents.executeJavaScript(`window.setStatus && window.setStatus(${JSON.stringify(local.status)})`).catch(() => undefined);
   }
 }
 
@@ -188,7 +216,8 @@ const announced = new SeenIds(500);
 const popups = new HeldPopups<Notification>();
 /** The page's setting, kept in session.json so an off setting holds from launch. */
 let systemNotifications = true;
-let pendingOpen: { target: OpenTarget; at: number } | null = null;
+/** A session to open, waiting for `window` (a BrowserWindow id) to take it, or any window when null. */
+let pendingOpen: { target: OpenTarget; at: number; window: number | null } | null = null;
 
 /** One stream per connected machine. It restarts when the machine's address,
  *  token or epoch moves (a recovered link may come back on a new relay), and
@@ -224,15 +253,15 @@ function announceTurn(machine: MachineState, item: TurnNotification): void {
 }
 
 function showSystemNotification(content: { title: string; body: string; subtitle?: string }, target: OpenTarget | null): void {
-  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const focused = BrowserWindow.getFocusedWindow();
   // A focused window shows its own pop-ups, and the session in view needs none.
-  if (!wantsSystemNotification({ enabled: systemNotifications, windowFocused: Boolean(window?.isFocused()) })) return;
+  if (!wantsSystemNotification({ enabled: systemNotifications, windowFocused: Boolean(focused && windows.has(focused)) })) return;
   if (!Notification.isSupported()) return;
   const popup = new Notification({ title: content.title, body: content.body, ...(content.subtitle ? { subtitle: content.subtitle } : {}) });
   popups.hold(popup); // so its click handler is not collected; released on click, close or a 10-minute timeout
   popup.on('click', () => {
     popups.release(popup);
-    if (mainWindow && !mainWindow.isDestroyed()) showWindow();
+    if (liveWindows().length) focusWindow();
     else reopenWindow();
     if (target) openSession(target);
   });
@@ -240,22 +269,25 @@ function showSystemNotification(content: { title: string; body: string; subtitle
   popup.show();
   // Arrival asks for attention: the dock bounces once (macOS), the taskbar entry flashes elsewhere.
   if (process.platform === 'darwin') app.dock?.bounce('informational');
-  else window?.flashFrame(true);
+  else frontWindow()?.flashFrame(true);
 }
 
-/** The page takes the target (preload `onOpenSession`); a new window takes it once it loads. */
+/** The front window's page takes the target (preload `onOpenSession`); a
+ *  window still loading takes it once it loads. */
 function openSession(target: OpenTarget): void {
-  pendingOpen = { target, at: Date.now() };
-  if (mainWindow && !mainWindow.isDestroyed() && workspaceShown) mainWindow.webContents.send('dolphin:open-session');
+  const window = frontWindow();
+  pendingOpen = { target, at: Date.now(), window: window?.id ?? null };
+  if (window && windows.get(window)?.shown) window.webContents.send('dolphin:open-session');
 }
 
 ipcMain.on('dolphin:take-open-session', (event) => {
-  if (event.sender !== mainWindow?.webContents) { event.returnValue = null; return; }
-  event.returnValue = pendingOpen && Date.now() - pendingOpen.at < 60_000 ? pendingOpen.target : null;
+  const window = windowOf(event.sender);
+  if (!window || !pendingOpen || (pendingOpen.window !== null && pendingOpen.window !== window.id)) { event.returnValue = null; return; }
+  event.returnValue = Date.now() - pendingOpen.at < 60_000 ? pendingOpen.target : null;
   pendingOpen = null;
 });
 ipcMain.on('dolphin:notify', (event, payload: unknown) => {
-  if (event.sender !== mainWindow?.webContents) return;
+  if (!windowOf(event.sender)) return;
   if (!payload || typeof payload !== 'object') return;
   const { title, body, machine, projectId, session } = payload as Record<string, unknown>;
   if (typeof title !== 'string' || typeof body !== 'string') return;
@@ -263,7 +295,7 @@ ipcMain.on('dolphin:notify', (event, payload: unknown) => {
   showSystemNotification({ title: title.slice(0, 200), body: body.slice(0, 500) }, isOpenTarget(target) ? target : null);
 });
 ipcMain.on('dolphin:system-notifications', (event, enabled: unknown) => {
-  if (event.sender !== mainWindow?.webContents || typeof enabled !== 'boolean') return;
+  if (!windowOf(event.sender) || typeof enabled !== 'boolean') return;
   if (enabled === systemNotifications) return;
   systemNotifications = enabled;
   const saved = readJson<Saved>(sessionFile(), {});
@@ -305,10 +337,14 @@ async function connect(machine: MachineState): Promise<void> {
     machine.link = 'connected';
     machine.status = undefined;
     tellMemory(machine, 'connected');
-    if (machine.host.kind === 'local' && workspaceShown && !localInPage && mainWindow && !mainWindow.isDestroyed()) {
-      // The page read its helper's address at load, when it had none.
-      localInPage = true;
-      mainWindow.webContents.reload();
+    if (machine.host.kind === 'local') {
+      // A page read its helper's address at load, when it had none.
+      for (const window of liveWindows()) {
+        const state = windows.get(window);
+        if (!state?.shown || state.localInPage) continue;
+        state.localInPage = true;
+        window.webContents.reload();
+      }
     }
     if (machine.host.kind === 'ssh') {
       rememberMachine(app.getPath('userData'), machine.host.target);
@@ -321,7 +357,7 @@ async function connect(machine: MachineState): Promise<void> {
       machine.reason = info.reason;
       // A machine over SSH with a new token reaches the page as a new token
       // in the list; this computer's token is the page's own config, read at load.
-      if (machine.host.kind === 'local' && info.tokenChanged && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+      if (machine.host.kind === 'local' && info.tokenChanged) for (const window of liveWindows()) window.webContents.reload();
       broadcast();
     });
     connection.watchAgent?.((error) => {
@@ -345,10 +381,10 @@ async function connect(machine: MachineState): Promise<void> {
   broadcast();
 }
 
-/** Add a machine to the window, or bring back one that failed. */
+/** Add a machine to the windows, or bring back one that failed. */
 function openMachine(target: string): void {
-  if (!mainWindow || mainWindow.isDestroyed()) reopenWindow();
-  else showWindow();
+  if (liveWindows().length) focusWindow();
+  else reopenWindow();
   if (target === 'local') return;
   const known = machines.has(target);
   const machine = machineFor({ kind: 'ssh', target });
@@ -439,99 +475,174 @@ function closeMachine(target: string): void {
   broadcast();
 }
 
-/* --- the window ----------------------------------------------------------- */
+/* --- the windows ---------------------------------------------------------- */
 
-/** Maximized / full-screen state waiting for the next window to be shown. */
-let pendingFlags: { maximized?: boolean; fullScreen?: boolean } = {};
-const savedFlags = (saved: Saved) => ({ maximized: saved.maximized, fullScreen: saved.fullScreen });
+/** Bring the front window forward. */
+function focusWindow(): BrowserWindow | null {
+  const window = frontWindow();
+  if (!window) return null;
+  if (window.isMinimized()) window.restore();
+  if (!window.isVisible()) window.show();
+  window.focus();
+  return window;
+}
 
-function showWindow(bounds?: Electron.Rectangle, flags: { maximized?: boolean; fullScreen?: boolean } = {}): BrowserWindow {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
-    return mainWindow;
-  }
+const workAreas = () => screen.getAllDisplays().map((display) => display.workArea);
+
+/** One workspace window, in `place`. It shows the launch page until this
+ *  computer's helper is up, then the workspace. */
+function createWindow(place: SavedWindow, fresh = false): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1440, height: 900, ...bounds, minWidth: 720, minHeight: 480, show: false, title: 'Dolphin',
+    width: 1440, height: 900, ...place.bounds, minWidth: 720, minHeight: 480, show: false,
+    title: place.slot === 1 ? 'Dolphin' : `Dolphin (${place.slot})`,
     ...windowChrome(),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  mainWindow = window;
-  pendingFlags = flags;
-  workspaceShown = false;
+  const state: WindowState = { slot: place.slot, shown: false, localInPage: false, fresh, closing: false };
+  windows.set(window, state);
+  focusOrder.push(window);
   hardenWindow(window);
-  // A notification flashed the taskbar entry (Linux, Windows); looking stops it.
-  window.on('focus', () => window.flashFrame(false));
+  window.on('focus', () => {
+    // A notification flashed the taskbar entry (Linux, Windows); looking stops it.
+    window.flashFrame(false);
+    focusOrder = [...focusOrder.filter((other) => other !== window), window];
+  });
   window.on('page-title-updated', (event) => event.preventDefault());
   // macOS hides the traffic lights in full screen; the page then reclaims their space.
   window.on('enter-full-screen', () => window.webContents.send('dolphin:fullscreen', true));
   window.on('leave-full-screen', () => window.webContents.send('dolphin:fullscreen', false));
-  // Saved while the window still exists, so its place and machines come back.
-  window.on('close', () => saveSession());
+  // The workspace counts as shown once its page has loaded, however it got
+  // there (a reload included), and not while the launch page shows.
+  window.webContents.on('did-finish-load', () => {
+    if (!window.webContents.getURL().startsWith(`${APP_ORIGIN}/desktop.html`)) return;
+    // A reload from here on keeps the layout this window has made.
+    state.fresh = false;
+    if (state.shown) return;
+    state.shown = true;
+    broadcast();
+  });
+  // Closing one of several windows forgets it; closing the last, or all of
+  // them at once, keeps them for next time (windowsAfterCloses).
+  window.on('close', () => {
+    if (quitting || state.closing) return;
+    const before = closeBurst?.before ?? openPlaces();
+    if (closeBurst) clearTimeout(closeBurst.timer);
+    state.closing = true;
+    closeBurst = { before, timer: setTimeout(settleCloses, CLOSES_SETTLE_MS) };
+  });
   window.on('closed', () => {
-    if (mainWindow === window) mainWindow = null;
-    workspaceShown = false;
+    windows.delete(window);
+    focusOrder = focusOrder.filter((other) => other !== window);
+    // A session waiting for this window goes to whichever window is in front.
+    if (pendingOpen?.window === window.id) {
+      const front = frontWindow();
+      pendingOpen.window = null;
+      if (front && windows.get(front)?.shown) front.webContents.send('dolphin:open-session');
+    }
     // The machine links stay up while Dolphin runs (macOS keeps it running
     // with no window), so finished turns still raise notifications, and
     // quitting later saves the machines that were open.
   });
-  void startWorkspace(window);
+  void startWorkspace(window, place);
   return window;
+}
+
+/** File → New Window (and the Dock menu, ⌘K, --new-window): another workspace
+ *  over the same machines, a step down and right of the front one, with an
+ *  empty layout. With no window open it is the same as reopening Dolphin. */
+function newWindow(): void {
+  const front = frontWindow();
+  if (!front) { reopenWindow(); return; }
+  const from = front.isFullScreen() || front.isMaximized() ? undefined : front.getNormalBounds();
+  const bounds = from ? clampBounds({ ...from, x: from.x + 28, y: from.y + 28 }, workAreas()) : undefined;
+  const slot = freeSlot([...windows.values()].map((state) => state.slot));
+  createWindow({ slot, bounds, maximized: false, fullScreen: false }, true);
+}
+
+/** This computer's helper, started once however many windows wait for it. A
+ *  link that is up, or recovering by itself, is left alone. */
+let localStarting: Promise<void> | null = null;
+function startLocal(): Promise<void> {
+  const local = machineFor({ kind: 'local' });
+  if (local.connection && local.link !== 'failed') return Promise.resolve();
+  return (localStarting ??= connect(local).finally(() => { localStarting = null; }));
 }
 
 /** The launch page while this computer's helper starts, then the workspace,
  *  whether or not it started: a failed helper shows as a failed section with
  *  Reconnect, and machines over SSH work regardless. */
-async function startWorkspace(window: BrowserWindow): Promise<void> {
-  workspaceShown = false;
-  await window.loadURL(`app://connect/status.html#${encodeURIComponent('Opening This Computer…')}`);
-  window.show();
-  applyWindowFlags(window, pendingFlags);
-  pendingFlags = {};
-  const local = machineFor({ kind: 'local' });
-  if (local.link !== 'connected') await connect(local);
+async function startWorkspace(window: BrowserWindow, flags: { maximized?: boolean; fullScreen?: boolean } = {}): Promise<void> {
+  const state = windows.get(window);
+  if (!state) return;
+  state.shown = false;
+  // A load cut short (the window closed, or reloaded as this computer's helper
+  // came back) is not an error: did-finish-load marks the workspace shown.
+  const load = (url: string) => window.loadURL(url).then(() => true, () => false);
+  await load(`app://connect/status.html#${encodeURIComponent('Opening This Computer…')}`);
   if (window.isDestroyed()) return;
-  localInPage = local.link === 'connected';
-  await window.loadURL(`${APP_ORIGIN}/desktop.html#/workspace`);
-  workspaceShown = true;
-  broadcast();
+  window.show();
+  applyWindowFlags(window, flags);
+  await startLocal();
+  if (window.isDestroyed()) return;
+  state.localInPage = Boolean(machines.get('local')?.connection);
+  await load(`${APP_ORIGIN}/desktop.html#/workspace`);
 }
 
 // The launch page's buttons after a failure: start this computer's helper
 // again, or show its logs.
 ipcMain.on('dolphin:retry', (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender);
-  if (window && window === mainWindow) void startWorkspace(window);
+  const window = windowOf(event.sender);
+  if (window) void startWorkspace(window);
 });
 ipcMain.on('dolphin:open-logs', () => void shell.openPath(path.join(app.getPath('home'), '.dolphin-server', 'logs')));
+// Which window the page is, for its layout (windowScope.ts), and New Window from ⌘K.
+ipcMain.on('dolphin:window', (event) => {
+  const window = windowOf(event.sender);
+  const state = window ? windows.get(window) : undefined;
+  event.returnValue = state ? { slot: state.slot, fresh: state.fresh } : null;
+});
+ipcMain.on('dolphin:new-window', (event) => { if (windowOf(event.sender)) newWindow(); });
 
-/* The machines open when Dolphin quits come back at the next launch, in the
-   window's last place. */
+/* The machines and windows open when Dolphin quits come back at the next
+   launch, each window in its last place with its own layout. */
 const sessionFile = () => path.join(app.getPath('userData'), 'session.json');
-function saveSession(): void {
-  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+/** Each open window's number and place, the front one last; none that is closing. */
+function openPlaces(): SavedWindow[] {
+  return liveWindows()
+    .filter((window) => !windows.get(window)!.closing)
+    .map((window) => ({ slot: windows.get(window)!.slot, bounds: window.getNormalBounds(), ...windowFlags(window) }));
+}
+function settleCloses(): void {
+  const burst = closeBurst;
+  closeBurst = null;
+  if (burst && !quitting) saveSession(windowsAfterCloses(burst.before, openPlaces()));
+}
+/** `kept`: the windows to save; by default those open, or while closes are
+ *  settling, those open before they began. None (macOS with no window) keeps
+ *  the saved ones. */
+function saveSession(kept: SavedWindow[] = closeBurst?.before ?? openPlaces()): void {
+  const front = kept.at(-1);
   // The live machines, window or not: with no window (macOS) they are still connected.
   const state = sessionToSave(readJson<Saved>(sessionFile(), {}), {
     machines: [...machines.keys()].filter((id) => id !== 'local'),
-    bounds: window?.getNormalBounds(),
-    flags: window ? windowFlags(window) : undefined,
+    bounds: front?.bounds,
+    flags: front ? { maximized: front.maximized, fullScreen: front.fullScreen } : undefined,
+    windows: kept.length ? kept : undefined,
   });
   try { writeJsonAtomic(sessionFile(), state); } catch { /* restoring is a convenience */ }
 }
-/** The saved place, on a screen that is attached. Before 0.1.11 each machine
- *  had its own window: the one window takes the first one's place. */
-const savedBounds = (saved: Saved) => clampBounds(saved.bounds ?? saved.open?.[0]?.bounds, screen.getAllDisplays().map((display) => display.workArea));
-/** A window again when there is none (macOS activate, a second launch, a
+/** The saved windows, each on a screen that is attached, the front one opened last. */
+function openSavedWindows(saved: Saved): void {
+  const areas = workAreas();
+  for (const place of windowsToRestore(saved)) createWindow({ ...place, bounds: clampBounds(place.bounds, areas) as Bounds | undefined });
+}
+/** Windows again when there are none (macOS activate, a second launch, a
  *  machine or notification opened with no window): the live machines are
- *  still connected, so they just get a window; only with none is the saved
+ *  still connected, so they just get windows; only with none is the saved
  *  session restored (which adds and connects its machines). */
 function reopenWindow(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) { showWindow(); return; }
-  if (machines.size) {
-    const saved = readJson<Saved>(sessionFile(), {});
-    showWindow(savedBounds(saved), windowFlags(null, saved));
-  }
+  if (liveWindows().length) { focusWindow(); return; }
+  if (machines.size) openSavedWindows(readJson<Saved>(sessionFile(), {}));
   else restoreSession();
 }
 function restoreSession(): void {
@@ -540,10 +651,9 @@ function restoreSession(): void {
   // into the one window.
   const targets = (saved.machines ?? (saved.open ?? []).map((item) => item.target))
     .filter((target) => typeof target === 'string' && target !== 'local' && validTarget(target));
-  const bounds = savedBounds(saved);
   machineFor({ kind: 'local' });
   for (const target of [...new Set(targets)]) machineFor({ kind: 'ssh', target });
-  showWindow(bounds, savedFlags(saved));
+  openSavedWindows(saved);
   for (const machine of machines.values()) if (machine.host.kind === 'ssh') void connect(machine);
 }
 
@@ -579,12 +689,12 @@ async function openOnThisComputer(machineId: unknown, url: string): Promise<{ ur
 }
 
 ipcMain.handle('dolphin:open-port', (event, machineId: unknown, port: unknown) => {
-  if (event.sender !== mainWindow?.webContents) return { error: 'Not from this window.' };
+  if (!windowOf(event.sender)) return { error: 'Not from this window.' };
   if (typeof port !== 'number' || !validPort(port)) return { error: 'That is not a TCP port.' };
   return openOnThisComputer(machineId, `http://localhost:${port}/`);
 });
 ipcMain.handle('dolphin:open-url', (event, machineId: unknown, url: unknown) => {
-  if (event.sender !== mainWindow?.webContents) return { error: 'Not from this window.' };
+  if (!windowOf(event.sender)) return { error: 'Not from this window.' };
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { error: 'Only web links open from here.' };
   return openOnThisComputer(machineId, url);
 });
@@ -626,7 +736,7 @@ ipcMain.handle('dolphin:setup-key', async (_event, target: unknown) => {
 });
 // "Forward SSH agent" in a machine's menu: saved per machine, applied to its link now.
 ipcMain.handle('dolphin:agent-forwarding', async (event, target: unknown, on: unknown) => {
-  if (event.sender !== mainWindow?.webContents) return { error: 'Not from this window.' };
+  if (!windowOf(event.sender)) return { error: 'Not from this window.' };
   const machine = machineOf(target);
   if (!machine || machine.host.kind !== 'ssh' || typeof on !== 'boolean') return { error: 'Only machines reached over SSH forward an agent.' };
   saveSettings({ agentForwarding: { ...agentForwardingMap(), [machine.host.target]: on } });
@@ -662,11 +772,12 @@ ipcMain.handle('dolphin:remote-log', async (_event, target: unknown) => {
   }
 });
 
-/** Connect to a Machine… : the window's own dialog, or a small window while it has none. */
+/** Connect to a Machine… : the front window's own dialog, or a small window while there is none. */
 function connectFromMenu(): void {
-  if (mainWindow && !mainWindow.isDestroyed() && workspaceShown) {
-    showWindow();
-    mainWindow.webContents.send('dolphin:connect-open');
+  const window = frontWindow();
+  if (window && windows.get(window)?.shown) {
+    focusWindow();
+    window.webContents.send('dolphin:connect-open');
   } else {
     openConnectWindow();
   }
@@ -684,24 +795,24 @@ function openConnectWindow(): void {
 
 ipcMain.on('dolphin:config', (event) => {
   // The window's own backend is this computer's helper.
-  const local = event.sender === mainWindow?.webContents ? machines.get('local')?.connection : undefined;
+  const local = windowOf(event.sender) ? machines.get('local')?.connection : undefined;
   event.returnValue = local ? { apiBase: local.apiBase, token: local.token, host: local.label } : null;
 });
 // Desktop settings (settings.ts): the page reads them synchronously at start.
 // A patch with any invalid value is rejected whole, not partly applied.
 ipcMain.on('dolphin:settings-get', (event) => {
-  event.returnValue = event.sender === mainWindow?.webContents ? readSettings(app.getPath('userData')) : { ...DEFAULT_SETTINGS, agentForwarding: {} };
+  event.returnValue = windowOf(event.sender) ? readSettings(app.getPath('userData')) : { ...DEFAULT_SETTINGS, agentForwarding: {} };
 });
 ipcMain.handle('dolphin:settings-set', (event, patch: unknown) => {
   const dir = app.getPath('userData');
-  if (event.sender !== mainWindow?.webContents || !patchIsValid(patch)) return readSettings(dir);
+  if (!windowOf(event.sender) || !patchIsValid(patch)) return readSettings(dir);
   return saveSettings(patch);
 });
 ipcMain.handle('dolphin:ssh-hosts', () => sshConfigHosts());
 ipcMain.handle('dolphin:connect', async (event, target: unknown) => {
   if (typeof target !== 'string' || !validTarget(target.trim())) return { error: 'Enter a machine like gpu-box, user@10.0.0.5 or ssh://user@host:2222.' };
   const from = BrowserWindow.fromWebContents(event.sender);
-  if (from && from !== mainWindow) from.close();
+  if (from && !windows.has(from)) from.close();
   openMachine(target.trim());
   return { ok: true };
 });
@@ -716,10 +827,10 @@ function checkAllLinks(): void {
 }
 ipcMain.on('dolphin:network-changed', () => checkAllLinks());
 
-/** A keyboard command for the workspace; ignored while the launch page shows. */
+/** A keyboard command for the front window's workspace; ignored while its launch page shows. */
 function sendCommand(id: CommandId): void {
-  const window = mainWindow;
-  if (!window || window.isDestroyed() || !workspaceShown) return;
+  const window = frontWindow();
+  if (!window || !windows.get(window)?.shown) return;
   window.webContents.send('dolphin:command', id);
 }
 
@@ -730,7 +841,8 @@ function buildMenu(): void {
   const separator = { type: 'separator' as const };
   const checkUpdates = { label: 'Check for Updates…', click: () => void checkFromMenu(BrowserWindow.getFocusedWindow() ?? undefined) };
   // Ctrl+R is reverse-i-search in a shell; only macOS keeps a reload key.
-  const reload: Electron.MenuItemConstructorOptions = { id: 'reload', label: 'Reload', ...(mac ? { accelerator: 'Cmd+R' } : {}), click: () => mainWindow?.webContents.reload() };
+  const reload: Electron.MenuItemConstructorOptions = { id: 'reload', label: 'Reload', ...(mac ? { accelerator: 'Cmd+R' } : {}), click: () => frontWindow()?.webContents.reload() };
+  const openWindow: Electron.MenuItemConstructorOptions = { id: 'new-window', label: 'New Window', accelerator: newWindowAccelerator(process.platform), click: () => newWindow() };
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(mac ? [{
       label: app.name,
@@ -744,10 +856,12 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
+        openWindow,
         command('new-session'),
         { label: 'Connect to Machine…', accelerator: 'CmdOrCtrl+Shift+O', click: connectFromMenu },
         separator,
-        ...(mac ? [command('close-view'), { role: 'close' as const, accelerator: 'Cmd+Shift+W' }] : [command('settings'), separator, { role: 'quit' as const }]),
+        // Ctrl+Shift+W closes a window in GNOME Terminal too; plain Ctrl+W is delete-word.
+        ...(mac ? [command('close-view'), { role: 'close' as const, accelerator: 'Cmd+Shift+W' }] : [{ role: 'close' as const, label: 'Close Window', accelerator: 'Ctrl+Shift+W' }, separator, command('settings'), separator, { role: 'quit' as const }]),
       ],
     },
     {
@@ -785,15 +899,18 @@ function buildMenu(): void {
     ] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // Right-clicking Dolphin in the Dock offers New Window too.
+  if (mac) app.dock?.setMenu(Menu.buildFromTemplate([{ label: 'New Window', click: () => newWindow() }]));
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const action = secondInstanceAction(app.isReady(), Boolean(mainWindow && !mainWindow.isDestroyed()));
-    if (action === 'show') showWindow();
+  app.on('second-instance', (_event, argv) => {
+    const action = secondInstanceAction(app.isReady(), liveWindows().length > 0, argv);
+    if (action === 'show') focusWindow();
     else if (action === 'restore') reopenWindow();
+    else if (action === 'new-window') newWindow();
   });
   app.whenReady().then(() => {
     serveApp();
@@ -815,12 +932,20 @@ if (!app.requestSingleInstanceLock()) {
     // Back from sleep: every machine link tries again at once.
     powerMonitor.on('resume', checkAllLinks);
     app.on('activate', () => {
-      // macOS: the window was closed; its machines are still connected.
-      if (!mainWindow) reopenWindow();
+      // macOS: the windows were closed; their machines are still connected.
+      if (!liveWindows().length) reopenWindow();
     });
   });
   // Drop every relay and SSH forward on quit; open connections must not hold the app open.
-  app.on('before-quit', () => saveSession());
+  app.on('before-quit', () => {
+    if (quitting) return;
+    // Windows already closing (restarting into an update closes them first)
+    // are saved as they were before.
+    saveSession();
+    if (closeBurst) clearTimeout(closeBurst.timer);
+    closeBurst = null;
+    quitting = true;
+  });
   app.on('will-quit', () => {
     stopFeeds();
     for (const machine of machines.values()) machine.connection?.close();

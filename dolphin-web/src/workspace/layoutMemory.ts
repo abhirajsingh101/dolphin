@@ -1,9 +1,11 @@
 import { clampChatWidth, CHAT_DEFAULT_WIDTH } from './chatColumn';
+import { windowKey } from './windowScope';
 
 /* What the glass workspace's layout remembers across a relaunch (spec item 11):
    whether the sidebar is collapsed, the chat column's width and fold, and which
    project is fullscreen. The window's own size, maximized and full-screen state
-   are the main process's (dolphin-desktop/src/windowState.ts). */
+   are the main process's (dolphin-desktop/src/windowState.ts). Each Dolphin
+   window keeps its own (windowScope.ts). */
 
 export const LAYOUT_KEYS = {
   sidebar: 'dolphin.glass.sidebar-collapsed',
@@ -13,7 +15,7 @@ export const LAYOUT_KEYS = {
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 function read(storage: Store | null, key: string): unknown {
-  try { return JSON.parse(storage?.getItem(key) ?? 'null'); } catch { return null; }
+  try { return JSON.parse(storage?.getItem(windowKey(key)) ?? 'null'); } catch { return null; }
 }
 
 export function readSidebarCollapsed(storage: Store | null): boolean {
@@ -33,8 +35,8 @@ export function readFullscreenProject(storage: Store | null): string | null {
 
 export function writeLayout(storage: Store | null, key: string, value: unknown): void {
   try {
-    if (value === null) storage?.removeItem(key);
-    else storage?.setItem(key, JSON.stringify(value));
+    if (value === null) storage?.removeItem(windowKey(key));
+    else storage?.setItem(windowKey(key), JSON.stringify(value));
   } catch { /* The layout is a convenience; the workspace works without it. */ }
 }
 

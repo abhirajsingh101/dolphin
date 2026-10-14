@@ -10,6 +10,8 @@ import ErrorBoundary from '../ErrorBoundary';
 import { applyTheme, readStoredTheme } from '../theme';
 import { useMachineLinks } from '../machines';
 import { healthTarget } from './healthTarget';
+import { browserStorage } from '../workspace/layoutMemory';
+import { startWindow } from '../workspace/windowScope';
 import '../glass.css';
 import './glassHealth.css';
 import './glassDialogs.css';
@@ -64,6 +66,8 @@ function DesktopRouter() {
 }
 
 applyTheme(readStoredTheme());
+// A window New Window just opened starts from an empty layout of its own.
+startWindow(browserStorage());
 
 // The window has no separate title bar; desktop.css lays each page's header out
 // around this platform's window controls and makes it the drag area.

@@ -48,6 +48,15 @@ function stored(): Record<string, number> {
 
 const all = () => (cache ??= stored());
 
+// Every Dolphin window shares these marks: another window's write replaces this
+// window's copy at once, and re-renders what shows them.
+globalThis.addEventListener?.('storage', (event: Event) => {
+  const key = (event as StorageEvent).key;
+  if (key !== KEY && key !== null) return;
+  cache = null;
+  globalThis.dispatchEvent?.(new Event(EVENT));
+});
+
 export function seenAt(machine: string, projectId: string, session: string): number | undefined {
   return all()[idOf(machine, projectId, session)];
 }
@@ -60,7 +69,9 @@ export function markSeen(machine: string, projectId: string, session: string, tu
   const known = Number.isFinite(turn);
   const at = known ? turn : Date.now();
   const id = idOf(machine, projectId, session);
-  const seen = all();
+  // Read again rather than trust the copy: another window may have written
+  // since. Storage wins; the copy fills in when storage refuses.
+  const seen = { ...all(), ...stored() };
   if (!known && (seen[id] ?? -Infinity) >= at) return;
   seen[id] = at;
   cache = Object.fromEntries(Object.entries(seen).sort((a, b) => b[1] - a[1]).slice(0, MAX_SEEN));

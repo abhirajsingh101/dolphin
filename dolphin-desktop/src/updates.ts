@@ -198,6 +198,7 @@ export async function checkFromMenu(window?: BrowserWindow): Promise<void> {
 /** The version this app ran last time, so the first window after an update can
  *  say what is new. A first install has nothing to announce. */
 let whatsNew: { version: string; notesUrl: string } | null = null;
+let whatsNewWindow: number | null = null;
 function noteVersion(): void {
   const file = path.join(app.getPath('userData'), 'last-version');
   let last = '';
@@ -231,7 +232,11 @@ export function startUpdateChecks(): void {
   ipcMain.on('dolphin:update-state', (event) => { event.returnValue = current; });
   ipcMain.handle('dolphin:update-apply', () => apply());
   ipcMain.handle('dolphin:update-check', () => checkForUpdates(true));
-  ipcMain.on('dolphin:whats-new', (event) => { event.returnValue = whatsNew; });
+  // One window says what is new: the first to ask (a reload of it asks again).
+  ipcMain.on('dolphin:whats-new', (event) => {
+    if (whatsNew && whatsNewWindow === null) whatsNewWindow = event.sender.id;
+    event.returnValue = event.sender.id === whatsNewWindow ? whatsNew : null;
+  });
   ipcMain.on('dolphin:whats-new-seen', () => { whatsNew = null; });
   if (!app.isPackaged && !process.env.DOLPHIN_DESKTOP_UPDATE_FEED) return; // a development build has nothing to update to
   setTimeout(() => void checkForUpdates(), Number(process.env.DOLPHIN_DESKTOP_UPDATE_DELAY_MS) || FIRST_CHECK_MS);

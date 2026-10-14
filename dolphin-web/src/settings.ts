@@ -37,6 +37,14 @@ const VALID: { [K in SettingKey]: (value: unknown) => boolean } = {
 
 // Changes made while storage refuses still hold for this window.
 const memory: Partial<Settings> = {};
+// Another Dolphin window changed the settings in the storage they share: its
+// values win over this window's copies. Registered before any listener that
+// re-reads them.
+globalThis.addEventListener?.('storage', (event: Event) => {
+  const key = (event as StorageEvent).key;
+  if (key !== KEY && key !== THEME_STORAGE_KEY && key !== null) return;
+  for (const name of Object.keys(memory) as SettingKey[]) delete memory[name];
+});
 
 function stored(): Record<string, unknown> {
   try {

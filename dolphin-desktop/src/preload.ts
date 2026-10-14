@@ -5,11 +5,16 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const config = ipcRenderer.sendSync('dolphin:config') as { apiBase: string; token: string; host: string } | null;
+// Which Dolphin window this is: its number keeps its layout apart from the
+// other windows' (the page's windowScope.ts); fresh means New Window opened it.
+const windowInfo = ipcRenderer.sendSync('dolphin:window') as { slot: number; fresh: boolean } | null;
 
 contextBridge.exposeInMainWorld('dolphinDesktop', {
   config: config ?? undefined,
   // Lets the page lay out its header around this platform's window controls.
   platform: process.platform,
+  window: windowInfo ?? undefined,
+  newWindow: () => ipcRenderer.send('dolphin:new-window'),
   // App updates (updates.ts): the current state, changes to it, and the button.
   update: () => ipcRenderer.sendSync('dolphin:update-state'),
   onUpdate: (listener: (state: unknown) => void) => {

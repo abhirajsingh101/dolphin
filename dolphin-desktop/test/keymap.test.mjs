@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commandItem, COMMAND_IDS, keyBindings } from '../dist/keymap.js';
+import { commandItem, COMMAND_IDS, keyBindings, newWindowAccelerator } from '../dist/keymap.js';
 import { launchApp, scratchEnv, teardown } from './support.mjs';
 
 const SESSIONS = Array.from({ length: 9 }, (_, i) => `session-${i + 1}`);
@@ -40,6 +40,15 @@ test('every accelerator is used once', () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     const accelerators = keyBindings(platform).map((binding) => binding.accelerator);
     assert.equal(new Set(accelerators).size, accelerators.length, platform);
+  }
+});
+
+test('New Window is Cmd+N on macOS and Ctrl+Shift+N elsewhere, and no command shares it', () => {
+  assert.equal(newWindowAccelerator('darwin'), 'Cmd+N');
+  for (const platform of ['linux', 'win32']) assert.equal(newWindowAccelerator(platform), 'Ctrl+Shift+N');
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const taken = [...keyBindings(platform).map((binding) => binding.accelerator), 'CmdOrCtrl+Shift+O'];
+    assert.equal(taken.includes(newWindowAccelerator(platform)), false, platform);
   }
 });
 

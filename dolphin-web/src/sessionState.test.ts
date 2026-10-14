@@ -86,6 +86,27 @@ describe('markSeen', () => {
     expect(seen.sessionState(s, seen.seenAt('gpu-box', 'atlas', 'build'))).toBe('unread');
   });
 
+  it('keeps what another Dolphin window marked seen meanwhile, the later time winning', async () => {
+    const seen = await import('./sessionState');
+    seen.markSeen('local', 'atlas', 'build');
+    // Another window shares this storage and writes its own marks.
+    localStorage.setItem('dolphin.seen-turns', JSON.stringify({ 'local|atlas|build': now + 5, 'local|orbit|main': now + 7 }));
+    vi.setSystemTime(now + 10);
+    seen.markSeen('local', 'pluto', 'dev');
+    expect(JSON.parse(localStorage.getItem('dolphin.seen-turns')!)).toEqual({ 'local|atlas|build': now + 5, 'local|orbit|main': now + 7, 'local|pluto|dev': now + 10 });
+    expect(seen.seenAt('local', 'orbit', 'main')).toBe(now + 7);
+  });
+
+  it('reads another window\'s marks as soon as storage says they changed', async () => {
+    const listeners: ((event: { key: string | null }) => void)[] = [];
+    vi.stubGlobal('addEventListener', (type: string, listener: (event: { key: string | null }) => void) => { if (type === 'storage') listeners.push(listener); });
+    const seen = await import('./sessionState');
+    expect(seen.seenAt('local', 'orbit', 'main')).toBeUndefined();
+    localStorage.setItem('dolphin.seen-turns', JSON.stringify({ 'local|orbit|main': now }));
+    for (const listener of listeners) listener({ key: 'dolphin.seen-turns' });
+    expect(seen.seenAt('local', 'orbit', 'main')).toBe(now);
+  });
+
   it('keeps the newest 500 sessions', async () => {
     const seen = await import('./sessionState');
     for (let i = 0; i < 501; i += 1) {

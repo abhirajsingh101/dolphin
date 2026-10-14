@@ -24,6 +24,18 @@ describe('settings', () => {
     expect(JSON.parse(localStorage.getItem('dolphin.settings')!)).toEqual({ theme: 'dark', 'notifications.system': false });
   });
 
+  it('another Dolphin window\'s later change wins over this window\'s own', async () => {
+    const listeners: ((event: { key: string | null }) => void)[] = [];
+    vi.stubGlobal('addEventListener', (type: string, listener: (event: { key: string | null }) => void) => { if (type === 'storage') listeners.push(listener); });
+    vi.stubGlobal('localStorage', memoryStorage());
+    const { getSetting, setSetting } = await import('./settings');
+    setSetting('notifications.system', false);
+    // The other window shares this storage and turns it back on.
+    localStorage.setItem('dolphin.settings', JSON.stringify({ 'notifications.system': true }));
+    for (const listener of listeners) listener({ key: 'dolphin.settings' });
+    expect(getSetting('notifications.system')).toBe(true);
+  });
+
   it('a malformed or out-of-range value reads as its default', async () => {
     vi.stubGlobal('localStorage', memoryStorage({ 'dolphin.settings': JSON.stringify({ 'terminal.fontSize': 40, theme: 'blue', 'notifications.system': 'no' }) }));
     const { getSetting } = await import('./settings');

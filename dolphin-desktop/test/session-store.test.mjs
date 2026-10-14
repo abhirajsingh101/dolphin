@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { clampBounds, readJson, savedSystemNotifications, secondInstanceAction, sessionToSave, writeJsonAtomic } from '../dist/session-store.js';
+import { clampBounds, freeSlot, readJson, savedSystemNotifications, secondInstanceAction, sessionToSave, windowsAfterCloses, windowsToRestore, writeJsonAtomic } from '../dist/session-store.js';
 
 test('writes are atomic and leave no temporary file behind', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'dstore-'));
@@ -60,6 +60,62 @@ test('a second launch shows the window, or restores it when there is none', () =
   assert.equal(secondInstanceAction(true, true), 'show');
   assert.equal(secondInstanceAction(true, false), 'restore');
   assert.equal(secondInstanceAction(false, false), 'wait');
+});
+
+test('a second launch with --new-window opens another window, or restores when there is none', () => {
+  assert.equal(secondInstanceAction(true, true, ['/opt/Dolphin/dolphin', '--new-window']), 'new-window');
+  assert.equal(secondInstanceAction(true, false, ['dolphin', '--new-window']), 'restore');
+  assert.equal(secondInstanceAction(false, true, ['dolphin', '--new-window']), 'wait');
+  assert.equal(secondInstanceAction(true, true, ['dolphin', '--new-windowish']), 'show');
+});
+
+test('every window is saved with its own place and number, the front one also as the old single bounds', () => {
+  const back = { slot: 2, bounds: { x: 0, y: 0, width: 900, height: 600 }, maximized: false, fullScreen: false };
+  const front = { slot: 1, bounds: { x: 50, y: 50, width: 1200, height: 800 }, maximized: true, fullScreen: false };
+  assert.deepEqual(
+    sessionToSave({ machines: [] }, { machines: ['gpu-box'], bounds: front.bounds, flags: { maximized: true, fullScreen: false }, windows: [back, front] }),
+    { machines: ['gpu-box'], bounds: front.bounds, maximized: true, fullScreen: false, windows: [back, front] },
+  );
+  // No window open (macOS): the saved windows stay as they were.
+  assert.deepEqual(sessionToSave({ machines: [], windows: [back] }, { machines: [] }).windows, [back]);
+});
+
+test('windows come back as saved; an older session is one window, number 1', () => {
+  const bounds = { x: 5, y: 6, width: 1000, height: 700 };
+  assert.deepEqual(windowsToRestore({ bounds, maximized: true }), [{ slot: 1, bounds, maximized: true, fullScreen: false }]);
+  assert.deepEqual(windowsToRestore({ open: [{ target: 'gpu-box', bounds }] }), [{ slot: 1, bounds, maximized: false, fullScreen: false }]);
+  assert.deepEqual(windowsToRestore({}), [{ slot: 1, bounds: undefined, maximized: false, fullScreen: false }]);
+  const saved = { windows: [{ slot: 3, bounds, fullScreen: true }, { slot: 1 }] };
+  assert.deepEqual(windowsToRestore(saved), [{ slot: 3, bounds, maximized: false, fullScreen: true }, { slot: 1, bounds: undefined, maximized: false, fullScreen: false }]);
+});
+
+test('a damaged window list never restores nonsense: bad numbers are dropped, repeats kept once', () => {
+  const bounds = { x: 5, y: 6, width: 1000, height: 700 };
+  const saved = { bounds, windows: [{ slot: 0 }, { slot: 2.5 }, { slot: '2' }, null, 'x', { slot: 2, bounds: 'far away' }, { slot: 2 }] };
+  assert.deepEqual(windowsToRestore(saved), [{ slot: 2, bounds: undefined, maximized: false, fullScreen: false }]);
+  // Nothing usable left: one window, as an older session.
+  assert.deepEqual(windowsToRestore({ bounds, windows: [{ slot: -1 }] }), [{ slot: 1, bounds, maximized: false, fullScreen: false }]);
+  assert.deepEqual(windowsToRestore({ bounds, windows: 'all' }), [{ slot: 1, bounds, maximized: false, fullScreen: false }]);
+  // A hand-edited file with hundreds of windows opens at most 12.
+  assert.equal(windowsToRestore({ windows: Array.from({ length: 300 }, (_, index) => ({ slot: index + 1 })) }).length, 12);
+});
+
+test('a new window takes the lowest free number', () => {
+  assert.equal(freeSlot([]), 1);
+  assert.equal(freeSlot([1, 2, 3]), 4);
+  assert.equal(freeSlot([2, 3]), 1);
+  assert.equal(freeSlot([1, 3]), 2);
+});
+
+test('closing one of several windows forgets it; closing all of them, together or the last alone, keeps them', () => {
+  const one = { slot: 1, maximized: false, fullScreen: false };
+  const two = { slot: 2, maximized: false, fullScreen: false };
+  // Before the closes, and what is still open once they settle.
+  assert.deepEqual(windowsAfterCloses([one, two], [one]), [one]);
+  assert.deepEqual(windowsAfterCloses([one, two], [two]), [two]);
+  assert.deepEqual(windowsAfterCloses([two], []), [two]);
+  // A desktop's Close All, or ⌘⌥W: every window closes at once, and all come back.
+  assert.deepEqual(windowsAfterCloses([one, two], []), [one, two]);
 });
 
 test('a failed write removes its temporary file and keeps the old content', () => {
