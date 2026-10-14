@@ -123,6 +123,10 @@ jobs:
             export CSC_LINK="$MAC_CERTIFICATE" CSC_KEY_PASSWORD="$MAC_CERTIFICATE_PASSWORD"
             # dolphinSigned: the app may then update itself in place (src/updates.ts).
             npm run dist -- -c.mac.notarize=true -c.extraMetadata.dolphinSigned=true
+          elif [ "$RUNNER_OS" = macOS ]; then
+            # Ad-hoc signed: Apple Silicon calls a downloaded app with no
+            # signature at all "damaged" and offers no way to open it.
+            CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- -c.mac.identity=-
           else
             CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist
           fi
@@ -149,8 +153,10 @@ jobs:
         env:
           DOLPHIN_SHOTS: ${{ runner.temp }}/shots
         run: |
+          app="$(ls -d "$PWD"/release/mac*/Dolphin.app)"
+          codesign --verify --deep --strict --verbose=2 "$app"
           mkdir -p "$DOLPHIN_SHOTS"
-          DOLPHIN_DESKTOP_APP="$(ls -d "$PWD"/release/mac*/Dolphin.app)/Contents/MacOS/Dolphin" node --test test/packaged.test.mjs
+          DOLPHIN_DESKTOP_APP="$app/Contents/MacOS/Dolphin" node --test test/packaged.test.mjs
 
       - uses: actions/upload-artifact@v7
         if: always()
