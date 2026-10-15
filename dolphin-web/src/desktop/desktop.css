@@ -12,11 +12,10 @@ html[data-platform] :is(.glass-top, .glass-health-top) :is(a, button, input, sel
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-html[data-platform="darwin"]:not([data-fullscreen]) .glass-top {
-  padding-left: 58px;
-}
-html[data-platform="darwin"]:not([data-fullscreen]) .glass-health-top {
-  padding-left: 58px;
+/* The traffic lights sit at x 18 and end near x 70 (main.ts); 80px keeps
+   the header's first control clear of the green one. */
+html[data-platform="darwin"]:not([data-fullscreen]) :is(.glass-top, .glass-health-top) {
+  padding-left: 80px;
 }
 html[data-platform]:not([data-platform="darwin"]) :is(.glass-top, .glass-health-top) {
   padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) - 18px));

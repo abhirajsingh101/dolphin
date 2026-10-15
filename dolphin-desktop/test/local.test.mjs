@@ -66,7 +66,8 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
       title.className = 'glass-window-title';
       frame.append(title);
       document.querySelector('.glass-workspace').append(frame);
-      const measure = () => ({ top: frame.getBoundingClientRect().top, left: parseFloat(getComputedStyle(title).paddingLeft) });
+      const firstControl = document.querySelector('.glass-top :is(button, a, input)');
+      const measure = () => ({ top: frame.getBoundingClientRect().top, left: parseFloat(getComputedStyle(title).paddingLeft), control: firstControl.getBoundingClientRect().left });
       delete root.dataset.fullscreen;
       const here = measure();
       root.dataset.platform = 'darwin';
@@ -82,6 +83,8 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     assert.equal(fullscreen.macWindow.top, 44, JSON.stringify(fullscreen));
     assert.equal(fullscreen.macFull.top, 0, JSON.stringify(fullscreen));
     assert.ok(fullscreen.macFull.left >= 72, JSON.stringify(fullscreen));
+    // In a Mac window the traffic lights end near x 70; the first header control starts clear of them.
+    assert.ok(fullscreen.macWindow.control >= 78, JSON.stringify(fullscreen));
 
     // Keyboard commands are menu items: they open the palette and Settings.
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('palette').click());

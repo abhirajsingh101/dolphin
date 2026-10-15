@@ -27,6 +27,7 @@ import { isLoopbackUrl, remotePortOf, rewriteToLocal, validPort } from './forwar
 import { DEFAULT_SETTINGS, onSettingsChange, patchIsValid, readRawSettings, readSettings, writeSettings } from './settings';
 import { hostNames, issueUrl, tailLines } from './issueReport';
 import { memoryChoiceFor, seededMemory, sendMemoryChoice } from './memorySync';
+import { SYNC_INTERVAL_MS, syncAll, type Fetch, type SyncMachine } from './brainSync';
 import { LinkSnapshot, nextEpoch } from './link-epoch';
 import { detectMachines, forgetMachine, rememberMachine, validTarget } from './machines';
 import { explainRemoteError, remoteLogName } from './remote';
@@ -337,6 +338,7 @@ async function connect(machine: MachineState): Promise<void> {
     machine.link = 'connected';
     machine.status = undefined;
     tellMemory(machine, 'connected');
+    syncBrains();
     if (machine.host.kind === 'local') {
       // A page read its helper's address at load, when it had none.
       for (const window of liveWindows()) {
@@ -408,6 +410,37 @@ function tellMemory(machine: MachineState, event: 'connected' | 'changed'): void
   if (choice === null || !connection || machine.link !== 'connected') return;
   void sendMemoryChoice(connection.apiBase, connection.token, choice, (url, init) => net.fetch(url, { ...init, signal: AbortSignal.timeout(15_000) }))
     .catch(() => undefined);
+}
+
+/* Every connected machine's work comes home to this computer's brain
+   (brainSync.ts): on connect, every 10 minutes, and when memory is turned on.
+   One sync at a time; a request during one runs once it ends. */
+let syncing = false;
+let syncAgain = false;
+const brainSyncFile = () => path.join(app.getPath('userData'), 'brain-sync.json');
+
+function syncBrains(): void {
+  if (syncing) { syncAgain = true; return; }
+  if (!readSettings(app.getPath('userData')).memory) return;
+  const local = machines.get('local');
+  if (!local?.connection || local.link !== 'connected') return;
+  const targets: SyncMachine[] = [...machines.values()]
+    .filter((machine) => machine.connection && machine.link === 'connected')
+    .map((machine) => ({ id: machine.id, kind: machine.host.kind === 'local' ? 'local' : 'ssh', endpoint: { apiBase: machine.connection!.apiBase, token: machine.connection!.token } }));
+  // A first sync writes a whole machine into the brain, a call at a time.
+  const fetcher: Fetch = (url, init) => net.fetch(url, { ...init, signal: AbortSignal.timeout(5 * 60_000) });
+  syncing = true;
+  void syncAll(targets, { apiBase: local.connection.apiBase, token: local.connection.token }, readJson<Record<string, unknown>>(brainSyncFile(), {}),
+    (cursors) => { try { writeJsonAtomic(brainSyncFile(), cursors); } catch (error) { console.warn('Could not keep the brain sync cursors:', error); } },
+    fetcher)
+    .then((results) => {
+      for (const [id, result] of Object.entries(results)) if (result.error) console.warn(`Brain sync from ${id}: ${result.error}`);
+    })
+    .catch((error) => console.warn('Brain sync failed:', error))
+    .finally(() => {
+      syncing = false;
+      if (syncAgain) { syncAgain = false; syncBrains(); }
+    });
 }
 
 /** `ssh -G <alias>`'s hostname and user, or nothing: never waits more than 2 s. */
@@ -927,7 +960,9 @@ if (!app.requestSingleInstanceLock()) {
     if (seeded !== null) writeSettings(app.getPath('userData'), { memory: seeded });
     onSettingsChange((next, previous) => {
       if (next.memory !== previous.memory) for (const machine of machines.values()) tellMemory(machine, 'changed');
+      if (next.memory && !previous.memory) syncBrains();
     });
+    setInterval(syncBrains, SYNC_INTERVAL_MS).unref();
     restoreSession();
     // Back from sleep: every machine link tries again at once.
     powerMonitor.on('resume', checkAllLinks);

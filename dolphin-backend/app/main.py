@@ -16,6 +16,7 @@ import re
 import signal
 import struct
 import termios
+import threading
 from typing import Annotated, Optional
 from uuid import UUID
 from urllib.parse import quote, unquote_to_bytes
@@ -598,6 +599,8 @@ async def startup():
     # Dolphin's memory: set it up (or retry a failed setup) in the background.
     if brain.mode() == "auto" and not brain.ready():
         brain.start_install(force=True)
+    else:
+        threading.Thread(target=brain.apply_settings, name="gbrain-settings", daemon=True).start()
     try:
         await _prune_terminal_attachments_once()
     except Exception:

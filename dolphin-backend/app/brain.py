@@ -51,6 +51,11 @@ BUN_SHA256 = {
 GBRAIN_VERSION = "0.60.110.0"
 GBRAIN_COMMIT = "1935c74a9e217b276c7bbf3075ddd3c220e96a09"  # tag v0.60.110.0
 CALL_TIMEOUT = 60
+# GBrain keeps a receipt of every write so a retried write is never applied
+# twice, and trims each receipt to a small stub once it is this many days old
+# (its default is 30). A week still leaves time to replay a refused write
+# (`gbrain repair failed-writes`), and keeps the receipts' share of the brain small.
+RECEIPT_RETENTION_DAYS = 7
 INSTALL_TIMEOUT = 900
 
 _lock = threading.Lock()
@@ -59,6 +64,15 @@ _worker: threading.Thread | None = None
 
 class BrainError(RuntimeError):
     pass
+
+
+class BrainNotFound(BrainError):
+    """The page asked for does not exist."""
+
+
+class BrainBusy(BrainError):
+    """Another process (an agent's `dolphin-memory` server) has the brain open.
+    PGlite takes one connection at a time, so the call can only be retried later."""
 
 
 class _Declined(Exception):
@@ -232,6 +246,11 @@ def call(tool: str, arguments: dict[str, Any], timeout: float = CALL_TIMEOUT) ->
     result = _run(["call", tool, json.dumps(arguments)], timeout=timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no detail"]
+        output = result.stderr + result.stdout
+        if "already open" in output:
+            raise BrainBusy(f"GBrain {tool} failed: {detail[0][:300]}")
+        if "page_not_found" in output:
+            raise BrainNotFound(f"GBrain {tool} failed: {detail[0][:300]}")
         raise BrainError(f"GBrain {tool} failed: {detail[0][:300]}")
     return _parse(result.stdout)
 
@@ -319,6 +338,28 @@ def _self_test(paths: dict[str, Path]) -> None:
     _parse(result.stdout)
 
 
+def _apply_settings(paths: dict[str, Path]) -> bool:
+    """Dolphin's settings for its brain. Returns whether GBrain took them."""
+    result = _run(["config", "set", "persistence.receipt_retention_days", str(RECEIPT_RETENTION_DAYS)],
+                  timeout=CALL_TIMEOUT, cwd=paths["home"])
+    if result.returncode != 0:
+        _log(f"settings not applied: {(result.stderr or result.stdout).strip()[-300:]}")
+        return False
+    return True
+
+
+def apply_settings() -> None:
+    """Bring a brain set up by an earlier Dolphin to its current settings, once.
+    A brain that another process holds open is left for the next start."""
+    if mode() != "auto" or not ready():
+        return
+    state = _read_state()
+    if state.get("receipt_retention_days") == RECEIPT_RETENTION_DAYS:
+        return
+    if _apply_settings(_paths()):
+        _write_state(**{**state, "receipt_retention_days": RECEIPT_RETENTION_DAYS})
+
+
 def _still_wanted() -> None:
     if mode() != "auto":
         raise _Declined()
@@ -369,8 +410,10 @@ def install() -> None:
         begin("init", paths["home"])
         begin("check")
         shutil.rmtree(paths["cache"], ignore_errors=True)  # Bun's download cache: ~150 MB, not needed again
+        settled = _apply_settings(paths)
         _log("ready")
-        _write_state(state="ready", version=GBRAIN_VERSION)
+        _write_state(state="ready", version=GBRAIN_VERSION,
+                     **({"receipt_retention_days": RECEIPT_RETENTION_DAYS} if settled else {}))
     except _Declined:
         _decline(paths, created)
     except BrainError as error:

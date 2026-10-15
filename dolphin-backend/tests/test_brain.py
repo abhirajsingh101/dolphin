@@ -30,6 +30,7 @@ shift  # the cli.ts path
 case "$1" in
   init) mkdir -p "$GBRAIN_HOME/.gbrain" && touch "$GBRAIN_HOME/.gbrain/brain.pglite"
         echo '{"status":"success","engine":"pglite"}' ;;
+  config) echo "$@" >> "$GBRAIN_HOME/config.log" ;;
   call) echo "gbrain 0.60 -> 0.61 available"   # a notice before the JSON, as the real one prints
         printf '{"tool":"%s","args":%s}\n' "$2" "$3" ;;
 esac
@@ -312,3 +313,26 @@ def test_concurrent_choices_never_fail_and_the_last_wins(ask_home, monkeypatch):
     brain.set_consent(True)
     assert brain.consent() is True
     assert [name for name in os.listdir(brain.base()) if name.startswith("consent")] == ["consent.json"]
+
+
+def _settings_applied() -> list[str]:
+    log = brain.base() / "home" / "config.log"
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def test_setup_keeps_write_receipts_for_a_week(dolphin_home):
+    brain.install()
+    assert _settings_applied() == ["config set persistence.receipt_retention_days 7"]
+    assert json.loads((brain.base() / "state.json").read_text())["receipt_retention_days"] == 7
+
+
+def test_a_brain_from_an_earlier_dolphin_gets_the_setting_once(dolphin_home):
+    brain.install()
+    state = json.loads((brain.base() / "state.json").read_text())
+    del state["receipt_retention_days"]
+    (brain.base() / "state.json").write_text(json.dumps(state))
+    (brain.base() / "home" / "config.log").unlink()
+    brain.apply_settings()
+    brain.apply_settings()
+    assert _settings_applied() == ["config set persistence.receipt_retention_days 7"]
+    assert brain.ready()
