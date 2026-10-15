@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, ChevronDown, FileText, Gauge, KeyRound, LoaderCircle, MoreHorizontal, Network, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
+import { Activity, ChevronDown, FileText, Gauge, KeyRound, Laptop, LoaderCircle, MoreHorizontal, Network, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
 import { machineBridge, type MachineLink } from './machines';
 import './connectMachine.css';
 
 /* One machine in the projects list: a heading with its name and whether its
-   link is up, then its projects. This computer comes first; every machine
+   link is up, then its projects. The heading is a band with a laptop or
+   server icon carrying the connection dot, so a machine never reads as one
+   more project. This computer comes first; every machine
    added from Connect to a Machine follows, each with a menu to reconnect, set
    up sign-in without a password, or disconnect. */
 
@@ -62,7 +64,10 @@ export default function MachineSection({ link, count, collapsed, onToggle, onAdd
           onClick={onToggle}
         >
           <ChevronDown size={12} aria-hidden="true" />
-          <i className="glass-machine-dot" data-state={link.state} aria-hidden="true" />
+          <span className="glass-machine-icon" aria-hidden="true">
+            {remote ? <Server size={14} /> : <Laptop size={14} />}
+            <i className="glass-machine-dot" data-state={link.state} />
+          </span>
           <strong className="glass-machine-label">{label}</strong>
           {!connected && (
             <small data-state={link.state}>

@@ -1,39 +1,81 @@
 /* The projects list, compact (design contract §4, "Projects list rows"):
    28px project and session rows. Selectors carry .glass-tree so they win over
-   glass.css whichever loads first (the web and desktop entries differ). */
+   glass.css whichever loads first (the web and desktop entries differ).
+
+   Three levels, each with its own look so they never blur together:
+   a machine is a band with a laptop or server icon (connectMachine.css), a
+   project is a row with a folder in its own colour, and a session is an
+   indented row with its status glyph. What only matters on hover (+, history,
+   remove, pin) floats over the row's right end and takes no width otherwise,
+   so names keep the room. Icons never shrink. */
 .glass-tree .sidebar-project { margin: 0; }
-.glass-tree .sidebar-project > summary { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; }
-.glass-tree .sidebar-project > summary strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.sidebar-project-meta { color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.glass-workspace .sidebar-project-add { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: var(--r-sm); color: var(--glass-muted); opacity: 0; }
-.glass-tree .sidebar-project > summary:hover .sidebar-project-add,
-.glass-tree .sidebar-project > summary:focus-within .sidebar-project-add { opacity: 1; }
-.glass-workspace .sidebar-project-add:hover { color: var(--glass-text); background: var(--glass-bubble); }
-@media (hover: none) { .glass-workspace .sidebar-project-add { opacity: 1; } }
-.glass-tree .sidebar-sessions { margin: 0 0 0 13px; padding-left: 4px; border-left: 1px solid var(--glass-edge); }
+.glass-tree .sidebar-project > summary { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; }
+.glass-tree .sidebar-project > summary > svg,
+.glass-tree .glass-other-sessions > summary > svg,
+.glass-workspace .sidebar-reveal > svg { flex-shrink: 0; }
+.glass-tree .sidebar-project > summary > svg:first-child,
+.glass-tree .glass-other-sessions > summary > svg:first-child { color: var(--glass-muted); }
+.glass-tree .sidebar-project > summary strong { flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sidebar-project-icon { color: var(--glass-muted); }
+.sidebar-project-meta { flex-shrink: 0; margin-left: auto; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The branch has only what the name leaves. */
+.glass-tree .sidebar-project > summary .glass-git { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--glass-muted-small); font-family: var(--font-mono); font-size: var(--fs-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.glass-tree .sidebar-project > summary .glass-git[data-dirty='true'] { color: var(--glass-text); }
+
+/* Row actions: one cluster over the row's right end, shown on hover or focus. */
+.glass-tree .sidebar-row-actions { position: absolute; top: 2px; right: 2px; bottom: 2px; display: flex; align-items: center; gap: 1px; padding: 0 2px 0 10px; border-radius: var(--r-sm); }
+.glass-tree .sidebar-project > summary:is(:hover, :focus-within) .sidebar-row-actions { background: var(--glass-solid); box-shadow: -6px 0 6px var(--glass-solid); }
+.glass-workspace .glass-tree .sidebar-row-actions > button { display: inline-grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; border-radius: var(--r-sm); color: var(--glass-muted); opacity: 0; }
+.glass-tree .sidebar-project > summary:is(:hover, :focus-within) .sidebar-row-actions > button { opacity: 1; }
+.glass-workspace .glass-tree .sidebar-row-actions > button:hover { color: var(--glass-text); background: var(--glass-bubble); }
+.glass-workspace .glass-tree .sidebar-row-actions > .glass-project-remove:hover { color: var(--danger); }
+@media (hover: none) {
+  .glass-tree .sidebar-row-actions { position: static; padding: 0; }
+  .glass-workspace .glass-tree .sidebar-row-actions > button { opacity: 1; }
+}
+
+/* Sessions: indented under their project, a guide line under its chevron. */
+.glass-tree .sidebar-sessions { margin: 0 0 2px 11px; padding-left: 4px; border-left: 1px solid var(--glass-edge); }
 .glass-tree .sidebar-session { display: flex; align-items: center; gap: 7px; width: 100%; height: 28px; padding: 0 6px; border-radius: var(--r-sm); text-align: left; white-space: nowrap; }
 .glass-tree .sidebar-session[aria-current='true'] { background: var(--glass-selection); box-shadow: inset 2px 0 0 var(--glass-accent); }
-.sidebar-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-session-agent { color: var(--glass-muted-small); font-size: var(--fs-2xs); }
-.sidebar-session-time { min-width: 3ch; text-align: right; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
-.glass-workspace .sidebar-reveal { display: block; width: 100%; height: 28px; padding: 0 6px; color: var(--glass-muted-small); font-size: var(--fs-2xs); text-align: left; }
+.glass-tree .sidebar-session > :first-child { flex-shrink: 0; }
+.sidebar-session-name { flex: 1 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-session-agent { flex-shrink: 0; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.sidebar-session-time { flex-shrink: 0; min-width: 3ch; text-align: right; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
+/* A narrow list keeps the name and the time; the agent is in the glance. */
+.glass-tree { container-type: inline-size; }
+@container (max-width: 190px) { .sidebar-session-agent { display: none; } }
 
-/* The pin button beside a session row; the row itself stays 28px. */
-.glass-tree .sidebar-session-line { display: flex; align-items: center; }
+/* The secondary rows that end a machine: empty projects and other sessions. */
+.glass-workspace .sidebar-reveal { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 6px 0 24px; color: var(--glass-muted-small); font-size: var(--fs-xs); text-align: left; }
+.glass-workspace .sidebar-reveal > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glass-workspace .sidebar-reveal:hover { color: var(--glass-text); background: var(--glass-bubble); }
+
+/* The pin floats over the time on hover or focus; the row stays 28px. */
+.glass-tree .sidebar-session-line { position: relative; display: flex; align-items: center; }
 .glass-tree .sidebar-session-line > .sidebar-session { flex: 1; width: auto; min-width: 0; }
-.glass-workspace .glass-tree .sidebar-session-pin { flex: 0 0 24px; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: var(--r-sm); color: var(--glass-muted); opacity: 0; }
-.glass-tree .sidebar-session-line:hover .sidebar-session-pin,
-.glass-tree .sidebar-session-line:focus-within .sidebar-session-pin,
-.glass-workspace .glass-tree .sidebar-session-pin[aria-pressed='true'] { opacity: 1; }
+.glass-workspace .glass-tree .sidebar-session-pin { position: absolute; top: 2px; right: 2px; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: var(--r-sm); background: var(--glass-solid); color: var(--glass-muted); opacity: 0; }
+.glass-tree .sidebar-session-line:is(:hover, :focus-within) .sidebar-session-pin { opacity: 1; }
+/* Beside a worktree's Archive the pin takes its own place, so it never covers it. */
+.glass-workspace .glass-tree .sidebar-session-line:has(> .sidebar-worktree) > .sidebar-session-pin { position: static; flex: 0 0 24px; background: none; }
+.glass-workspace .glass-tree .sidebar-session-pin:hover { color: var(--glass-text); }
 .glass-workspace .glass-tree .sidebar-session-pin[aria-pressed='true'] { color: var(--glass-accent); }
-@media (hover: none) { .glass-workspace .glass-tree .sidebar-session-pin { opacity: 1; } }
+@media (hover: none) { .glass-workspace .glass-tree .sidebar-session-pin { position: static; opacity: 1; background: none; } }
 
 /* A worktree session's branch and archive, in the session's own 28px line. */
-.glass-tree .sidebar-worktree { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.glass-tree .sidebar-worktree { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: 4px; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.glass-tree .sidebar-worktree .glass-git { min-width: 0; overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .glass-tree .sidebar-worktree-archive,
-.glass-tree .sidebar-worktree-keep { height: 20px; padding: 0 6px; border: 1px solid var(--glass-muted-small); border-radius: var(--r-sm); background: none; color: var(--glass-muted-small); font-size: var(--fs-2xs); cursor: pointer; }
+.glass-tree .sidebar-worktree-keep { flex-shrink: 0; height: 20px; padding: 0 6px; border: 1px solid var(--glass-muted-small); border-radius: var(--r-sm); background: none; color: var(--glass-muted-small); font-size: var(--fs-2xs); cursor: pointer; }
 .glass-tree .sidebar-worktree-archive:hover,
 .glass-tree .sidebar-worktree-keep:hover { background: var(--glass-selection); color: var(--glass-text); }
 /* While Archive waits for its answer: what else it deletes, on a line of its own under the row. */
 .glass-tree .sidebar-session-line:has(> .sidebar-worktree-note) { flex-wrap: wrap; }
 .glass-tree .sidebar-worktree-note { flex: 0 0 100%; margin: 0 0 4px; padding-left: 24px; color: var(--glass-muted-small); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
+
+/* The list's right edge, where it is resized (SidebarResizer.tsx). */
+.glass-sidebar-resizer { position: absolute; top: 12px; right: -7px; bottom: 12px; z-index: var(--z-sticky); width: 8px; cursor: col-resize; touch-action: none; }
+.glass-sidebar-resizer::after { position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: var(--r-full); background: transparent; content: ''; transition: background 160ms; }
+.glass-sidebar-resizer:is(:hover, :focus-visible, [data-dragging])::after { background: var(--glass-accent); }
+.glass-sidebar-resizer:focus-visible { outline: none; }
+@media (max-width: 1000px) { .glass-sidebar-resizer { display: none; } }

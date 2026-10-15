@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, Folder, FolderMinus, History as HistoryIcon, Pin, Plus } from 'lucide-react';
+import { ChevronDown, Folder, FolderMinus, History as HistoryIcon, Inbox, Pin, Plus } from 'lucide-react';
 import StatusGlyph from './StatusGlyph';
 import type { SessionState } from './sessionState';
 import { elapsed, projectSummary, rowTime } from './sidebarModel';
 import GitBadge from './GitBadge';
+import { projectAccentVar } from './projectIdentity';
 import type { ControlCenterProject, ControlCenterSession, GitStatus, WorktreeStatus } from './types';
 import './sidebar.css';
 
@@ -20,8 +21,11 @@ export function useNow(intervalMs: number): number {
 }
 
 /* One project in the projects list: a 28px row, then one 28px row per session
-   with its glyph, name, agent and time. New session is the + on the project
-   row; a collapsed project says what its sessions are doing. */
+   with its glyph, name, agent and time. The folder takes the project's colour,
+   so projects read apart from machines and from each other. The row's actions
+   (+, history, remove) float over its right end on hover or focus and take no
+   width otherwise, so the name keeps the row. A collapsed project says what
+   its sessions are doing. */
 /** What Archive deletes besides the folder's tracked files: git removes ignored files with the worktree. */
 function ignoredNote(worktree: WorktreeStatus): string {
   const count = worktree.ignored_count ?? 0;
@@ -64,30 +68,34 @@ export default function SidebarProject({ project, machine, machineLabel, collaps
     <details className="sidebar-project" open={!collapsed}
       onToggle={(event) => { const open = event.currentTarget.open; if (open === collapsed) onToggle(!open); }}>
       <summary data-nav-row data-project-key={`${machine} ${project.id}`}>
-        <ChevronDown size={13} aria-hidden="true" />
-        <Folder size={14} aria-hidden="true" />
+        <ChevronDown size={12} aria-hidden="true" />
+        {project.is_inbox
+          ? <Inbox size={14} className="sidebar-project-icon" aria-hidden="true" />
+          : <Folder size={14} className="sidebar-project-icon" style={{ color: projectAccentVar(project.id) }} aria-hidden="true" />}
         <strong>{project.name}</strong>
-        <GitBadge status={git} />
+        <GitBadge status={git} brief />
         <small className="sidebar-project-meta">{collapsed ? projectSummary(states) : project.sessions.length}</small>
-        <button type="button" className="sidebar-project-add" aria-label={`New session in ${project.name}`}
-          title={`New session in ${project.name}`} disabled={creating}
-          onClick={(event) => { event.preventDefault(); event.stopPropagation(); onNewSession(); }}>
-          <Plus size={14} />
-        </button>
-        {onHistory && (
-          <button type="button" className="glass-project-history" aria-label={`Session history for ${project.name}`}
-            title="Search this project's Claude and Codex transcripts"
-            onClick={(event) => { event.preventDefault(); event.stopPropagation(); onHistory(); }}>
-            <HistoryIcon size={14} />
+        <span className="sidebar-row-actions">
+          <button type="button" className="sidebar-project-add" aria-label={`New session in ${project.name}`}
+            title={`New session in ${project.name}`} disabled={creating}
+            onClick={(event) => { event.preventDefault(); event.stopPropagation(); onNewSession(); }}>
+            <Plus size={14} />
           </button>
-        )}
-        {onRemove && (
-          <button type="button" className="glass-project-remove" aria-label={`Remove ${project.name} from Dolphin`}
-            title="Remove from Dolphin (the folder stays)"
-            onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRemove(); }}>
-            <FolderMinus size={14} />
-          </button>
-        )}
+          {onHistory && (
+            <button type="button" className="glass-project-history" aria-label={`Session history for ${project.name}`}
+              title="Search this project's Claude and Codex transcripts"
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); onHistory(); }}>
+              <HistoryIcon size={14} />
+            </button>
+          )}
+          {onRemove && (
+            <button type="button" className="glass-project-remove" aria-label={`Remove ${project.name} from Dolphin`}
+              title="Remove from Dolphin (the folder stays)"
+              onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRemove(); }}>
+              <FolderMinus size={14} />
+            </button>
+          )}
+        </span>
       </summary>
       <div className="sidebar-sessions">
         {project.sessions.map((session, index) => {
@@ -111,7 +119,7 @@ export default function SidebarProject({ project, machine, machineLabel, collaps
             const canArchive = Boolean(onArchive) && worktree.merged && worktree.dirty === 0;
             return (
               <span className="sidebar-worktree">
-                <GitBadge status={worktree} />
+                <GitBadge status={worktree} brief />
                 {canArchive && (confirming === session.name ? (
                   <>
                     <button type="button" className="sidebar-worktree-archive"

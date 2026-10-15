@@ -8,23 +8,30 @@
   min-width: 0;
 }
 
-/* A machine's section: its heading, any trouble with its link, its projects. */
-.glass-machine + .glass-machine { margin-top: 6px; border-top: 1px solid var(--glass-edge); }
+/* A machine's section: its heading, any trouble with its link, its projects.
+   The heading is a band (the section's own surface, an edge, a laptop or
+   server icon with the connection dot on it, the name in sentence case), so a
+   machine never reads as one more project. Sections are apart by space. */
+.glass-machine + .glass-machine { margin-top: 10px; }
+.glass-machine + .glass-connect-machine { margin-top: 12px; }
 /* One sticky 28px row per machine: it stays in view while its projects scroll. */
 .glass-machine-head {
   position: sticky; top: 0; z-index: var(--z-sticky);
-  display: flex; align-items: center; gap: 2px; height: 28px; margin: 0 0 4px;
+  display: flex; align-items: center; gap: 1px; height: 28px; margin: 0 0 2px; padding-right: 2px;
+  border: 1px solid var(--glass-edge); border-radius: var(--r-md);
   background: var(--glass-solid);
 }
-.glass-workspace .glass-machine-toggle { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 6px; border-radius: var(--r-md); text-align: left; }
+.glass-workspace .glass-machine-toggle { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; height: 26px; padding: 0 6px; border-radius: var(--r-md); text-align: left; }
 .glass-workspace .glass-machine-toggle:hover { background: var(--glass-bubble); }
 .glass-machine-toggle > svg { flex-shrink: 0; color: var(--glass-muted); transition: transform 180ms var(--glass-ease); }
 .glass-machine-toggle[aria-expanded='false'] > svg { transform: rotate(-90deg); }
+.glass-machine-icon { position: relative; display: inline-grid; flex-shrink: 0; place-items: center; width: 16px; height: 16px; color: var(--glass-text); }
+.glass-machine-icon > .glass-machine-dot { position: absolute; right: -2px; bottom: -1px; box-shadow: 0 0 0 2px var(--glass-solid); }
 .glass-machine-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--glass-muted); }
 .glass-machine-dot[data-state='connected'] { background: var(--glass-success); }
 .glass-machine-dot:is([data-state='connecting'], [data-state='reconnecting']) { background: var(--glass-alert); }
 .glass-machine-dot:is([data-state='offline'], [data-state='failed']) { background: var(--danger); }
-.glass-machine-label { min-width: 0; overflow: hidden; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.glass-machine-label { flex: 0 1 auto; min-width: 0; overflow: hidden; font-size: var(--fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .glass-machine-toggle small { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--glass-muted-small); font-size: var(--fs-2xs); text-overflow: ellipsis; white-space: nowrap; }
 .glass-machine-toggle small:is([data-state='connecting'], [data-state='reconnecting']) { color: var(--glass-alert); }
 .glass-machine-toggle small:is([data-state='offline'], [data-state='failed']) { color: var(--danger); }

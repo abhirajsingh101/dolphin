@@ -21,4 +21,18 @@ html[data-platform="darwin"]:not([data-fullscreen]) .glass-health-top {
 html[data-platform]:not([data-platform="darwin"]) :is(.glass-top, .glass-health-top) {
   padding-right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) - 18px));
 }
+/* A fullscreen project window (glass.css) covers the page, and the window
+   controls sit over the page's top 44px: the traffic lights at the left on
+   macOS, the controls at the right elsewhere. In a window it therefore starts
+   below the top bar, which keeps them and stays the drag area. In macOS full
+   screen the system slides the traffic lights in over the top-left when the
+   pointer reaches the menu bar, so the window's header keeps that corner free. */
+html[data-platform]:not([data-fullscreen]) .glass-session-window[data-fullscreen='true'],
+html[data-platform]:not([data-platform="darwin"]) .glass-session-window[data-fullscreen='true'] {
+  inset: 44px 0 0;
+  height: auto;
+}
+html[data-platform="darwin"][data-fullscreen] .glass-session-window[data-fullscreen='true'] .glass-window-title {
+  padding-left: 76px;
+}
 

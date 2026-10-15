@@ -1,7 +1,8 @@
 .glass-workspace {
   --r-lg: 22px;
   --r-md: 12px;
-  --glass-sidebar-width: 216px;
+  /* 216px unless dragged (SidebarResizer.tsx); 200px at 1000px and under. */
+  --glass-sidebar-width: var(--glass-sidebar-user-width, 216px);
   position: relative;
   isolation: isolate;
   height: 100dvh;
@@ -867,25 +868,6 @@
 @keyframes glass-content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .glass-tree summary { border-radius: var(--r-md); transition: background 160ms, color 160ms; }
 .glass-tree summary:hover { background: var(--glass-bubble); }
-/* Remove sits where the count is and appears when the row is pointed at. */
-.glass-workspace .glass-project-remove {
-  display: none;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  place-items: center;
-  margin: -4px -4px -4px 0;
-  padding: 0;
-  color: var(--glass-muted);
-}
-.glass-workspace .glass-project-remove:hover { background: var(--glass-selection); color: var(--danger); }
-.glass-tree summary:hover .glass-project-remove,
-.glass-tree summary:focus-within .glass-project-remove { display: inline-grid; }
-.glass-tree summary:hover > small:has(+ .glass-project-remove),
-.glass-tree summary:focus-within > small:has(+ .glass-project-remove) { display: none; }
-@media (hover: none) {
-  .glass-workspace .glass-project-remove { display: inline-grid; }
-}
 .glass-tree summary > svg:first-child { transition: transform 180ms var(--glass-ease); }
 .glass-tree details:not([open]) summary > svg:first-child { transform: rotate(-90deg); }
 .glass-task-list details[open] > .glass-task-row { animation: glass-content-in 180ms var(--glass-ease) both; }
@@ -1192,10 +1174,10 @@
 /* Compact projects list (design contract §4, "Projects list rows"). The
    list's own chrome stays small so sessions get the height, and above
    850px it spans the workspace row beside the terminal. */
-.glass-sidebar-tabs { margin: 0 12px; }
-.glass-project-filter { margin: 0 6px 6px; padding: 5px 10px; }
+.glass-sidebar-tabs { margin: 0 4px; }
+.glass-project-filter { margin: 0 2px 6px; padding: 5px 10px; }
 @media (min-width: 851px) {
-  .glass-sidebar { grid-row: 2; padding: 6px 12px 8px; }
+  .glass-sidebar { position: relative; grid-row: 2; padding: 6px 8px 8px; }
 }
 
 /* Terminal notices (OSC 52 "Copied"): a quiet line in the corner, never focus. */
@@ -1345,30 +1327,11 @@
 .glass-task-message button { border: 0; background: none; color: inherit; cursor: pointer; }
 .glass-task-edit input { flex: 1; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--glass-edge); border-radius: var(--r-sm); background: var(--glass-bubble); color: var(--glass-text); font: inherit; }
 
-/* History sits beside + and Remove; it shows when the row is pointed at, like +. */
-.glass-workspace .glass-project-history {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  padding: 0;
-  border-radius: var(--r-sm);
-  color: var(--glass-muted);
-  opacity: 0;
-  transition: opacity var(--d1) var(--glass-ease);
-}
-.glass-tree summary:hover .glass-project-history,
-.glass-tree summary:focus-within .glass-project-history { opacity: 1; }
-.glass-workspace .glass-project-history:hover { background: var(--glass-bubble); color: var(--glass-text); }
-@media (hover: none) {
-  .glass-workspace .glass-project-history { opacity: 1; }
-}
-
 /* tmux sessions outside every project (workflow). Rows reuse .sidebar-session. */
-.glass-tree .glass-other-sessions > summary { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; color: var(--glass-muted); cursor: pointer; }
+.glass-tree .glass-other-sessions { margin-bottom: 0; }
+.glass-tree .glass-other-sessions > summary { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; color: var(--glass-muted-small); font-size: var(--fs-xs); cursor: pointer; }
 .glass-tree .glass-other-sessions > summary:hover { background: var(--glass-selection); color: var(--glass-text); }
-.glass-tree .glass-other-sessions > summary strong { flex: 1; min-width: 0; font-weight: 500; }
+.glass-tree .glass-other-sessions > summary strong { flex: 1; min-width: 0; font-weight: 400; }
 .glass-tree .glass-other-sessions > summary small { color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
 .glass-tree .glass-other-sessions .sidebar-session[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
 .glass-task-row { position: relative; }

@@ -156,7 +156,8 @@ jobs:
           app="$(ls -d "$PWD"/release/mac*/Dolphin.app)"
           codesign --verify --deep --strict --verbose=2 "$app"
           mkdir -p "$DOLPHIN_SHOTS"
-          DOLPHIN_DESKTOP_APP="$app/Contents/MacOS/Dolphin" node --test test/packaged.test.mjs
+          # The first run, then an update installing itself in place (no Developer ID).
+          DOLPHIN_DESKTOP_APP="$app/Contents/MacOS/Dolphin" node --test --test-concurrency=1 test/packaged.test.mjs test/mac-update.test.mjs
 
       - uses: actions/upload-artifact@v7
         if: always()

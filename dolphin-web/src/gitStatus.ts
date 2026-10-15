@@ -23,6 +23,22 @@ export function gitSummary(status: GitStatus | null | undefined): { text: string
   return { text: parts.join(' · '), label: words.join(', ') };
 }
 
+const DEFAULT_BRANCHES = new Set(['main', 'master']);
+
+/** The sidebar's shorter text: the branch only when it is not main or master,
+    then uncommitted changes and ahead/behind. Nothing for a clean default
+    branch, so the project name keeps the row. The full facts stay in `label`. */
+export function gitBrief(status: GitStatus | null | undefined): { text: string; label: string } | null {
+  const full = gitSummary(status);
+  if (!full || !status) return null;
+  const parts = [status.branch && DEFAULT_BRANCHES.has(status.branch) ? '' : (status.branch ?? status.head ?? 'no commits')];
+  if (status.dirty) parts.push(`±${status.dirty}`);
+  const arrows = [status.ahead ? `↑${status.ahead}` : '', status.behind ? `↓${status.behind}` : ''].filter(Boolean).join(' ');
+  if (arrows) parts.push(arrows);
+  const text = parts.filter(Boolean).join(' · ');
+  return text ? { text, label: full.label } : null;
+}
+
 const sameGit = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** A fresh answer, reusing the previous object for every status that did not change. */

@@ -10,6 +10,7 @@ export const WINDOW_KEYS = [
   'dolphin.glass.windows',
   'dolphin.glass.project-tabs',
   'dolphin.glass.sidebar-collapsed',
+  'dolphin.glass.sidebar-width',
   'dolphin.glass.fullscreen-project',
   'dolphin.glass.chat',
   'dolphin.glass.chat-tabs',

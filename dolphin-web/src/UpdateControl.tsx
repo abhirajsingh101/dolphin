@@ -11,7 +11,7 @@ import './updateControl.css';
 
 export type UpdateState = (
   | { state: 'idle' | 'checking' | 'current' }
-  | { state: 'available'; version: string; action: 'download'; url: string; notesUrl: string }
+  | { state: 'available'; version: string; action: 'download'; url: string; notesUrl: string; note?: string }
   | { state: 'downloading'; version: string; percent: number; notesUrl: string }
   | { state: 'ready'; version: string; action: 'restart'; notesUrl: string }
   | { state: 'error'; message: string }
@@ -161,7 +161,7 @@ export default function UpdateControl({ open, onOpenChange }: { open: AboutAncho
                 <ArrowDownToLine size={16} aria-hidden="true" />
                 <span>
                   <strong>Dolphin {update.version} is available</strong>
-                  <small>Download opens {installer()}.</small>
+                  <small>{update.note ? `${update.note} ` : ''}Download opens {installer()}.</small>
                 </span>
               </>
             )}
@@ -234,7 +234,7 @@ export function UpdateSettings() {
   const version = update.appVersion || '—';
   const [title, detail] =
     update.state === 'checking' ? ['Checking for updates…', ''] :
-    update.state === 'available' ? [`Dolphin ${update.version} is available`, `You have ${version}. Download opens ${installer()}.`] :
+    update.state === 'available' ? [`Dolphin ${update.version} is available`, `You have ${version}. ${update.note ? `${update.note} ` : ''}Download opens ${installer()}.`] :
     update.state === 'downloading' ? [`Downloading Dolphin ${update.version}`, `${update.percent}% · You can keep working.`] :
     update.state === 'ready' ? [`Dolphin ${update.version} is ready`, 'Restart to finish. Your terminal sessions keep running.'] :
     update.state === 'error' ? ['Could not check for updates', `${update.message}. Check your connection and try again.`] :

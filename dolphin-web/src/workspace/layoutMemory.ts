@@ -9,6 +9,7 @@ import { windowKey } from './windowScope';
 
 export const LAYOUT_KEYS = {
   sidebar: 'dolphin.glass.sidebar-collapsed',
+  sidebarWidth: 'dolphin.glass.sidebar-width',
   chat: 'dolphin.glass.chat',
   fullscreen: 'dolphin.glass.fullscreen-project',
 } as const;
@@ -20,6 +21,23 @@ function read(storage: Store | null, key: string): unknown {
 
 export function readSidebarCollapsed(storage: Store | null): boolean {
   return read(storage, LAYOUT_KEYS.sidebar) === true;
+}
+
+/* The projects list's width, dragged at its right edge. The 216px default is
+   what keeps an open terminal at 100 columns beside the chat at 1440×900
+   (design contract §4); wider is a drag away and remembered. Past 420px the
+   list stops gaining anything and only costs terminal columns. */
+export const SIDEBAR_DEFAULT_WIDTH = 216;
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 420;
+
+export function clampSidebarWidth(width: unknown): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)));
+}
+
+export function readSidebarWidth(storage: Store | null): number {
+  return clampSidebarWidth(read(storage, LAYOUT_KEYS.sidebarWidth));
 }
 
 export function readChatLayout(storage: Store | null): { width: number; collapsed: boolean } {

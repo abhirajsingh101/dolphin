@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { trustedInstallStart } from './agentInstall';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
@@ -8,7 +8,8 @@ import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
 import AgentSetupPrompt from './AgentSetupPrompt';
 import { currentPlatform, isMacPlatform, shortcutLabel } from './shortcutLabel';
-import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, writeLayout } from './workspace/layoutMemory';
+import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, readSidebarWidth, writeLayout } from './workspace/layoutMemory';
+import SidebarResizer from './workspace/SidebarResizer';
 import { windowKey } from './workspace/windowScope';
 import { parseIds, useSharedStorage } from './workspace/sharedStorage';
 import { CHAT_MIN_WIDTH, chatFits, clampChatWidth, foldShortcut } from './workspace/chatColumn';
@@ -55,6 +56,7 @@ import {
   PanelLeft,
   MessageSquare,
   PanelRightClose,
+  FolderClosed,
 } from 'lucide-react';
 import {
   api,
@@ -410,6 +412,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(storage));
   useEffect(() => writeLayout(storage, LAYOUT_KEYS.sidebar, sidebarCollapsed), [storage, sidebarCollapsed]);
+  const [sidebarWidth, setSidebarWidth] = useState(() => readSidebarWidth(storage));
+  const commitSidebarWidth = (width: number) => { setSidebarWidth(width); writeLayout(storage, LAYOUT_KEYS.sidebarWidth, width); };
   const sessionTargets: Target[] = projects.flatMap((p) =>
     p.sessions.map((s) => ({
       projectId: p.id,
@@ -1083,7 +1087,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     );
   }
   return (
-    <MotionConfig reducedMotion="user"><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed}>
+    <MotionConfig reducedMotion="user"><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} style={{ '--glass-sidebar-user-width': `${sidebarWidth}px` } as CSSProperties}>
       <CommandPalette
         items={palette.items}
         open={paletteOpen}
@@ -1398,7 +1402,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                   if (first) setFocusProject(`${link.id} ${first.id}`);
                   setShowEmpty((ids) => (ids.includes(link.id) ? ids : [...ids, link.id]));
                 }}>
-                  {hiddenEmpty} {hiddenEmpty === 1 ? 'project' : 'projects'} with no sessions
+                  <FolderClosed size={13} className="sidebar-project-icon" aria-hidden="true" />
+                  <span>{hiddenEmpty} {hiddenEmpty === 1 ? 'project' : 'projects'} with no sessions</span>
                 </button>
               ),
             ];
@@ -1482,6 +1487,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           )}
         </div>
         </div>}
+        {!narrow && !sidebarCollapsed && <SidebarResizer width={sidebarWidth} onChange={setSidebarWidth} onCommit={commitSidebarWidth} />}
       </motion.aside>
       <Group
         className="glass-center"

@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, SquareTerminal } from 'lucide-react';
 import StatusGlyph from './StatusGlyph';
 import type { SessionState } from './sessionState';
 import type { OtherSession } from './types';
@@ -20,7 +20,8 @@ export default function OtherSessions({ machine, sessions, stateOf, opening, onO
   return (
     <details className="glass-other-sessions">
       <summary>
-        <ChevronDown size={13} aria-hidden="true" />
+        <ChevronDown size={12} aria-hidden="true" />
+        <SquareTerminal size={13} className="sidebar-project-icon" aria-hidden="true" />
         <strong>Other sessions</strong>
         <small>{sessions.length}</small>
       </summary>

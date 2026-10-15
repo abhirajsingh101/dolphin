@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { CRASH_DIR, crashReporterOptions } from './crashReports';
 import { startAskpass } from './askpass';
 import { commandItem, CommandId, keyBindings, newWindowAccelerator } from './keymap';
-import { checkFromMenu, startUpdateChecks } from './updates';
+import { checkFromMenu, installUpdateOnQuit, startUpdateChecks } from './updates';
 import { connectLocal, connectSsh, Connection, fetchRemoteLog, helperDir, HostSpec, installKey, LinkState, setSshEnv, sshConfigHosts } from './hosts';
 import { contentSecurityPolicy } from './csp';
 import { openableExternally } from './links';
@@ -947,6 +947,8 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
   });
   app.on('will-quit', () => {
+    // A Mac update that is unpacked and waiting installs now (updates.ts).
+    installUpdateOnQuit();
     stopFeeds();
     for (const machine of machines.values()) machine.connection?.close();
     // Nothing in this process needs flushing: helpers and tmux are detached and

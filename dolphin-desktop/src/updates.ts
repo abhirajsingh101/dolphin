@@ -9,9 +9,12 @@
  *
  * - AppImage, and a signed Mac app: electron-updater downloads the update in
  *   the background; the user restarts when it suits them ("Restart to Update").
- * - Unsigned macOS, .deb and .rpm: the app offers the matching installer
- *   ("Download"). macOS refuses to install updates into an unsigned app, and a
- *   .deb or .rpm belongs to the system's package manager.
+ * - A Mac app without a Developer ID does the same through macUpdate.ts
+ *   (electron-updater installs only into a Developer ID signed one), unless
+ *   it cannot replace itself: run from the disk image or a translocated copy,
+ *   or in a folder it cannot write. That one offers the download, and says why.
+ * - .deb and .rpm: the app offers the matching installer ("Download"); they
+ *   belong to the system's package manager.
  *
  * The update channel (settings.ts: updateChannel) decides which releases count:
  * stable sees only full releases, beta sees GitHub prereleases too. Changing it
@@ -25,11 +28,12 @@
  * one when it starts (app/helper.py), on this computer and on SSH machines.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, net, powerMonitor, shell } from 'electron';
 import { canSelfUpdate, Channel, compareVersions, dropStagedUpdate, installerFor, linuxPackage, pickRelease, Release, StagedUpdater, tagVersion, updateFilesChannel } from './releases';
 import { onSettingsChange, readSettings } from './settings';
+import { appBundleOf, downloadVerified, inPlaceBlocker, macZipFor, parseMacFeed, startSwap, unpackUpdate } from './macUpdate';
 
 // The list, not /releases/latest: GitHub's "latest" never names a prerelease,
 // and the beta channel needs them (pickRelease chooses per channel).
@@ -42,7 +46,7 @@ const notesFor = (version: string) => `https://github.com/abhirajsingh101/dolphi
 
 type Found =
   | { state: 'idle' | 'checking' | 'current' }
-  | { state: 'available'; version: string; action: 'download'; url: string; notesUrl: string }
+  | { state: 'available'; version: string; action: 'download'; url: string; notesUrl: string; note?: string }
   | { state: 'downloading'; version: string; percent: number; notesUrl: string }
   | { state: 'ready'; version: string; action: 'restart'; notesUrl: string }
   | { state: 'error'; message: string };
@@ -75,6 +79,16 @@ function signedBuild(): boolean {
 function selfUpdating(): boolean {
   return canSelfUpdate({ platform: process.platform, packaged: app.isPackaged, appImage: Boolean(process.env.APPIMAGE), signed: signedBuild() });
 }
+
+/** A packaged Mac app without a Developer ID: its bundle, and why it cannot
+ *  replace itself (null when it can). Not a Mac app of that kind: null. */
+function unsignedMac(): { bundle: string; blocker: string | null } | null {
+  if (process.platform !== 'darwin' || !app.isPackaged || signedBuild()) return null;
+  const bundle = appBundleOf(process.execPath);
+  return bundle ? { bundle, blocker: inPlaceBlocker(bundle) } : null;
+}
+/** Where macUpdate.ts downloads and unpacks; nothing in it outlives the next launch. */
+const macUpdates = () => path.join(app.getPath('userData'), 'updates');
 
 const channel = (): Channel => readSettings(app.getPath('userData')).updateChannel;
 
@@ -110,6 +124,9 @@ async function startUpdater(): Promise<NonNullable<typeof updater>> {
 
 let pendingVersion = '';
 let downloadToken: { cancel(): void } | null = null;
+/** The Mac download in progress (macUpdate.ts), and the update it unpacked. */
+let macDownload: AbortController | null = null;
+let macStaged: { bundle: string; staged: string; dir: string } | null = null;
 const version = () => pendingVersion;
 
 let asked = false;
@@ -156,13 +173,70 @@ export async function checkForUpdates(manual = false): Promise<UpdateState> {
       downloadToken = result?.cancellationToken ?? null;
       return current;
     }
+    const mac = unsignedMac();
+    if (mac && !mac.blocker) {
+      publish({ state: 'downloading', version: pendingVersion, percent: 0, notesUrl });
+      void downloadForMac(mac.bundle, pendingVersion, notesUrl);
+      return current;
+    }
     const pkg = process.platform === 'darwin' ? 'dmg' : linuxPackage({ appImage: Boolean(process.env.APPIMAGE), hasDpkg: existsSync('/usr/bin/dpkg'), hasRpm: existsSync('/usr/bin/rpm') });
     const url = installerFor(release, process.platform, process.arch, pkg) ?? release.html_url ?? '';
-    publish({ state: 'available', version: pendingVersion, action: 'download', url, notesUrl });
+    publish({ state: 'available', version: pendingVersion, action: 'download', url, notesUrl, ...(mac?.blocker ? { note: mac.blocker } : {}) });
   } catch (error) {
     fail(error, asked);
   }
   return current;
+}
+
+/** A Mac without a Developer ID: download this Mac's zip from the release,
+ *  check it, unpack it, and offer Restart to Update (macUpdate.ts). */
+async function downloadForMac(bundle: string, version: string, notesUrl: string): Promise<void> {
+  macDownload?.abort();
+  const controller = new AbortController();
+  macDownload = controller;
+  const mine = () => macDownload === controller;
+  const dir = path.join(macUpdates(), version);
+  const base = process.env.DOLPHIN_DESKTOP_UPDATE_FILES || `${DOWNLOADS}/desktop-v${version}`;
+  const fetch = (url: string, init?: { signal?: AbortSignal }) => net.fetch(url, { ...init, headers: { 'User-Agent': `Dolphin/${app.getVersion()}` } });
+  try {
+    const feed = await fetch(`${base}/${updateFilesChannel(version)}-mac.yml`, { signal: controller.signal });
+    if (!feed.ok) throw new Error(`the update feed answered ${feed.status}`);
+    const file = macZipFor(parseMacFeed(await feed.text()), process.arch);
+    if (!file) throw new Error(`the release has no update for this Mac (${process.arch})`);
+    const zip = path.join(dir, path.basename(file.url));
+    await downloadVerified({ ...file, url: `${base}/${file.url}` }, zip, {
+      fetch, signal: controller.signal,
+      onProgress: (percent) => { if (mine()) publish({ state: 'downloading', version, percent, notesUrl }); },
+    });
+    const staged = await unpackUpdate(zip, path.join(dir, 'app'), version);
+    rmSync(zip, { force: true });
+    if (!mine()) return;
+    macStaged = { bundle, staged, dir };
+    publish({ state: 'ready', version, action: 'restart', notesUrl });
+    // Tests only: press "Restart to Update" as soon as it appears.
+    if (process.env.DOLPHIN_DESKTOP_UPDATE_RESTART_AT_ONCE) setTimeout(() => void apply(), 2000);
+  } catch (error) {
+    if (!mine()) return; // abandoned: a channel switch, or a newer download
+    rmSync(dir, { recursive: true, force: true });
+    fail(error, asked);
+  } finally {
+    if (mine()) macDownload = null;
+  }
+}
+
+/** Swap in the unpacked Mac update once Dolphin has quit; `relaunch` opens it again. */
+function installMac(relaunch: boolean): boolean {
+  const staged = macStaged;
+  if (!staged) return false;
+  macStaged = null;
+  startSwap({ dir: staged.dir, pid: process.pid, current: staged.bundle, staged: staged.staged, relaunch });
+  return true;
+}
+
+/** Quitting with an update unpacked installs it, as electron-updater does
+ *  (main.ts calls this as Dolphin quits). */
+export function installUpdateOnQuit(): void {
+  installMac(false);
 }
 
 /** Waking up or coming back to the window: check, unless a check is recent. */
@@ -173,6 +247,11 @@ function checkIfStale(): void {
 /** The button: download the installer, or restart into the downloaded update. */
 async function apply(): Promise<void> {
   if (current.state === 'available') await shell.openExternal(current.url);
+  if (current.state === 'ready' && macStaged) {
+    installMac(true);
+    app.quit();
+    return;
+  }
   if (current.state === 'ready' && updater) updater.quitAndInstall(true, true); // silent install, then reopen Dolphin
 }
 
@@ -214,6 +293,10 @@ function noteVersion(): void {
 async function leavePrerelease(now: Channel): Promise<void> {
   if (now !== 'stable' || !pendingVersion.includes('-')) return;
   if (found.state !== 'downloading' && found.state !== 'ready') return;
+  macDownload?.abort();
+  macDownload = null;
+  if (macStaged) rmSync(macStaged.dir, { recursive: true, force: true });
+  macStaged = null;
   if (updater) {
     try {
       await dropStagedUpdate(updater as unknown as StagedUpdater, downloadToken ?? undefined);
@@ -229,6 +312,8 @@ async function leavePrerelease(now: Channel): Promise<void> {
 export function startUpdateChecks(): void {
   publish(found);
   noteVersion();
+  // An update unpacked last time was installed on quit, or abandoned.
+  if (process.platform === 'darwin') rmSync(macUpdates(), { recursive: true, force: true });
   ipcMain.on('dolphin:update-state', (event) => { event.returnValue = current; });
   ipcMain.handle('dolphin:update-apply', () => apply());
   ipcMain.handle('dolphin:update-check', () => checkForUpdates(true));
