@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type SetStateAction } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type SetStateAction } from 'react';
+import { AnimatePresence, LayoutGroup, motion, useIsPresent } from 'motion/react';
 import { Plus, RotateCcw, X } from 'lucide-react';
 import { windowKey } from './workspace/windowScope';
+import { indicatorTransition, presence, spring, tabVariants } from './motion/presets';
 
 type Tab = { id: string; title?: string };
 const STORAGE = 'dolphin.glass.chat-tabs';
@@ -64,29 +66,47 @@ export function useTabRef<T>(id: string, initial: T) {
   return refs.current[id] ?? (refs.current[id] = { current: initial });
 }
 
+/* A tab's place in the strip. It fades in when added and out when closed,
+   and its neighbours glide into place (position only, so titles never
+   stretch). While it leaves it is inert, so arrow keys and screen readers
+   see only the tabs that remain. Motion strips HTML drag handlers from its
+   own elements, so the draggable tab inside stays a plain element. */
+function TabSlot({ children }: { children: ReactNode }) {
+  const present = useIsPresent();
+  return <motion.div className="glass-chat-tab-slot" layout="position" transition={{ layout: spring.control }}
+    variants={tabVariants} {...presence} inert={!present || undefined} aria-hidden={!present || undefined}>
+    {children}
+  </motion.div>;
+}
+
 export default function GlassChatTabs({ controller, title, running, unread }: {
   controller: ReturnType<typeof useChatTabs>; title: (id: string) => string; running: (id: string) => boolean; unread: (id: string) => boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState('');
   const [name, setName] = useState('');
+  // Scopes the indicator's layoutId, so two strips never trade indicators.
+  const strip = useId();
   useEffect(() => { root.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [controller.active]);
-  return <div className="glass-chat-tabs" ref={root}>
-    <div role="tablist" aria-label="Chat tabs" onKeyDown={event => {
+  return <div className="glass-chat-tabs" ref={root}><LayoutGroup id={strip}>
+    <motion.div layoutScroll role="tablist" aria-label="Chat tabs" onKeyDown={event => {
       if ((event.target as HTMLElement).tagName === 'INPUT') return;
       const index = controller.tabs.findIndex(t => t.id === controller.active);
       const next = event.key === 'ArrowRight' ? (index + 1) % controller.tabs.length : event.key === 'ArrowLeft' ? (index - 1 + controller.tabs.length) % controller.tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? controller.tabs.length - 1 : -1;
-      if (next >= 0) { event.preventDefault(); controller.select(controller.tabs[next].id); root.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus(); }
+      if (next >= 0) { event.preventDefault(); controller.select(controller.tabs[next].id); root.current?.querySelectorAll<HTMLElement>('.glass-chat-tab-slot:not([inert]) [role="tab"]')[next]?.focus(); }
       if (event.key === 'F2') { event.preventDefault(); setEditing(controller.active); setName(title(controller.active)); }
       if (event.key === 'Delete') { event.preventDefault(); controller.close(controller.active); }
     }}>
-      {controller.tabs.map(tab => <div className="glass-chat-tab" key={tab.id} data-selected={tab.id === controller.active} draggable={editing !== tab.id} onDragStart={event => { event.dataTransfer.setData('application/x-dolphin-chat-tab', tab.id); }} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-dolphin-chat-tab')) event.preventDefault(); }} onDrop={event => { const from = event.dataTransfer.getData('application/x-dolphin-chat-tab'); if (from) { event.preventDefault(); controller.move(from, tab.id); } }}>
+      <AnimatePresence initial={false} mode="popLayout">
+      {controller.tabs.map(tab => <TabSlot key={tab.id}><div className="glass-chat-tab" data-selected={tab.id === controller.active} draggable={editing !== tab.id} onDragStart={event => { event.dataTransfer.setData('application/x-dolphin-chat-tab', tab.id); }} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-dolphin-chat-tab')) event.preventDefault(); }} onDrop={event => { const from = event.dataTransfer.getData('application/x-dolphin-chat-tab'); if (from) { event.preventDefault(); controller.move(from, tab.id); } }}>
         {editing === tab.id ? <input aria-label="Tab name" autoFocus maxLength={80} value={name} onChange={e => setName(e.target.value)} onBlur={() => { controller.rename(tab.id, name); setEditing(''); }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(''); }} /> : <button role="tab" aria-label={title(tab.id)} aria-description={running(tab.id) ? 'Working' : unread(tab.id) ? 'New reply' : undefined} aria-selected={tab.id === controller.active} aria-controls="dolphin-chat-panel" tabIndex={tab.id === controller.active ? 0 : -1} title={`${title(tab.id)} · Double-click to rename`} onDoubleClick={() => { setEditing(tab.id); setName(title(tab.id)); }} onClick={() => controller.select(tab.id)}>
           {running(tab.id) && <i className="glass-tab-working" aria-label="Working" />}<span>{title(tab.id)}</span>{unread(tab.id) && <i className="glass-tab-unread" aria-label="New reply" />}
         </button>}
         <button aria-label={`Close tab ${title(tab.id)}`} title="Close tab — conversation and work are kept" onClick={() => controller.close(tab.id)}><X size={12} /></button>
-      </div>)}
-    </div>
+        {tab.id === controller.active && <motion.span className="glass-tab-indicator" layoutId="chat-tab-indicator" transition={indicatorTransition} aria-hidden="true" />}
+      </div></TabSlot>)}
+      </AnimatePresence>
+    </motion.div></LayoutGroup>
     <button aria-label="New chat tab" title="New chat tab" onClick={controller.add}><Plus size={15} /></button>
     <button aria-label="Reopen closed chat tab" title="Reopen closed chat tab" disabled={!controller.closed.length} onClick={() => controller.reopen()}><RotateCcw size={14} /></button>
   </div>;

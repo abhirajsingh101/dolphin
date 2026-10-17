@@ -242,6 +242,24 @@ body {
   overflow: hidden;
 }
 
+/* While a route's code loads (main.tsx's Suspense fallback): one quiet line,
+   centred, on the backdrop the route is about to paint. It used to be bare
+   text in the corner over the legacy beige, before the glass came in. */
+:root[data-surface='glass'] body {
+  background: var(--glass-bg);
+}
+.app-splash {
+  display: grid;
+  height: 100%;
+  margin: 0;
+  place-content: center;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+:root[data-surface='glass'] .app-splash {
+  color: var(--glass-muted-small);
+}
+
 button,
 input {
   font: inherit;
@@ -1720,6 +1738,39 @@ button:disabled {
   color: var(--term-text);
 }
 
+/* The terminal package sets its session and tab labels at 8-10px, under the
+   --fs-2xs floor (docs/design-contract.md §5). Both sit in boxes of fixed
+   height (a 34-38px launcher, a 30px tab), so they take 11px here with line
+   heights that fit two lines in those boxes: no row of the cockpit's 40-row
+   floor is spent on it (e2e/cockpit-density.spec.ts). */
+.terminal-session-launcher-copy strong,
+.terminal-pane-tab-copy strong {
+  font-size: var(--fs-2xs);
+  line-height: 14px;
+}
+
+.terminal-session-launcher-copy small,
+.terminal-pane-tab-copy small {
+  margin-top: 0;
+  font-size: var(--fs-2xs);
+  line-height: 13px;
+}
+
+/* 11px mono is a tenth wider: the tab grows by as much, so a session name
+   that fitted at 10px still fits. */
+.terminal-pane-tab {
+  max-width: 220px;
+  flex-basis: 196px;
+}
+
+.terminal-session-open-mark {
+  padding: 2px 6px;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  line-height: 14px;
+}
+
 /* Above 1180px the packaged terminal lays its session dock over a lone pane's
    toolbar, so one terminal costs one row of chrome. That puts two lists on one
    line — the project's tmux sessions and the open tabs — and the session list
@@ -2865,6 +2916,13 @@ button:disabled {
 
 .table-meter.hot i {
   background: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+/* The same thresholds as the Root Disk card above the table (85 warning,
+   95 critical), so one disk is not amber in the card and green in the row.
+   Amber needs more than the green's 28% to read as amber over the blue glass. */
+.table-meter.warm i {
+  background: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
 .table-meter:not(i) {

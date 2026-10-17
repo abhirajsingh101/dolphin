@@ -1,0 +1,367 @@
+/* Glass surfaces: one material, one set of buttons and one field for
+   everything that floats over the glass workspace (docs/design-contract.md,
+   "Glass surfaces", 2026-10-17).
+
+   Settings, the bell's list, the menus and the About panel were drawn as glass
+   from the start and use the --glass-float-* tokens directly. The dialogs that
+   predate the glass (the command palette, the project picker, New Session,
+   Connect to a Machine, Remove Project, and the workflow panels: Ports, Usage,
+   History, Changes, Add Projects) are written against the plain tokens, and
+   used to render as opaque white or warm-grey boxes here. Inside the workspace
+   their scrim now points those plain tokens at the glass ones, so their own
+   sheets keep working unchanged outside it; the material, buttons and fields
+   below are the only glass paint they get.
+
+   Every selector starts at .glass-workspace: the dialogs' own sheets load
+   later (lazy chunks) and lose to the extra class rather than to load order. */
+
+/* --- Plain tokens, pointed at the glass ------------------------------------ */
+
+.glass-workspace :is(.cp-scrim, .picker-scrim, .new-session-scrim, .workflow-scrim) {
+  --surface: var(--glass-bubble);
+  --surface-2: var(--glass-bubble);
+  --surface-3: var(--glass-selection);
+  --border: var(--glass-edge);
+  --border-interactive: var(--glass-edge);
+  --text: var(--glass-text);
+  /* Secondary copy in these dialogs is 12-13px: the darker muted step. */
+  --text-2: var(--glass-muted-small);
+  --text-3: var(--glass-muted-small);
+  --accent: var(--glass-accent);
+  --accent-hover: var(--glass-accent-hover);
+  --accent-soft: var(--glass-selection);
+  --ok-soft: var(--glass-add);
+  --danger-soft: var(--glass-del);
+  --warn: var(--glass-alert);
+  --warn-soft: var(--glass-warn-tint);
+  --sh-1: none;
+  --sh-2: none;
+  --sh-3: none;
+  background: var(--glass-scrim);
+  backdrop-filter: var(--glass-scrim-blur);
+}
+
+/* --- The material ---------------------------------------------------------- */
+
+.glass-workspace :is(.cp-panel, .picker-panel, .new-session-panel, .workflow-panel) {
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-xl);
+  background: var(--glass-float-fill);
+  color: var(--glass-text);
+  box-shadow: var(--glass-float-shadow);
+  backdrop-filter: var(--glass-float-blur);
+}
+/* The large ones open over the terminal: all but opaque (tokens.css). */
+.glass-workspace :is(.picker-panel, .workflow-panel) {
+  background: var(--glass-float-fill-solid);
+}
+
+/* One header: the title at --fs-md/600, an optional hint, icon actions. */
+.glass-workspace :is(.picker-header, .new-session-header, .workflow-header) {
+  min-height: 48px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+}
+.glass-workspace :is(.picker-header, .new-session-header, .workflow-header) h2 {
+  color: var(--glass-text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  text-wrap: balance;
+}
+.glass-workspace :is(.picker-footer, .workflow-footer, .new-session-footer) {
+  background: transparent;
+}
+
+/* --- Buttons ----------------------------------------------------------------
+   Text buttons are 28px pills: primary (filled accent), secondary (bubble and
+   edge), ghost (text only) and danger. Icon buttons are 28px squares on
+   --r-md. The glass primary pills that already existed (.machine-action in
+   the menus and workflow panels, .update-primary in About) are the same
+   button and are defined here, once. */
+
+.glass-workspace :is(.dt-btn, .machine-action, .update-primary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  height: auto;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.glass-workspace :is(.dt-btn--primary, .machine-action, .update-primary) {
+  background: var(--glass-accent-strong);
+  color: var(--accent-on);
+  font-weight: var(--fw-bold);
+  box-shadow: inset 0 1px var(--glass-sheen);
+}
+.glass-workspace :is(.dt-btn--primary, .machine-action, .update-primary):hover:not(:disabled) {
+  background: var(--glass-accent-hover);
+}
+.glass-workspace .dt-btn--secondary {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+}
+.glass-workspace .dt-btn--secondary:hover:not(:disabled) {
+  border-color: var(--glass-edge);
+  background: var(--glass-selection);
+}
+.glass-workspace .dt-btn--ghost {
+  background: transparent;
+  color: var(--glass-muted);
+}
+.glass-workspace .dt-btn--ghost:hover:not(:disabled) {
+  background: var(--glass-selection);
+  color: var(--glass-text);
+}
+.glass-workspace .dt-btn--danger {
+  background: var(--danger);
+  color: var(--danger-on);
+  font-weight: var(--fw-bold);
+}
+.glass-workspace .dt-btn--danger:hover:not(:disabled) {
+  background: var(--danger-hover);
+}
+.glass-workspace :is(.dt-btn, .machine-action, .update-primary):disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.glass-workspace :is(.dt-btn--icon, :is(.picker-header, .new-session-header, .workflow-header) .dt-btn) {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--r-md);
+}
+
+/* Native checkboxes and radios take the glass accent. */
+.glass-workspace :is(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--glass-accent);
+}
+
+/* --- Fields ------------------------------------------------------------------
+   One field: 32px, bubble fill, edge border, --r-md; focus is the accent edge
+   and a selection-coloured ring. */
+
+.glass-workspace :is(.dt-input, .workflow-search, .new-session-branch input, .diff-comment-row textarea, .glass-task-edit input) {
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+}
+.glass-workspace :is(.dt-input, .workflow-search, .new-session-branch input) {
+  min-height: 32px;
+}
+.glass-workspace .new-session-branch input {
+  font-family: var(--font-mono);
+}
+.glass-workspace :is(.dt-input, .workflow-search, .new-session-branch input, .diff-comment-row textarea, .glass-task-edit input)::placeholder {
+  color: var(--glass-muted-small);
+}
+.glass-workspace .dt-input:focus-visible,
+.glass-workspace .workflow-search:focus-visible,
+.glass-workspace .new-session-branch input:focus-visible,
+.glass-workspace .diff-comment-row textarea:focus-visible,
+.glass-workspace .glass-task-edit input:focus-visible {
+  outline: none;
+  border-color: var(--glass-accent);
+  box-shadow: 0 0 0 3px var(--glass-selection);
+}
+.glass-workspace .connect-machine-search {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+}
+.glass-workspace .connect-machine-search:focus-within {
+  border-color: var(--glass-accent);
+  box-shadow: 0 0 0 3px var(--glass-selection);
+}
+
+/* --- Command palette ---------------------------------------------------------
+   Raycast density: a borderless 40px query, 32px rows. */
+
+.glass-workspace .cp-panel {
+  width: min(600px, calc(100vw - 32px));
+}
+.glass-workspace .cp-field {
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--glass-edge);
+}
+.glass-workspace .cp-field .dt-input {
+  height: 40px;
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+}
+/* The query is the whole panel's subject: its edge shows focus (no ring). */
+.glass-workspace .cp-field .dt-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.glass-workspace .cp-field:focus-within {
+  border-bottom-color: var(--glass-accent);
+}
+.glass-workspace .cp-results {
+  padding: 0 6px 6px;
+}
+.glass-workspace .cp-heading {
+  margin: 0;
+  padding: 10px 10px 4px;
+  color: var(--glass-muted-small);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.glass-workspace .cp-row {
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  color: var(--glass-text);
+  font-size: var(--fs-sm);
+}
+.glass-workspace .cp-row.is-active {
+  background: var(--glass-selection);
+  color: var(--glass-text);
+}
+.glass-workspace .cp-row em {
+  color: var(--glass-muted-small);
+  font-size: var(--fs-xs);
+}
+.glass-workspace :is(.cp-none, .cp-foot) {
+  color: var(--glass-muted-small);
+}
+.glass-workspace .cp-none {
+  padding: var(--sp-6) var(--sp-4);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+.glass-workspace .cp-foot {
+  padding: var(--sp-2) var(--sp-4);
+  border-top-color: var(--glass-edge);
+}
+
+/* --- Keys ------------------------------------------------------------------ */
+
+.glass-workspace .dt-kbd {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  color: var(--glass-muted-small);
+}
+
+/* --- Rows and groups inside the dialogs ------------------------------------ */
+
+/* Rows, and a diff's files, are cards as in Settings: their own fill and a
+   quiet hairline, so they separate from the panel in both themes. */
+.glass-workspace .workflow-list > li {
+  border: 1px solid var(--glass-card-edge);
+  background: var(--glass-card-fill);
+}
+.glass-workspace .diff-file {
+  border-color: var(--glass-card-edge);
+  background: var(--glass-card-fill);
+}
+.glass-workspace :is(.connect-machine-group, .machine-group) {
+  color: var(--glass-muted-small);
+  font-weight: var(--fw-bold);
+}
+.glass-workspace .connect-machine-row[aria-selected='true'] {
+  border-color: var(--glass-edge);
+  background: var(--glass-selection);
+}
+.glass-workspace .connect-machine-row > svg:first-child {
+  color: var(--glass-accent);
+}
+.glass-workspace .remove-project-icon {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  color: var(--danger);
+}
+.glass-workspace .new-session-option:hover:not(:disabled),
+.glass-workspace .new-session-option:focus-visible {
+  border-color: var(--glass-edge);
+  background: var(--glass-selection);
+}
+.glass-workspace .new-session-option:focus-visible {
+  outline: 2px solid var(--glass-accent);
+  outline-offset: 1px;
+}
+/* Each choice's icon on a small glass tile. */
+.glass-workspace .new-session-option {
+  align-items: center;
+}
+.glass-workspace .new-session-option > svg {
+  box-sizing: content-box;
+  width: 16px;
+  height: 16px;
+  margin-top: 0;
+  padding: 8px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-md);
+  background: var(--glass-bubble);
+  color: var(--glass-accent);
+}
+.glass-workspace :is(.new-session-command, .new-session-number) {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+}
+.glass-workspace .picker-row-missing {
+  border-radius: var(--r-full);
+  padding: 0 var(--sp-2);
+}
+/* The diff is code; the comment form under a line is not. */
+.glass-workspace .diff-comment-row td {
+  font-family: var(--font-sans);
+}
+.glass-workspace .diff-act button {
+  border-radius: var(--r-sm);
+  color: var(--glass-muted);
+}
+.glass-workspace .diff-comment {
+  border-left-color: var(--glass-accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--glass-selection);
+}
+
+/* --- Without blur, or asked for less transparency, or in forced colours ---- */
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-workspace :is(.cp-panel, .picker-panel, .new-session-panel, .workflow-panel, .settings-panel,
+    .glass-notification-panel, .glass-conversation-dialog, .glass-window-menu, .glass-glance, .machine-menu, .update-panel),
+  :is(.glass-notification-toasts li, .update-toast) {
+    background: var(--glass-solid);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-workspace :is(.cp-panel, .picker-panel, .new-session-panel, .workflow-panel, .settings-panel,
+    .glass-notification-panel, .glass-conversation-dialog, .glass-window-menu, .glass-glance, .machine-menu, .update-panel),
+  :is(.glass-notification-toasts li, .update-toast) {
+    background: var(--glass-solid);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .glass-workspace :is(.cp-scrim, .picker-scrim, .new-session-scrim, .workflow-scrim, .settings-scrim) {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-workspace :is(.cp-panel, .picker-panel, .new-session-panel, .workflow-panel, .settings-panel,
+    .glass-notification-panel, .glass-conversation-dialog, .glass-window-menu, .glass-glance, .machine-menu, .update-panel),
+  :is(.glass-notification-toasts li, .update-toast) {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .glass-workspace :is(.dt-btn, .machine-action, .update-primary) {
+    border-color: ButtonText;
+  }
+}

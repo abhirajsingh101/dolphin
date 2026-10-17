@@ -35,7 +35,7 @@ DIRECTION_REVISION = "e2c8b4195a7d"
 PRE_PLANNING_REVISION = "f6b4c8d21e30"
 # The last revision that still had Learn/Active automation and learned planning.
 PRE_REMOVAL_REVISION = "9324cf29e61e"
-HEAD_REVISION = "c41d7e9a2b58"
+HEAD_REVISION = "92e8549e6f2b"
 FLEET_TABLES = {
     "fleet_missions",
     "fleet_tasks",
@@ -68,6 +68,8 @@ SIGNAL_TABLES = {"project_links", "chat_rooms", "signals", "signal_seen_messages
 NOTIFICATION_TABLES = {"notifications"}
 # Session links (c41d7e9a2b58): new, empty, not domain data.
 SESSION_LINK_TABLES = {"session_links"}
+# Agent exchanges (92e8549e6f2b): new, empty, not domain data.
+EXCHANGE_TABLES = {"agent_exchanges", "transcript_offsets"}
 
 EXPECTED_CHIEF_COLUMNS = {
     "chief_threads": {
@@ -614,6 +616,7 @@ def _domain_rows(path):
                 | SIGNAL_TABLES
                 | NOTIFICATION_TABLES
                 | SESSION_LINK_TABLES
+                | EXCHANGE_TABLES
             )
         ]
         snapshot = {}

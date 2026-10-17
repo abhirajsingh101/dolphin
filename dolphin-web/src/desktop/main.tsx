@@ -7,13 +7,13 @@ import ReactDOM from 'react-dom/client';
 import DictationProvider from '../DictationProvider';
 import DolphinIcon from '../DolphinIcon';
 import ErrorBoundary from '../ErrorBoundary';
-import { applyTheme, readStoredTheme } from '../theme';
+import { applyTheme, readStoredTheme, SETTINGS_EVENT, THEME_STORAGE_KEY, type ThemeChoice } from '../theme';
 import { useMachineLinks } from '../machines';
 import { healthTarget } from './healthTarget';
 import { browserStorage } from '../workspace/layoutMemory';
 import { startWindow } from '../workspace/windowScope';
 import '../glass.css';
-import './glassHealth.css';
+import '../glassHealth.css';
 import './glassDialogs.css';
 import './desktop.css';
 import './motion.css';
@@ -71,8 +71,14 @@ startWindow(browserStorage());
 
 // The window has no separate title bar; desktop.css lays each page's header out
 // around this platform's window controls and makes it the drag area.
-const bridge = (window as { dolphinDesktop?: { platform?: string; onFullscreen?: (listener: (on: boolean) => void) => void } }).dolphinDesktop;
+const bridge = (window as { dolphinDesktop?: { platform?: string; onFullscreen?: (listener: (on: boolean) => void) => void; setTheme?: (choice: ThemeChoice) => void } }).dolphinDesktop;
 if (bridge?.platform) document.documentElement.dataset.platform = bridge.platform;
+// The theme choice also sets the app's (dolphin-desktop/src/theme.ts), so the
+// launch, Connect and SSH pages and the window controls match this page.
+const tellTheme = () => bridge?.setTheme?.(readStoredTheme());
+tellTheme();
+window.addEventListener(SETTINGS_EVENT, tellTheme);
+window.addEventListener('storage', (event) => { if (event.key === null || event.key === THEME_STORAGE_KEY) tellTheme(); });
 bridge?.onFullscreen?.((on) => {
   if (on) document.documentElement.dataset.fullscreen = '';
   else delete document.documentElement.dataset.fullscreen;

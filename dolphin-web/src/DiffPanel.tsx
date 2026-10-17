@@ -4,6 +4,7 @@ import { useApi } from './apiContext';
 import { parseDiff, reviewPrompt, type DiffFile, type DiffLine, type ReviewComment } from './diffModel';
 import type { SessionDiff } from './types';
 import { panelError, useModalPanel } from './useModalPanel';
+import { useDialogParts } from './motion/dialogParts';
 import './workflow.css';
 
 /* What a session changed against its base, with a comment box on every line.
@@ -43,6 +44,7 @@ export default function DiffPanel({ projectId, sessionName, hasAgent, onClose }:
   }, [projectId, sessionName]);
   // An open comment box answers Escape itself (it cancels the comment).
   useModalPanel(panel, onClose, { holdEscape: () => editing !== null });
+  const { Scrim, Panel } = useDialogParts();
   const files = useMemo(() => (diff ? parseDiff(diff.diff) : []), [diff]);
   const keyOf = (file: DiffFile, line: DiffLine) => `${file.path}:${line.oldLine ?? ''}:${line.newLine ?? ''}`;
   const add = (file: DiffFile, line: DiffLine, text: string) => {
@@ -67,8 +69,8 @@ export default function DiffPanel({ projectId, sessionName, hasAgent, onClose }:
   };
   const count = comments.length;
   return (
-    <div className="workflow-scrim" role="presentation" onClick={onClose}>
-      <div
+    <Scrim className="workflow-scrim" role="presentation" onClick={onClose}>
+      <Panel
         ref={panel}
         tabIndex={-1}
         className="workflow-panel workflow-panel--wide"
@@ -146,7 +148,7 @@ export default function DiffPanel({ projectId, sessionName, hasAgent, onClose }:
             <Send size={13} aria-hidden="true" /> {`Send ${count} ${count === 1 ? 'comment' : 'comments'} to ${sessionName}`}
           </button>
         </footer>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

@@ -104,6 +104,15 @@ def codex_file(path: Path) -> tuple[list[Entry], dict | None]:
     return entries, limits
 
 
+def agent_home(home: Path, agent: str) -> Path:
+    """Where an agent keeps its data: ~/.claude and ~/.codex, or the folder
+    CLAUDE_CONFIG_DIR / CODEX_HOME names for this user."""
+    variable = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
+    if os.environ.get(variable) and home == Path.home():
+        return Path(os.environ[variable]).expanduser()
+    return home / (".claude" if agent == "claude" else ".codex")
+
+
 def recent_files(base: Path, suffix: str, since: datetime, prefix: str = "") -> list[Path]:
     """Regular files under base changed since `since`; symlinks (file or directory) and
     non-regular files (FIFOs) are never followed or opened."""
@@ -187,7 +196,7 @@ def collect(home: Path, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     since = now - WEEK
     scanned: set[str] = set()
-    claude_base = home / ".claude" / "projects"
+    claude_base = agent_home(home, "claude") / "projects"
     seen: set[tuple] = set()
     claude: list[Entry] = []
     for path in recent_files(claude_base, ".jsonl", since):
@@ -199,7 +208,7 @@ def collect(home: Path, now: datetime | None = None) -> dict:
                     continue
                 seen.add(entry.key)
             claude.append(entry)
-    codex_base = home / ".codex" / "sessions"
+    codex_base = agent_home(home, "codex") / "sessions"
     codex: list[Entry] = []
     latest = None
     for path in recent_files(codex_base, ".jsonl", since, "rollout-"):

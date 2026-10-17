@@ -12,6 +12,7 @@ export const LAYOUT_KEYS = {
   sidebarWidth: 'dolphin.glass.sidebar-width',
   chat: 'dolphin.glass.chat',
   fullscreen: 'dolphin.glass.fullscreen-project',
+  windowHeights: 'dolphin.glass.window-heights',
 } as const;
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -49,6 +50,28 @@ export function readChatLayout(storage: Store | null): { width: number; collapse
 export function readFullscreenProject(storage: Store | null): string | null {
   const saved = read(storage, LAYOUT_KEYS.fullscreen);
   return typeof saved === 'string' && saved ? saved : null;
+}
+
+/* A stacked session window's height, set at its bottom edge, by project. A
+   window with none is 45dvh, the stack's default. Only nonsense is refused on
+   the way back in: the live minimum and maximum depend on the viewport, and
+   the window's own CSS min-height holds the first. */
+export const WINDOW_HEIGHT_LIMIT = 20000;
+
+export function clampWindowHeight(height: unknown): number | null {
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) return null;
+  return Math.round(Math.min(WINDOW_HEIGHT_LIMIT, height));
+}
+
+export function readWindowHeights(storage: Store | null): Record<string, number> {
+  const saved = read(storage, LAYOUT_KEYS.windowHeights);
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+  const heights: Record<string, number> = {};
+  for (const [project, value] of Object.entries(saved as Record<string, unknown>)) {
+    const height = clampWindowHeight(value);
+    if (project && height !== null) heights[project] = height;
+  }
+  return heights;
 }
 
 export function writeLayout(storage: Store | null, key: string, value: unknown): void {

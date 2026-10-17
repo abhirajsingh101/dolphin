@@ -536,6 +536,8 @@ class TmuxSessionResponse(BaseModel):
     has_recent_activity: bool = False
     rename_allowed: bool = True
     rename_block_reason: Optional[str] = None
+    # Set when the agent asked for is not installed and the other one started.
+    warning: Optional[str] = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -926,7 +928,7 @@ class ResumeRequest(BaseModel):
 
 class LaunchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["claude", "codex", "shell"] = "claude"
+    mode: Literal["claude", "codex", "shell", "terminal"] = "claude"
     name: Optional[str] = None
     prompt: Optional[str] = Field(default=None, max_length=8_000)
     task_id: Optional[str] = None

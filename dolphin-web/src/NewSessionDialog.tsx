@@ -6,15 +6,19 @@ import { useApi } from './apiContext';
 import { useSetting } from './settings';
 import { branchProblem } from './branchName';
 import type { WorktreeOptions } from './types';
+import { useDialogParts } from './motion/dialogParts';
 import './newSession.css';
 
-/* Dolphin Desktop: New Session asks what to run. An agent this host lacks is
-   offered as an install that runs, visibly, in the new terminal and then
-   starts the agent. Nothing is installed without that click. */
+/* Dolphin Desktop: New Session asks what to run: Claude Code, Codex, a tmux
+   session or a plain terminal. An agent this host lacks is offered as an
+   install that runs, visibly, in the new terminal and then starts the agent.
+   Nothing is installed without that click. "Always start this" makes the
+   choice the default, so + starts it without asking (Settings changes it). */
 
-export type SessionChoice = { mode: 'shell' | 'claude' | 'codex'; startup?: string; worktree?: { branch: string; runSetup: boolean } };
+export type SessionMode = 'shell' | 'claude' | 'codex' | 'terminal';
+export type SessionChoice = { mode: SessionMode; startup?: string; worktree?: { branch: string; runSetup: boolean } };
 
-export type SessionTile = { key: string; number: number; title: string; detail: string; command: string | null; mode: 'claude' | 'codex' | 'shell'; choice: SessionChoice | null };
+export type SessionTile = { key: string; number: number; title: string; detail: string; command: string | null; mode: SessionMode; choice: SessionChoice | null };
 
 export function sessionTiles(agents: AgentCli[], inWorktree = false): SessionTile[] {
   const tiles: Omit<SessionTile, 'number'>[] = agents.map((agent) => agent.found
@@ -22,21 +26,22 @@ export function sessionTiles(agents: AgentCli[], inWorktree = false): SessionTil
     : trustedInstallStart(agent)
       ? { key: agent.agent, title: `Install ${agent.name}`, detail: inWorktree ? 'Installs first; starts in the project folder. Runs this in a new terminal, then starts it:' : 'Not found on this machine. Runs this in a new terminal, then starts it:', command: agent.install_command, mode: agent.agent, choice: { mode: 'shell', startup: trustedInstallStart(agent) ?? undefined } }
       : { key: agent.agent, title: agent.name, detail: `Not found on this machine. ${agent.install_hint ?? 'Install it yourself.'}`.trim(), command: null, mode: agent.agent, choice: null });
-  tiles.push({ key: 'shell', title: 'Shell', detail: 'A plain terminal in the project folder.', command: null, mode: 'shell', choice: { mode: 'shell' } });
+  tiles.push({ key: 'shell', title: 'tmux Session', detail: 'A shell in tmux. It keeps running after you close Dolphin.', command: null, mode: 'shell', choice: { mode: 'shell' } });
+  tiles.push({ key: 'terminal', title: 'Terminal', detail: 'A plain shell, without tmux. It ends when you close it or quit Dolphin.', command: null, mode: 'terminal', choice: { mode: 'terminal' } });
   return tiles.map((tile, index) => ({ ...tile, number: index + 1 }));
 }
 
-export function defaultTile(tiles: SessionTile[], agent: 'claude' | 'codex' | 'shell'): SessionTile | undefined {
+export function defaultTile(tiles: SessionTile[], agent: 'ask' | SessionMode): SessionTile | undefined {
   return tiles.find((tile) => tile.mode === agent && tile.choice) ?? tiles.find((tile) => tile.choice);
 }
 
 /* The install command is text to read and copy; showing it runs nothing. */
-export function NewSessionOptions({ tiles, onChoose }: { tiles: SessionTile[]; onChoose: (choice: SessionChoice) => void }) {
+export function NewSessionOptions({ tiles, onChoose }: { tiles: SessionTile[]; onChoose: (choice: SessionChoice, tile: SessionTile) => void }) {
   return (
     <>
       {tiles.map((tile) => (
         <button key={tile.key} className="new-session-option" type="button" data-tile={tile.key} aria-keyshortcuts={String(tile.number)}
-          disabled={!tile.choice} onClick={() => tile.choice && onChoose(tile.choice)}>
+          disabled={!tile.choice} onClick={() => tile.choice && onChoose(tile.choice, tile)}>
           <kbd className="new-session-number" aria-hidden="true">{tile.number}</kbd>
           <span>
             <strong>{tile.title}</strong>
@@ -63,8 +68,10 @@ export default function NewSessionDialog({ projectId, projectName, onChoose, onC
   const [branch, setBranch] = useState('');
   const [runSetup, setRunSetup] = useState(true);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [defaultAgent] = useSetting('newSession.defaultAgent');
+  const [defaultAgent, setDefaultAgent] = useSetting('newSession.defaultAgent');
+  const [always, setAlways] = useState(false);
   const tiles = agents ? sessionTiles(agents, useWorktree && Boolean(options?.git)) : null;
+  const { Scrim, Panel } = useDialogParts();
 
   useEffect(() => {
     getAgentClis().then(setAgents).catch(() => { setFailed(true); setAgents([]); });
@@ -82,7 +89,8 @@ export default function NewSessionDialog({ projectId, projectName, onChoose, onC
   const problem = useWorktree && options?.git ? branchProblem(branch) : null;
   /* Where the session runs: the project folder, or a new worktree. An install
      tile runs in the project folder, so it is never moved. */
-  const choose = (choice: SessionChoice) => {
+  const choose = (choice: SessionChoice, tile?: SessionTile) => {
+    if (always && tile) setDefaultAgent(tile.mode);
     if (!useWorktree || !options?.git || choice.startup) { onChoose(choice); return; }
     if (problem) return;
     onChoose({ ...choice, worktree: { branch: branch.trim(), runSetup: options.setup && runSetup } });
@@ -96,8 +104,8 @@ export default function NewSessionDialog({ projectId, projectName, onChoose, onC
   };
 
   return (
-    <div className="new-session-scrim" onClick={onClose} role="presentation">
-      <div
+    <Scrim className="new-session-scrim" onClick={onClose} role="presentation">
+      <Panel
         aria-label={`New session in ${projectName}`}
         aria-modal="true"
         className="new-session-panel"
@@ -107,7 +115,7 @@ export default function NewSessionDialog({ projectId, projectName, onChoose, onC
             const target = event.target as HTMLElement;
             if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
             const tile = tiles[Number(event.key) - 1];
-            if (tile?.choice) { event.preventDefault(); choose(tile.choice); }
+            if (tile?.choice) { event.preventDefault(); choose(tile.choice, tile); }
             return;
           }
           if (event.key === 'Escape') { event.preventDefault(); onClose(); }
@@ -144,7 +152,11 @@ export default function NewSessionDialog({ projectId, projectName, onChoose, onC
           {tiles && <NewSessionOptions tiles={tiles} onChoose={choose} />}
           {failed && <p className="new-session-note" role="status">Could not check for agents. You can still open a shell and run one yourself.</p>}
         </div>
-      </div>
-    </div>
+        <footer className="new-session-footer">
+          <label><input type="checkbox" checked={always} onChange={(event) => setAlways(event.target.checked)} /> Always start this</label>
+          <small>{always ? '+ will start your choice without asking. Change it in Settings.' : 'Choose what + starts, or ask each time, in Settings.'}</small>
+        </footer>
+      </Panel>
+    </Scrim>
   );
 }

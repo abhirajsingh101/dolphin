@@ -2,7 +2,7 @@
 // and show System Health for this machine. Run with `npm test` (xvfb-run).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { _electron as electron } from 'playwright';
@@ -10,6 +10,13 @@ import { teardown } from './support.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const shots = process.env.DOLPHIN_SHOTS || tmpdir();
+async function waitFor(check, what, timeoutMs = 10_000) {
+  for (const end = Date.now() + timeoutMs; Date.now() < end;) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail(`timed out: ${what}`);
+}
 
 test('this computer opens the workspace and System Health', { timeout: 120_000 }, async () => {
   const home = mkdtempSync(path.join(tmpdir(), 'dh-'));
@@ -50,6 +57,17 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
       assert.ok(chrome.headerPadding >= chrome.controlsWidth - 18, `header leaves room for window controls: ${JSON.stringify(chrome)}`);
     }
     await window.screenshot({ path: path.join(shots, 'desktop-workspace.png') });
+    // The page's theme choice becomes the app's (theme.ts): the static pages,
+    // the window's background and its controls follow it, and it is kept.
+    const pickTheme = (choice) => window.evaluate((value) => { localStorage.setItem('dolphin.theme', value); window.dispatchEvent(new Event('dolphin:settings')); }, choice);
+    const nativeSource = () => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
+    await pickTheme('dark');
+    await waitFor(async () => (await nativeSource()) === 'dark', 'the app takes the page theme');
+    assert.equal(await window.evaluate(() => window.dolphinDesktop.theme()), 'dark');
+    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBackgroundColor())).toLowerCase(), '#091421');
+    assert.deepEqual(JSON.parse(readFileSync(path.join(home, 'profile', 'theme.json'), 'utf8')), { theme: 'dark' });
+    await pickTheme('system');
+    await waitFor(async () => (await nativeSource()) === 'system', 'System follows the system again');
     // Machine sections: one sticky 28px row each.
     const head = await window.locator('.glass-machine-head').first().evaluate((element) => ({ position: getComputedStyle(element).position, height: Math.round(element.getBoundingClientRect().height) }));
     assert.deepEqual(head, { position: 'sticky', height: 28 });
@@ -135,19 +153,37 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     await window.evaluate(() => { location.hash = '#/health/gpu-box'; });
     await window.getByText('gpu-box is not connected.').waitFor();
     assert.equal(await window.getByText(/CPU/).count(), 0);
+    // Its chip carries no "connected" dot.
+    assert.equal(await window.locator('.glass-health .glass-host').getAttribute('data-state'), 'offline');
     await window.keyboard.press('Escape');
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
     await window.getByRole('textbox', { name: 'Message Dolphin' }).fill('');
 
-    // Motion: dialogs scale in from their scrim; reduced motion turns it off.
-    await window.getByRole('button', { name: 'Open command palette' }).click();
-    const panelAnimation = () => window.locator('.cp-panel').evaluate((element) => getComputedStyle(element).animationName);
-    assert.equal(await panelAnimation(), 'dd-pop');
+    // Motion: dialogs rise and scale out of their scrim (Motion, not a CSS
+    // animation, so nothing else animates the panel); reduced motion keeps
+    // only the fade. Sampled frame by frame from the click.
+    const panelTransforms = () => window.evaluate(() => new Promise((resolve) => {
+      const seen = [];
+      const trigger = document.querySelector('[aria-label="Open command palette"]');
+      trigger.focus();
+      trigger.click();
+      const tick = () => {
+        const panel = document.querySelector('.cp-panel');
+        if (panel) seen.push({ transform: getComputedStyle(panel).transform, animation: getComputedStyle(panel).animationName });
+        if (seen.length < 12) requestAnimationFrame(tick); else resolve(seen);
+      };
+      tick();
+    }));
+    const moved = (frames) => frames.some((frame) => !['none', 'matrix(1, 0, 0, 1, 0, 0)'].includes(frame.transform));
+    const animated = await panelTransforms();
+    assert.ok(moved(animated), 'the palette rises into place');
+    assert.ok(animated.every((frame) => frame.animation === 'none'), 'no CSS animation on the panel');
     await window.keyboard.press('Escape');
+    await window.locator('.cp-scrim').waitFor({ state: 'detached' });
     await window.emulateMedia({ reducedMotion: 'reduce' });
-    await window.getByRole('button', { name: 'Open command palette' }).click();
-    assert.equal(await panelAnimation(), 'none');
+    assert.ok(!moved(await panelTransforms()), 'reduced motion: no transform');
     await window.keyboard.press('Escape');
+    await window.locator('.cp-scrim').waitFor({ state: 'detached' });
     await window.emulateMedia({ reducedMotion: 'no-preference' });
   } finally {
     await teardown({ app, helpers: [home], remove: [home] });

@@ -41,6 +41,7 @@ import type {
   ListeningPort,
   UsageReport,
   HistoryItem,
+  SkillSuggestions,
 } from './types';
 
 const browserLocation =
@@ -527,7 +528,7 @@ function makeApi(endpoint: Endpoint) {
   function createTmuxSession(
     projectId: string,
     name?: string,
-    mode: 'shell' | 'claude' | 'codex' = 'shell',
+    mode: 'shell' | 'claude' | 'codex' | 'terminal' = 'shell',
   ): Promise<TmuxSession> {
     return request<TmuxSession>(`/api/projects/${projectId}/tmux/sessions`, {
       method: 'POST',
@@ -798,12 +799,34 @@ function makeApi(endpoint: Endpoint) {
     return request<GitStatuses>('/api/git/status');
   }
 
+  /* Skill suggestions (Dolphin Desktop's helper). Nothing here installs
+     anything: the user opens the link or copies the command. */
+  function fetchSkillSuggestions(signal?: AbortSignal): Promise<SkillSuggestions> {
+    return request<SkillSuggestions>('/api/suggestions/skills', { signal });
+  }
+
+  function dismissSkillSuggestion(key: string): Promise<void> {
+    return request<void>('/api/suggestions/skills/dismiss', { method: 'POST', body: JSON.stringify({ key }) });
+  }
+
+  function refreshSkillSuggestions(): Promise<{ started: boolean }> {
+    return request<{ started: boolean }>('/api/suggestions/skills/refresh', { method: 'POST' });
+  }
+
+  function setSkillSuggestionsEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+    return request<{ enabled: boolean }>('/api/suggestions/skills/enabled', { method: 'PUT', body: JSON.stringify({ enabled }) });
+  }
+
   return {
     API_BASE,
     getListeningPorts,
     getUsage,
     searchHistory,
     fetchGitStatus,
+    fetchSkillSuggestions,
+    dismissSkillSuggestion,
+    refreshSkillSuggestions,
+    setSkillSuggestionsEnabled,
     API_TOKEN,
     WS_BASE,
     authHeaders,

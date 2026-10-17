@@ -47,13 +47,16 @@ function tmuxItem({ tmux }: Environment): ChecklistItem {
   return { id: 'tmux', label: 'tmux', done: true, detail: tmux.bundled ? `Dolphin’s own tmux ${tmux.version}` : `tmux ${tmux.version}` };
 }
 
-function agentItem(cli: AgentCli, signedIn: boolean | null | undefined): ChecklistItem {
+/** `other`: the other agent, when it is installed: one agent is enough, so a
+    missing one is then optional (done, still offering its install). */
+function agentItem(cli: AgentCli, signedIn: boolean | null | undefined, other?: string): ChecklistItem {
   const label = cli.name;
   if (!cli.found) {
+    const optional = other ? `Optional: Dolphin uses ${other}. ` : '';
     // Only a command the client knows is offered to run; otherwise the hint is shown as text.
     return trustedInstallStart(cli)
-      ? { id: cli.agent, label, done: false, detail: 'Not installed.', action: { kind: 'install', agent: cli.agent, label: 'Install', name: `Install ${label}` } }
-      : { id: cli.agent, label, done: false, detail: `Not installed. ${cli.install_hint ?? 'Install it yourself, then press Check Again.'}`.trim() };
+      ? { id: cli.agent, label, done: Boolean(other), detail: `${optional}Not installed.`, action: { kind: 'install', agent: cli.agent, label: 'Install', name: `Install ${label}` } }
+      : { id: cli.agent, label, done: Boolean(other), detail: `${optional}Not installed. ${cli.install_hint ?? 'Install it yourself, then press Check Again.'}`.trim() };
   }
   if (signedIn === false) {
     return { id: cli.agent, label, done: false, detail: 'Installed. No sign-in found.', action: { kind: 'sign-in', agent: cli.agent, label: 'Sign In', name: `Sign in to ${label}` } };
@@ -83,7 +86,7 @@ function memoryItem(brain: BrainState, canChoose: boolean): ChecklistItem | null
       return { id: 'memory', label: 'Memory', done: false, detail: `Setup failed: ${brain.error ?? 'no detail'}`, action: { kind: 'retry-memory', label: 'Retry', name: 'Retry memory setup' } };
     case 'off':
       return brain.optional && canChoose
-        ? { id: 'memory', label: 'Memory', done: false, detail: 'Optional. Dolphin remembers what you tell it. Downloads about 400 MB.', action: { kind: 'memory', label: 'Turn On', name: 'Turn on memory' } }
+        ? { id: 'memory', label: 'Memory', done: false, detail: 'Optional. Dolphin follows every project through your Claude Code and Codex conversations, on every connected machine. Downloads about 550 MB.', action: { kind: 'memory', label: 'Turn On', name: 'Turn on memory' } }
         : null;
   }
 }
@@ -91,17 +94,13 @@ function memoryItem(brain: BrainState, canChoose: boolean): ChecklistItem | null
 export function checklist(input: ChecklistInput): ChecklistItem[] {
   const items: (ChecklistItem | null)[] = [];
   if (input.environment) items.push(tmuxItem(input.environment));
-  for (const cli of input.agents ?? []) {
-    items.push(agentItem(cli, input.environment?.agents.find((row) => row.agent === cli.agent)?.signed_in));
+  const agents = input.agents ?? [];
+  for (const cli of agents) {
+    const other = agents.find((row) => row.agent !== cli.agent && row.found);
+    items.push(agentItem(cli, input.environment?.agents.find((row) => row.agent === cli.agent)?.signed_in, other?.name));
   }
   if (input.hooks) items.push(notificationsItem(input.hooks));
   if (input.brain) items.push(memoryItem(input.brain, input.canChooseMemory));
   return items.filter((item): item is ChecklistItem => item !== null);
 }
 
-/** The agent setup line (AgentSetupPrompt.tsx) polls until memory is ready,
-    but only while it is actually being set up. */
-export function memoryStillSettingUp(rows: { cli_found: boolean; memory_ready: boolean; memory_state?: string }[]): boolean {
-  return rows.some((row) => row.cli_found && !row.memory_ready
-    && (row.memory_state === undefined || row.memory_state === 'installing' || row.memory_state === 'missing'));
-}

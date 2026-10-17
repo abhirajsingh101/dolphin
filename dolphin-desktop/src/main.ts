@@ -25,6 +25,7 @@ import { contentSecurityPolicy } from './csp';
 import { openableExternally } from './links';
 import { isLoopbackUrl, remotePortOf, rewriteToLocal, validPort } from './forwards';
 import { DEFAULT_SETTINGS, onSettingsChange, patchIsValid, readRawSettings, readSettings, writeSettings } from './settings';
+import { isThemeChoice, readTheme, windowColors, writeTheme } from './theme';
 import { hostNames, issueUrl, tailLines } from './issueReport';
 import { memoryChoiceFor, seededMemory, sendMemoryChoice } from './memorySync';
 import { SYNC_INTERVAL_MS, syncAll, type Fetch, type SyncMachine } from './brainSync';
@@ -100,12 +101,36 @@ export const HEADER_HEIGHT = 44;
  *  end, and the page leaves that space free (env(titlebar-area-*)). The header
  *  is the drag area (app-region: drag). */
 function windowChrome(): BrowserWindowConstructorOptions {
-  const background = nativeTheme.shouldUseDarkColors ? '#0f1722' : '#eef3f9';
+  const { background, symbol } = windowColors(nativeTheme.shouldUseDarkColors);
   if (process.platform === 'darwin') {
     return { titleBarStyle: 'hidden', trafficLightPosition: { x: 18, y: (HEADER_HEIGHT - 14) / 2 }, backgroundColor: background };
   }
-  return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', height: HEADER_HEIGHT }, backgroundColor: background };
+  return { titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: symbol, height: HEADER_HEIGHT }, backgroundColor: background };
 }
+
+const shownTheme = () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+/** The theme changed (the page's choice, or the system's): every window's
+ *  background, window-control ink and static page follow it (theme.ts). */
+function followTheme(): void {
+  const { background, symbol } = windowColors(nativeTheme.shouldUseDarkColors);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.setBackgroundColor(background);
+    window.webContents.send('dolphin:theme-changed', shownTheme());
+    if (process.platform !== 'darwin') {
+      // Only windows made with windowChrome() have an overlay; the SSH prompt has a frame.
+      try { window.setTitleBarOverlay({ color: '#00000000', symbolColor: symbol, height: HEADER_HEIGHT }); } catch { /* no overlay */ }
+    }
+  }
+}
+// The theme the static pages show (static/theme.js): any window may ask.
+ipcMain.on('dolphin:theme-get', (event) => { event.returnValue = shownTheme(); });
+// The workspace's theme choice (Settings, Appearance), for every window and the next launch.
+ipcMain.on('dolphin:theme', (event, choice: unknown) => {
+  if (!windowOf(event.sender) || !isThemeChoice(choice) || nativeTheme.themeSource === choice) return;
+  nativeTheme.themeSource = choice;
+  writeTheme(app.getPath('userData'), choice);
+});
 
 /* --- machines ------------------------------------------------------------- */
 
@@ -402,10 +427,11 @@ function openMachine(target: string): void {
 
 const dolphinHome = () => process.env.DOLPHIN_HOME || path.join(app.getPath('home'), '.dolphin-server');
 
-/** Memory follows the user's choice on every machine (memorySync.ts). Never
- *  awaited by connect(); a failure waits for the next connect, no retry loop. */
+/** Memory follows the user's choice on this computer, and is off on every
+ *  machine over SSH (memorySync.ts). Never awaited by connect(); a failure
+ *  waits for the next connect, no retry loop. */
 function tellMemory(machine: MachineState, event: 'connected' | 'changed'): void {
-  const choice = memoryChoiceFor(event, readSettings(app.getPath('userData')).memory);
+  const choice = memoryChoiceFor(event, readSettings(app.getPath('userData')).memory, machine.host.kind === 'local' ? 'local' : 'ssh');
   const connection = machine.connection;
   if (choice === null || !connection || machine.link !== 'connected') return;
   void sendMemoryChoice(connection.apiBase, connection.token, choice, (url, init) => net.fetch(url, { ...init, signal: AbortSignal.timeout(15_000) }))
@@ -413,7 +439,7 @@ function tellMemory(machine: MachineState, event: 'connected' | 'changed'): void
 }
 
 /* Every connected machine's work comes home to this computer's brain
-   (brainSync.ts): on connect, every 10 minutes, and when memory is turned on.
+   (brainSync.ts): on connect, every minute, and when memory is turned on.
    One sync at a time; a request during one runs once it ends. */
 let syncing = false;
 let syncAgain = false;
@@ -946,6 +972,8 @@ if (!app.requestSingleInstanceLock()) {
     else if (action === 'new-window') newWindow();
   });
   app.whenReady().then(() => {
+    nativeTheme.themeSource = readTheme(app.getPath('userData'));
+    nativeTheme.on('updated', followTheme);
     serveApp();
     setSshEnv(startAskpass());
     startUpdateChecks();

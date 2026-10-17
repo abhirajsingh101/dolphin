@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import agent_history, agent_usage, git_repo, listening_ports, session_worktrees, tmux_service
+from . import agent_history, agent_usage, agents, git_repo, listening_ports, session_worktrees, tmux_service
 from .database import get_db
 from .models import Project, SessionLink, Task
 from .schemas import (
@@ -249,8 +249,10 @@ async def launch_session(project_id: str, body: LaunchRequest, db: AsyncSession 
         prompt = tmux_service.sanitize_prompt(prompt)
         if len(prompt) > MAX_PROMPT_CHARS:
             raise HTTPException(status_code=400, detail=f"The prompt is longer than {MAX_PROMPT_CHARS} characters.")
-    if prompt and body.mode == "shell":
+    if prompt and body.mode in ("shell", "terminal"):
         raise HTTPException(status_code=422, detail="A shell session has no agent to give the prompt to.")
+    # The agent asked for, or the other one when only that one is installed.
+    mode, switched = await asyncio.to_thread(agents.substitute, body.mode)
 
     created: session_worktrees.CreatedWorktree | None = None
     cwd = workspace
@@ -261,7 +263,8 @@ async def launch_session(project_id: str, body: LaunchRequest, db: AsyncSession 
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
         cwd = created.path
     try:
-        session = await tmux_service.create_session(cwd, project.name, requested_name=body.name, mode="shell")
+        session = await tmux_service.create_session(cwd, project.name, requested_name=body.name,
+                                                    mode="terminal" if mode == "terminal" else "shell")
     except tmux_service.TmuxServiceError as error:
         if created is not None:
             await asyncio.to_thread(session_worktrees.discard_unused, created)
@@ -269,7 +272,7 @@ async def launch_session(project_id: str, body: LaunchRequest, db: AsyncSession 
 
     link = SessionLink(
         session_name=session.name, project_id=project.id, task_id=task.id if task else None,
-        agent=None if body.mode == "shell" else body.mode,
+        agent=mode if mode in agents.AGENTS else None,
         worktree_path=str(created.path) if created else None,
         branch=created.branch if created else None,
         base_ref=created.base_ref if created else None,
@@ -289,15 +292,15 @@ async def launch_session(project_id: str, body: LaunchRequest, db: AsyncSession 
         raise HTTPException(status_code=500, detail="Could not record the new session.") from error
 
     setup = _setup_command(created.repo) if created and body.worktree.run_setup else None
-    warning = None
+    warning = switched
     try:
         if setup:
             # Only a path Dolphin generated is typed; the prompt rides in a file.
-            line = tmux_service.prepare_agent_command(body.mode, initial_prompt=prompt, run_id=None, setup=setup)
+            line = tmux_service.prepare_agent_command(mode if mode in agents.AGENTS else "shell", initial_prompt=prompt, run_id=None, setup=setup)
             await tmux_service.run_in_session(cwd, session.name, line)
-        elif body.mode == "claude":
+        elif mode == "claude":
             await tmux_service.start_claude(cwd, session.name, initial_prompt=prompt)
-        elif body.mode == "codex":
+        elif mode == "codex":
             await tmux_service.start_codex(cwd, session.name, initial_prompt=prompt)
     except tmux_service.TmuxServiceError as error:
         warning = error.detail

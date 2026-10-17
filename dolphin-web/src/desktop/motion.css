@@ -12,10 +12,6 @@
   to { opacity: 1; transform: none; }
 }
 @keyframes dd-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes dd-drop {
-  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-  to { opacity: 1; transform: none; }
-}
 @keyframes dd-pop {
   from { opacity: 0; transform: translateY(6px) scale(0.96); }
   to { opacity: 1; transform: none; }
@@ -40,25 +36,12 @@
 .glass-welcome > :nth-child(4) { animation-delay: 160ms; }
 .glass-welcome > :nth-child(5) { animation-delay: 210ms; }
 
-/* Dialogs: the scrim fades, the panel scales up out of it. */
-.new-session-scrim,
-.picker-scrim,
-.cp-scrim {
-  animation: dd-fade 180ms var(--ease) backwards;
-}
-.new-session-panel,
-.picker-panel,
-.cp-panel {
-  animation: dd-pop 260ms var(--ease) backwards;
-}
-.new-session-option { animation: dd-rise 320ms var(--ease) backwards; }
-.new-session-option:nth-child(2) { animation-delay: 40ms; }
-.new-session-option:nth-child(3) { animation-delay: 80ms; }
-.new-session-option:nth-child(4) { animation-delay: 120ms; }
+/* Dialogs, menus, pop-ups and the hover glance are not here: Motion animates
+   them in and out (src/motion/MotionDialog.tsx, design contract "Motion
+   vocabulary"), in the web build too, so no rule here may touch them. */
 
-/* Lines above the composer, the notification list, and the first-run panel. */
+/* Lines above the composer, and the first-run panel. */
 .signals-tray { animation: dd-rise 320ms var(--ease) backwards; }
-.glass-notification-panel { animation: dd-drop 220ms var(--ease) backwards; transform-origin: top right; }
 .desktop-start > * { animation: dd-rise 360ms var(--ease) backwards; }
 .desktop-start > :nth-child(2) { animation-delay: 50ms; }
 .desktop-start > :nth-child(3) { animation-delay: 100ms; }
@@ -102,34 +85,25 @@
 /* Entrances hold only their first frame (backwards), so hover can still move them. */
 .desktop-splash .dolphin-orb { animation: dd-rise 420ms var(--ease) backwards, dd-breathe 2.2s ease-in-out 420ms infinite; }
 
-/* Machines: a machine's menu drops from its button; a link on its way turns its spinner. */
-.machine-menu { animation: dd-drop 220ms var(--ease) backwards; transform-origin: top right; }
+/* Machines: a link on its way turns its spinner. */
 .glass-machine-name small > svg { animation: dd-spin 1s linear infinite; }
 @keyframes dd-spin { to { transform: rotate(360deg); } }
 /* A session's agent at work: its status arc turns. Status, not decoration. */
 .status-glyph[data-state='working'] svg { animation: dd-spin 1s linear infinite; }
 
-/* Updates: the pill arrives, the About panel drops from the header, the toast pops. */
+/* Updates: the pill arrives (the About panel and the toast are Motion's). */
 .update-pill { animation: dd-pop 320ms var(--ease) backwards; }
-.update-panel { animation: dd-drop 240ms var(--ease) backwards; transform-origin: top right; }
-.update-panel[data-anchor='brand'] { transform-origin: top left; }
-.update-toast { animation: dd-rise 360ms var(--ease) backwards; }
 .glass-workspace .update-pill { transition: background 160ms, box-shadow 160ms, transform 160ms var(--ease); }
 .glass-workspace .update-pill:hover { transform: translateY(-1px); }
 .glass-brand-button .dolphin-mark { transition: transform 200ms var(--ease); }
 .glass-brand-button:hover .dolphin-mark { transform: scale(1.06); }
 
-/* Hover glance: fades in once placed. */
-.glass-glance { animation: dd-fade 120ms var(--ease) backwards; }
-
 @media (prefers-reduced-motion: reduce) {
-  .glass-glance,
   .glass-workspace, .glass-health, .glass-health-stage, .glass-welcome > *,
-  .new-session-scrim, .picker-scrim, .cp-scrim, .new-session-panel, .picker-panel, .cp-panel,
-  .new-session-option, .signals-tray, .glass-notification-panel, .desktop-start > *, .desktop-start li,
+  .signals-tray, .desktop-start > *, .desktop-start li,
   .glass-health .health-overview-grid > *, .glass-health :is(.health-chart-card, .health-panel, .gpu-health-card),
   .desktop-splash > *, .desktop-splash .dolphin-orb, .desktop-splash-bar::after,
-  .update-pill, .update-panel, .update-toast, .machine-menu, .glass-machine-name small > svg,
+  .update-pill, .glass-machine-name small > svg,
   .status-glyph[data-state='working'] svg {
     animation: none;
   }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FolderMinus, X } from 'lucide-react';
 import { useApi } from './apiContext';
+import { useDialogParts } from './motion/dialogParts';
 import './newSession.css';
 
 /* Remove a project from Dolphin. Only Dolphin's record goes, with its tasks:
@@ -15,6 +16,7 @@ export default function RemoveProjectDialog({ project, onClose, onRemoved }: {
   const [state, setState] = useState<'idle' | 'working' | 'failed'>('idle');
   const [error, setError] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const { Scrim, Panel } = useDialogParts();
 
   useEffect(() => { cancelRef.current?.focus(); }, []);
 
@@ -30,8 +32,8 @@ export default function RemoveProjectDialog({ project, onClose, onRemoved }: {
   };
 
   return (
-    <div className="new-session-scrim" onClick={onClose} role="presentation">
-      <div
+    <Scrim className="new-session-scrim" onClick={onClose} role="presentation">
+      <Panel
         aria-label={`Remove ${project.name}`}
         aria-modal="true"
         className="new-session-panel remove-project-panel"
@@ -54,12 +56,12 @@ export default function RemoveProjectDialog({ project, onClose, onRemoved }: {
         </div>
         {state === 'failed' && <p className="remove-project-error" role="alert">Could not remove it: {error}</p>}
         <footer className="remove-project-actions">
-          <button ref={cancelRef} type="button" className="remove-project-cancel" onClick={onClose}>Cancel</button>
-          <button type="button" className="remove-project-confirm" disabled={state === 'working'} onClick={() => void remove()}>
+          <button ref={cancelRef} type="button" className="remove-project-cancel dt-btn dt-btn--secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="remove-project-confirm dt-btn dt-btn--danger" disabled={state === 'working'} onClick={() => void remove()}>
             {state === 'working' ? 'Removing…' : 'Remove Project'}
           </button>
         </footer>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

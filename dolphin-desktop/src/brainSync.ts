@@ -1,7 +1,8 @@
 /* Every machine's work comes home to this computer's brain (the helper's
  * app/brain_sync.py). Each machine Dolphin is connected to exports what is new
- * since its cursor: its projects, the agent turns that finished in them, and
- * what its own brain learned. This computer's helper takes each export into
+ * since its cursor: its projects, and what was asked and answered in its
+ * Claude Code and Codex sessions (every minute). Only this computer has a
+ * brain. This computer's helper takes each export into
  * its brain, labelled with the machine it came from. The traffic runs over the
  * SSH link each machine already has. This computer exports its own projects
  * and turns too, and keeps its own brain where it is.
@@ -16,8 +17,8 @@ export type SyncResult = { cursor: unknown; rounds: number; stopped?: 'memory-of
 type Response = { ok: boolean; status: number; json: () => Promise<unknown> };
 export type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<Response>;
 
-/** How often every connected machine is brought up to date, besides on connect. */
-export const SYNC_INTERVAL_MS = 10 * 60 * 1000;
+/** How often every connected machine's sessions are brought up to date, besides on connect. */
+export const SYNC_INTERVAL_MS = 60 * 1000;
 /** Exports per machine per sync; a long backlog finishes on the next one. */
 const MAX_ROUNDS = 25;
 
@@ -28,7 +29,7 @@ export async function syncMachine(machine: SyncMachine, local: Endpoint, cursor:
   let rounds = 0;
   let busy = false;
   while (rounds < MAX_ROUNDS) {
-    const query = new URLSearchParams({ cursor: JSON.stringify(cursor ?? {}), brain_pages: String(machine.kind === 'ssh') });
+    const query = new URLSearchParams({ cursor: JSON.stringify(cursor ?? {}) });
     let body: Export;
     try {
       const response = await fetcher(`${machine.endpoint.apiBase}/api/brain/export?${query}`, {

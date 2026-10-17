@@ -43,7 +43,7 @@ async def choose_memory(body: MemoryChoice):
 
 
 @router.get("/api/brain/export")
-async def export_for_sync(cursor: str = "", brain_pages: bool = True, db: AsyncSession = Depends(get_db)):
+async def export_for_sync(cursor: str = "", db: AsyncSession = Depends(get_db)):
     """What this machine knows past `cursor` (the last export's `cursor`, as JSON)."""
     try:
         position = json.loads(cursor) if cursor else {}
@@ -51,7 +51,7 @@ async def export_for_sync(cursor: str = "", brain_pages: bool = True, db: AsyncS
         raise HTTPException(status_code=400, detail="cursor is not JSON")
     if not isinstance(position, dict):
         raise HTTPException(status_code=400, detail="cursor is not an object")
-    return await brain_sync.export(db, position, brain_pages)
+    return await brain_sync.export(db, position)
 
 
 class SyncMachine(BaseModel):

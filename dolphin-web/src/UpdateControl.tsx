@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
+import { closingProps, MotionPopover, useCalm, useLetGo } from './motion/MotionDialog';
+import { presence, toastVariants } from './motion/presets';
 import { ArrowDownToLine, CheckCircle2, LoaderCircle, RefreshCw, RotateCw, Sparkles, TriangleAlert, X } from 'lucide-react';
 import DolphinIcon from './DolphinIcon';
 import './updateControl.css';
@@ -123,8 +126,9 @@ export default function UpdateControl({ open, onOpenChange }: { open: AboutAncho
         </button>
       )}
 
+      <AnimatePresence>
       {open && (
-        <div className="update-panel" role="dialog" aria-label="About Dolphin" data-anchor={open} style={open === 'brand' ? brandAnchor() : undefined}>
+        <MotionPopover key={open} align={open === 'brand' ? 'left' : 'right'} className="update-panel" role="dialog" aria-label="About Dolphin" data-anchor={open} style={open === 'brand' ? brandAnchor() : undefined}>
           <button type="button" className="update-close" aria-label="Close" onClick={() => onOpenChange(null)}>
             <X size={14} />
           </button>
@@ -202,20 +206,34 @@ export default function UpdateControl({ open, onOpenChange }: { open: AboutAncho
               </button>
             )}
           </footer>
-        </div>
+        </MotionPopover>
       )}
+      </AnimatePresence>
 
+      <AnimatePresence>
       {whatsNew && !open && (
-        <div className="update-toast" role="status" aria-label="Dolphin updated">
+        <UpdateToast key="whats-new">
           <Sparkles size={15} aria-hidden="true" />
           <span>
             <strong>Updated to Dolphin {whatsNew.version}</strong>
             <a href={whatsNew.notesUrl} target="_blank" rel="noreferrer" onClick={seen}>See what’s new</a>
           </span>
           <button type="button" aria-label="Dismiss" onClick={seen}><X size={13} /></button>
-        </div>
+        </UpdateToast>
       )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/** "Updated to …": arrives like a notification pop-up, and leaves faster. */
+function UpdateToast({ children }: { children: ReactNode }) {
+  const present = useIsPresent();
+  useLetGo(present);
+  return (
+    <motion.div className="update-toast" role="status" aria-label="Dolphin updated" {...closingProps(present)} variants={useCalm(toastVariants)} {...presence}>
+      {children}
+    </motion.div>
   );
 }
 

@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useApi } from './apiContext';
 import { AGENT_NAMES, usageLines } from './usageModel';
 import { panelError, useModalPanel } from './useModalPanel';
+import { useDialogParts } from './motion/dialogParts';
 import type { UsageReport } from './types';
 import './workflow.css';
 
@@ -19,6 +20,7 @@ export default function UsagePanel({ machineLabel, onClose }: { machineLabel: st
   const [error, setError] = useState('');
   const panel = useRef<HTMLDivElement>(null);
   useModalPanel(panel, onClose);
+  const { Scrim, Panel } = useDialogParts();
   useEffect(() => {
     let current = true;
     const load = () => loadUsage.current()
@@ -29,8 +31,8 @@ export default function UsagePanel({ machineLabel, onClose }: { machineLabel: st
     return () => { current = false; window.clearInterval(timer); };
   }, []);
   return (
-    <div className="workflow-scrim" role="presentation" onClick={onClose}>
-      <div ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Usage on ${machineLabel}`}
+    <Scrim className="workflow-scrim" role="presentation" onClick={onClose}>
+      <Panel ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Usage on ${machineLabel}`}
         onClick={(event) => event.stopPropagation()}>
         <header className="workflow-header">
           <h2>Usage on {machineLabel}</h2>
@@ -49,7 +51,7 @@ export default function UsagePanel({ machineLabel, onClose }: { machineLabel: st
             </section>
           ))}
         </div>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

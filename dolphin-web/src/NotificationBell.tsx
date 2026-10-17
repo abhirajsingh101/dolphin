@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref } from 'react';
+import { AnimatePresence, motion, useIsPresent, type HTMLMotionProps } from 'motion/react';
+import { closingProps, MotionPopover, useCalm, useLetGo, useOverlayLayer } from './motion/MotionDialog';
+import { fadeVariants, presence, settle, toastVariants } from './motion/presets';
 import { pickKeys, rememberBounded } from './cachePruning';
 import { createPortal } from 'react-dom';
 import { Bell, Terminal, X } from 'lucide-react';
@@ -57,6 +60,7 @@ export default function NotificationBell({ onOpen, onTurn, sources = LOCAL_SOURC
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );
   const [toasts, setToasts] = useState<Item[]>([]);
+  const [toastLayer, toastLayerGone] = useOverlayLayer(!open && toasts.length > 0);
   const [holding, setHolding] = useState(false);
   const [anchor, setAnchor] = useState({ top: 0, right: 0 });
   const root = useRef<HTMLDivElement>(null);
@@ -204,14 +208,20 @@ export default function NotificationBell({ onOpen, onTurn, sources = LOCAL_SOURC
         <Bell size={18} />
         {unread > 0 && <span className="glass-bell-badge" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
       </button>
-      {!open && toasts.length > 0 && createPortal(
-        <ul className="glass-notification-toasts" aria-label="New notifications" aria-live="polite" style={{ top: anchor.top, right: anchor.right }}
+      {/* Pop-ups arrive from the edge they stack against and leave faster; the
+          rest of the stack settles into the gap (layout). A leaving one pops
+          out of the flow at once (popLayout) and takes no clicks. */}
+      {toastLayer && createPortal(
+        <AnimatePresence onExitComplete={toastLayerGone}>
+        {!open && toasts.length > 0 && (
+        <ToastStack key="toasts" className="glass-notification-toasts" aria-label="New notifications" aria-live="polite" style={{ top: anchor.top, right: anchor.right }}
           onPointerEnter={() => setHolding(true)} onPointerLeave={() => setHolding(false)}
           onFocus={() => setHolding(true)} onBlur={() => setHolding(false)}>
+          <AnimatePresence mode="popLayout">
           {toasts.map((item) => {
             const target = targetOf(item);
             return (
-              <li key={item.uid}>
+              <Toast key={item.uid}>
                 <button
                   className="glass-toast-open"
                   disabled={!target}
@@ -233,14 +243,18 @@ export default function NotificationBell({ onOpen, onTurn, sources = LOCAL_SOURC
                 <button className="glass-toast-dismiss" aria-label={`Dismiss ${notificationTitle(item)}`} onClick={() => dismiss(item.uid)}>
                   <X size={13} />
                 </button>
-              </li>
+              </Toast>
             );
           })}
-        </ul>,
+          </AnimatePresence>
+        </ToastStack>
+        )}
+        </AnimatePresence>,
         document.body,
       )}
+      <AnimatePresence>
       {open && (
-        <div className="glass-notification-panel" role="dialog" aria-label="Notifications">
+        <MotionPopover key="panel" align="right" className="glass-notification-panel" role="dialog" aria-label="Notifications">
           <header>
             <strong>Notifications</strong>
             <button disabled={!unread} onClick={() => {
@@ -288,8 +302,33 @@ export default function NotificationBell({ onOpen, onTurn, sources = LOCAL_SOURC
               </button>
             </footer>
           )}
-        </div>
+        </MotionPopover>
       )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/** The stack of pop-ups. It appears with its first pop-up (which animates in
+    itself) and, when the last one goes or the list opens, fades out with
+    whatever it still holds. */
+function ToastStack({ style, children, ...props }: Omit<HTMLAttributes<HTMLUListElement>, 'style'> & { style?: CSSProperties }) {
+  const present = useIsPresent();
+  useLetGo(present);
+  return (
+    <motion.ul {...(props as HTMLMotionProps<'ul'>)} {...closingProps(present, style)} variants={fadeVariants} initial={false} animate="shown" exit="hidden">
+      {children}
+    </motion.ul>
+  );
+}
+
+/** One pop-up in the stack. Forwards its ref: popLayout measures the leaving one. */
+function Toast({ ref, children }: { ref?: Ref<HTMLLIElement>; children: ReactNode }) {
+  const present = useIsPresent();
+  useLetGo(present);
+  return (
+    <motion.li ref={ref} layout {...closingProps(present)} variants={useCalm(toastVariants)} {...presence} transition={{ layout: settle }}>
+      {children}
+    </motion.li>
   );
 }

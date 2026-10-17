@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
 import pytest
-from app import dolphin_model as model
+from app import agent_clis, dolphin_model as model
 
 @pytest.mark.asyncio
 async def test_claude_first_with_no_native_tools(monkeypatch):
-    monkeypatch.setattr(model.shutil, 'which', lambda name: '/bin/' + name)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     async def invoke(command, prompt, cwd):
         assert command[0] == '/bin/claude'
         assert command[command.index('--tools') + 1] == ''
@@ -19,7 +19,7 @@ async def test_claude_first_with_no_native_tools(monkeypatch):
 @pytest.mark.asyncio
 async def test_fallback_keeps_tool_results_and_uses_read_only_codex(monkeypatch):
     seen = []
-    monkeypatch.setattr(model.shutil, 'which', lambda name: '/bin/' + name)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     async def invoke(command, prompt, cwd):
         seen.append(command[0])
         assert 'already submitted' in prompt
@@ -36,7 +36,7 @@ async def test_fallback_keeps_tool_results_and_uses_read_only_codex(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_unavailable_never_routes_to_local_model(monkeypatch):
-    monkeypatch.setattr(model.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: None): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     with pytest.raises(model.EngineUnavailable, match='No local-model'):
         await model.complete([], [])
 
@@ -52,7 +52,7 @@ def test_partial_content_decodes_only_answer_text():
 @pytest.mark.asyncio
 async def test_live_claude_text_arrives_before_final_result(monkeypatch):
     previews = []
-    monkeypatch.setattr(model.shutil, 'which', lambda name: '/bin/' + name)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     async def invoke(command, prompt, cwd, on_line):
         assert '--include-partial-messages' in command
         on_line(json.dumps({'event': {'type': 'content_block_start', 'index': 0, 'content_block': {'name': 'StructuredOutput'}}}))

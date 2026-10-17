@@ -13,6 +13,8 @@ OPTION = '@dolphin-chat-work'
 
 
 async def attach(session_name: str) -> dict:
+    if session_name.startswith('term:'):  # a plain terminal has no tmux pane to track
+        raise ValueError('A plain terminal cannot be tracked.')
     _, identity, _ = await _run_tmux('display-message', '-p', '-t', session_name + ':0.0', '#{session_id}\n#{pane_id}')
     session_id, pane_id = identity.strip().splitlines()
     work = {'id': uuid4().hex, 'session_id': session_id, 'pane_id': pane_id,

@@ -22,3 +22,7 @@ import '../tokens.css';
 import '../components.css';
 import '@dolphin-terminal/react/styles.css';
 import '../styles.css';
+// Glass material for the routes outside the workspace; every rule is scoped to
+// <html data-surface="legacy">, so its place after styles.css only matters for
+// readability, not for which rule wins.
+import '../legacyGlass.css';

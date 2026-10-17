@@ -1,9 +1,12 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { indicatorTransition } from './motion/presets';
+import { AnimatePresence, motion } from 'motion/react';
+import { MotionPopover, useOverlayLayer } from './motion/MotionDialog';
 import StatusGlyph from './StatusGlyph';
 import type { SessionState } from './sessionState';
 import { GitCompare, Maximize2, Minimize2, Minus, MoreHorizontal, Pin, Plus, Power, RefreshCw, TextSelect, X } from 'lucide-react';
-import { targetKey, type Target } from './workspace/targets';
+import { isPlainTerminal, sessionLabel, targetKey, type Target } from './workspace/targets';
 import { sameWindowProps } from './workspace/windowProps';
 import { loadTerminalFeatures, loadTerminalPane } from './workspace/prefetch';
 import { HIDDEN_DETACH_MS, useLinger } from './workspace/useLinger';
@@ -69,7 +72,7 @@ export type SessionWindowProps = {
   onSelectTab: (target: Target) => void;
   onCloseTab: (target: Target) => void;
   onToggleFullscreen?: (projectId: string) => void;
-  onNewSession?: (projectId: string) => void;
+  onNewSession?: (projectId: string, ask?: boolean) => void;
   onToggleCollapsed: (projectId: string) => void;
   onTogglePin?: (target: Target) => void;
   /** Opens the session's diff panel; a stable callback taking the target. */
@@ -116,7 +119,8 @@ const MENU_GUTTER = 8;
    button (above it when there is no room below) and inside the viewport. */
 function WindowMenu({ label, pane, pinned, onTogglePin, onReviewChanges }: { label: string; pane: RefObject<HTMLElement | null>; pinned: boolean; onTogglePin?: () => void; onReviewChanges?: () => void }) {
   const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState({ top: 0, left: 0 });
+  const [layer, layerGone] = useOverlayLayer(open);
+  const [place, setPlace] = useState<{ top: number; left: number; side: 'below' | 'above' }>({ top: 0, left: 0, side: 'below' });
   const [actions, setActions] = useState<{ select: PaneAction; reconnect: PaneAction; close: PaneAction }>({ select: null, reconnect: null, close: null });
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -196,7 +200,8 @@ function WindowMenu({ label, pane, pinned, onTogglePin, onReviewChanges }: { lab
     const below = box.bottom + 4;
     const top = below + height <= window.innerHeight - MENU_GUTTER ? below : Math.max(MENU_GUTTER, box.top - 4 - height);
     const left = Math.max(MENU_GUTTER, Math.min(box.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - MENU_GUTTER));
-    setPlace((current) => (current.top === top && current.left === left ? current : { top, left }));
+    const side = top >= box.bottom ? 'below' : 'above';
+    setPlace((current) => (current.top === top && current.left === left && current.side === side ? current : { top, left, side }));
   }, [open, actions]);
   useEffect(() => {
     if (!open) return;
@@ -254,8 +259,10 @@ function WindowMenu({ label, pane, pinned, onTogglePin, onReviewChanges }: { lab
       <button ref={button} type="button" className="glass-window-more" aria-label={`More actions for ${label}`} title="More actions" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <MoreHorizontal size={14} aria-hidden="true" />
       </button>
-      {open && createPortal(
-        <div ref={menu} className="glass-window-menu" role="menu" aria-label={`Actions for ${label}`} style={{ top: place.top, left: place.left }} onKeyDown={onMenuKey}>
+      {layer && createPortal(
+        <AnimatePresence onExitComplete={layerGone}>
+        {open && (
+        <MotionPopover key="menu" ref={menu} side={place.side} align="right" className="glass-window-menu" role="menu" aria-label={`Actions for ${label}`} style={{ top: place.top, left: place.left }} onKeyDown={onMenuKey}>
           {actions.select && (
             <button type="button" role="menuitem" tabIndex={-1} {...availability(actions.select)} onClick={() => run(SELECT)}>
               <TextSelect size={14} aria-hidden="true" />{actions.select.title === PANE_TITLES.exitSelect ? 'Exit Select Mode' : 'Select Text'}
@@ -281,7 +288,9 @@ function WindowMenu({ label, pane, pinned, onTogglePin, onReviewChanges }: { lab
               <Power size={14} aria-hidden="true" />Close Session…
             </button>
           )}
-        </div>,
+        </MotionPopover>
+        )}
+        </AnimatePresence>,
         button.current?.closest('.glass-workspace') ?? document.body,
       )}
     </>
@@ -439,7 +448,7 @@ function GlassSessionWindowView(props: SessionWindowProps) {
     }).catch(() => { if (current) setError('Could not connect to this session. Close and reopen to retry.'); });
     return () => { current = false; };
   }, [target.projectId, target.sessionName]);
-  const label = `${target.projectName} / ${target.sessionName}`;
+  const label = `${target.projectName} / ${sessionLabel(target.sessionName)}`;
   /* Hidden tabs and minimized windows let go of their terminal after a minute.
      A tab that has never been shown never attaches: it has no size to report,
      and a socket opened at 80x24 can shrink the real tmux window. */
@@ -477,17 +486,22 @@ function GlassSessionWindowView(props: SessionWindowProps) {
             const tabState = states?.[targetKey(session)];
             return (
               <div className="glass-terminal-tab" key={targetKey(session)} data-selected={selected}>
-                <button role="tab" aria-label={session.sessionName} aria-selected={selected} tabIndex={selected ? 0 : -1} title={session.sessionName} onClick={() => onSelectTab(session)}>
-                  {tabState && <StatusGlyph state={tabState} />}{session.sessionName}
+                <button role="tab" aria-label={sessionLabel(session.sessionName)} aria-selected={selected} tabIndex={selected ? 0 : -1} title={sessionLabel(session.sessionName)} onClick={() => onSelectTab(session)}>
+                  {tabState && <StatusGlyph state={tabState} />}{sessionLabel(session.sessionName)}
                 </button>
                 <TerminalActivityBadge activityKey={terminalKey(session.machine ?? machineId, session.projectId, session.sessionName)} />
-                <button aria-label={`Close terminal tab ${session.sessionName}`} title="Close tab — tmux keeps running" onClick={(event) => { event.stopPropagation(); onCloseTab(session); }}><X size={12} /></button>
+                <button aria-label={`Close terminal tab ${sessionLabel(session.sessionName)}`} title={isPlainTerminal(session.sessionName) ? "Close tab — the terminal keeps running" : "Close tab — tmux keeps running"} onClick={(event) => { event.stopPropagation(); onCloseTab(session); }}><X size={12} /></button>
+                {/* Every tab of a project renders its own copy of this strip; only the
+                    shown one draws the indicator, which glides to the newly shown
+                    copy's selected tab. The id is the project window's, so windows
+                    never trade indicators. */}
+                {selected && visible && <motion.span className="glass-tab-indicator" layoutId={`terminal-tab-indicator:${machineId ?? 'local'}:${target.projectId}`} transition={indicatorTransition} aria-hidden="true" />}
               </div>
             );
           })}
         </div>
       )}
-      {onNewSession && !collapsed && <button className="glass-new-terminal-tab" aria-label={`New terminal session in ${target.projectName}`} title="New tmux session in this project" disabled={creating} onClick={() => onNewSession(target.projectId)}><Plus size={14} /></button>}
+      {onNewSession && !collapsed && <button className="glass-new-terminal-tab" aria-label={`New terminal session in ${target.projectName}`} title="New session in this project (Option or Alt-click to choose what to start)" disabled={creating} onClick={(event) => onNewSession(target.projectId, event.altKey)}><Plus size={14} /></button>}
       {broken && !collapsed && <button className="glass-window-reconnect" aria-label={`Reconnect ${label}`} onClick={() => root.current?.querySelector<HTMLButtonElement>(RECONNECT)?.click()}><RefreshCw size={13} aria-hidden="true" /> Reconnect</button>}
       {!collapsed && <WindowMenu label={label} pane={root} pinned={pinned} onTogglePin={onTogglePin ? () => onTogglePin(target) : undefined} onReviewChanges={onReviewChanges ? () => onReviewChanges(target) : undefined} />}
       {onToggleFullscreen && !collapsed && <button className="glass-window-fullscreen" aria-pressed={fullscreen}

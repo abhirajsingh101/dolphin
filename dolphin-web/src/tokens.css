@@ -248,6 +248,32 @@ body {
  --glass-accent-strong: #1671eb;
  --glass-orb: linear-gradient(145deg,#f8fcff 5%,#b7dcff 50%,#72b8fb 100%);
  --glass-icon-ink: #086bcb;
+ /* Everything that floats over the workspace (dialogs, popovers, menus,
+    toasts, the glance) is one material: these five, glassSurfaces.css. */
+ --glass-float-fill: color-mix(in srgb, var(--glass-solid) 94%, transparent);
+ --glass-float-shadow: 0 24px 80px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
+ --glass-float-shadow-sm: 0 12px 40px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
+ --glass-float-blur: blur(28px) saturate(135%);
+ --glass-scrim-blur: blur(5px);
+ /* Large content dialogs (Settings, the project picker and the workflow
+    panels: Ports, Usage, History, Changes, Add Projects) open over the
+    terminal, whose near-black showed through 94% as a dark band in the light
+    theme. They keep the blur and are all but opaque; menus, popovers, toasts
+    and the palette keep --glass-float-fill. */
+ --glass-float-fill-solid: color-mix(in srgb, var(--glass-solid) 99%, transparent);
+ /* Rows and cards inside a floating panel (Settings' cards, the workflow
+    panels' rows, a diff's files). --glass-bubble on the float is within a
+    few levels of it in the light theme, so a row there needs its own lift
+    and a quiet hairline; dark keeps the bubble and the edge. */
+ --glass-card-fill: rgba(255,255,255,.5);
+ --glass-card-edge: rgba(25,41,67,.1);
+ /* Filled primary buttons: --accent-on on --glass-accent-strong (4.5:1 in
+    both themes, tokens.test.ts); hover moves toward the text colour. */
+ --glass-accent-hover: color-mix(in srgb, var(--glass-accent-strong) 84%, var(--glass-text));
+ /* Tints for state on glass, in place of the opaque --*-soft fills. */
+ --glass-add: color-mix(in srgb, var(--glass-success) 16%, transparent);
+ --glass-del: color-mix(in srgb, var(--danger) 14%, transparent);
+ --glass-warn-tint: color-mix(in srgb, var(--glass-alert) 14%, transparent);
 }
 :root[data-theme='dark'] {
  --glass-bg: #091421;
@@ -273,4 +299,59 @@ body {
  --glass-accent-strong: #69b4ff;
  --glass-orb: linear-gradient(145deg,#79bfff 0%,#277ace 48%,#153956 100%);
  --glass-icon-ink: #b9e6ff;
+ --glass-card-fill: var(--glass-bubble);
+ --glass-card-edge: var(--glass-edge);
+}
+
+/* Legacy routes on glass (2026-10-17). The board, cockpit, Missions, Morning
+   Radar and System Health paint with the semantic tokens at the top of this
+   file. On those routes main.tsx sets data-surface="legacy" on <html>, and the
+   block at the end points those tokens at the glass ones, so every card,
+   column, chip, input, menu and dialog there takes the workspace's backdrop,
+   panel, edge, muted text and scrim at once. Glass lacked three values that
+   legacy text and controls need:
+   - --glass-panel-flat: a glass panel over the flat backdrop, made opaque. It
+     looks the same as the translucent panel (the backdrop is flat), and a
+     sticky header painted with it never shows scrolled content through it.
+   - --glass-accent-ink: the accent as text and as a button fill. Light
+     --glass-accent is 3.0:1 on the backdrop; this is 4.67:1 on the darkest
+     surface it sits on, and white on it is 6.9:1.
+   - --glass-control-edge: an input's border, 3:1 on the surfaces inputs use.
+   tokens.test.ts ("legacy routes on glass") checks every text pair. */
+:root {
+ --glass-panel-flat: #e0ebf8;
+ --glass-accent-ink: #1556b5;
+ --glass-accent-ink-hover: #0f4797;
+ --glass-control-edge: #6f84a3;
+}
+:root[data-theme='dark'] {
+ --glass-panel-flat: #152333;
+ --glass-accent-ink: #69adff;
+ --glass-accent-ink-hover: #8cc1ff;
+ --glass-control-edge: #6a86a6;
+}
+:root[data-surface='legacy'] {
+  --bg: var(--glass-bg);
+  --surface: var(--glass-solid);
+  --surface-2: var(--glass-panel-flat);
+  --surface-3: color-mix(in srgb, var(--glass-accent) 10%, var(--glass-solid));
+  --border: var(--glass-edge);
+  --border-interactive: var(--glass-control-edge);
+  --text: var(--glass-text);
+  --text-2: var(--glass-muted-small);
+  --text-3: var(--glass-muted-small);
+  --accent: var(--glass-accent-ink);
+  --accent-hover: var(--glass-accent-ink-hover);
+  /* --surface-3 and --accent-soft are opaque, unlike --glass-selection: a
+     chip or selected row can sit on the bare backdrop, where muted text on
+     the translucent tint is 4.3:1. The terminal bezel stays dark (its xterm
+     canvas paints #111 in the cockpit); only its muted label takes the glass
+     terminal's, which is 7:1 on it where the old one was 3.7:1. */
+  --term-muted: var(--glass-term-muted);
+  --accent-soft: color-mix(in srgb, var(--glass-accent) 14%, var(--glass-solid));
+  --warn: var(--glass-alert);
+  --scrim: var(--glass-scrim);
+  --sh-1: inset 0 1px 0 var(--glass-sheen);
+  --sh-2: 0 4px 14px var(--glass-float-shadow), inset 0 1px 0 var(--glass-sheen);
+  --sh-3: 0 12px 40px var(--glass-dialog-shadow), inset 0 1px 0 var(--glass-sheen);
 }

@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
     return () => { ipcRenderer.removeListener('dolphin:open-session', take); };
   },
   setSystemNotifications: (enabled: boolean) => ipcRenderer.send('dolphin:system-notifications', enabled),
+  // The workspace's theme choice, for the windows and pages it cannot reach (theme.ts).
+  setTheme: (choice: 'system' | 'light' | 'dark') => ipcRenderer.send('dolphin:theme', choice),
+  // What the static pages show (static/theme.js): 'light' or 'dark', and each change.
+  theme: (): 'light' | 'dark' => ipcRenderer.sendSync('dolphin:theme-get'),
+  onTheme: (listener: (theme: 'light' | 'dark') => void) => { ipcRenderer.on('dolphin:theme-changed', (_event, theme) => listener(theme)); },
   // Desktop settings (settings.ts): update channel, memory, crash reports.
   settings: {
     get: () => ipcRenderer.sendSync('dolphin:settings-get'),

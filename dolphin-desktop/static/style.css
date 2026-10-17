@@ -1,5 +1,9 @@
 /* The launch, Connect and SSH-prompt pages: the workspace's glass, before the
-   workspace exists. Colours mirror dolphin-web's --glass-* tokens. */
+   workspace exists. These pages cannot load dolphin-web's tokens.css, so the
+   values below are copies of it: each --name here is --glass-name there (and
+   --danger, --fs-* are the same names). test/static.test.mjs fails when a copy
+   drifts, so change tokens.css and this file together. The theme is
+   data-theme on <html>, set by theme.js from the workspace's own choice. */
 
 @font-face {
   font-family: "Geist";
@@ -7,96 +11,110 @@
   font-weight: 100 900;
   font-display: swap;
 }
+@font-face {
+  font-family: "Geist Mono";
+  src: url("GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+  /* Mirrors of tokens.css --glass-*. */
   --bg: #cbdcf0;
   --text: #192943;
   --muted: #5b708d;
-  --panel: rgba(242, 248, 255, 0.62);
-  --edge: rgba(255, 255, 255, 0.88);
-  --bubble: rgba(237, 245, 255, 0.7);
-  --glow: rgba(255, 255, 255, 0.95);
-  --ridge: rgba(255, 255, 255, 0.38);
-  --tint: rgba(94, 154, 227, 0.12);
+  --muted-small: #4a5d78;
+  --panel: rgba(242,248,255,.54);
+  --edge: rgba(255,255,255,.88);
+  --shadow: 0 16px 42px rgba(40,73,115,.1), 0 2px 6px rgba(40,73,115,.04), inset 0 1px 0 rgba(255,255,255,1), inset 0 -1px 0 rgba(255,255,255,.48);
+  --dialog-shadow: rgba(10,25,45,.28);
   --accent: #2878ef;
   --accent-strong: #1671eb;
-  --selection: rgba(81, 147, 248, 0.15);
-  --danger: #c8443a;
-  --danger-soft: rgba(200, 68, 58, 0.1);
-  --shadow: 0 16px 42px rgba(40, 73, 115, 0.12), 0 2px 6px rgba(40, 73, 115, 0.05), inset 0 1px 0 rgba(255, 255, 255, 1);
-  --orb: linear-gradient(145deg, #f8fcff 5%, #b7dcff 50%, #72b8fb 100%);
+  --selection: rgba(81,147,248,.15);
+  --bubble: rgba(237,245,255,.66);
+  --sheen: rgba(255,255,255,.65);
+  --solid: #eef5fc;
+  --success: #23aa83;
+  --icon-shadow: 0 4px 14px rgba(52,133,243,.2);
+  --orb: linear-gradient(145deg,#f8fcff 5%,#b7dcff 50%,#72b8fb 100%);
+  /* Mirrors of tokens.css under the same names. */
+  --danger: #a93b2c;
+  --accent-on: #ffffff;
+  --fs-xl: 19px;
+  --fs-lg: 16px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+  --fs-2xs: 11px;
+  /* The glass workspace's shapes: floating panels at --r-xl, fields, rows and
+     boxes at --r-md, buttons as pills (glassSurfaces.css). */
+  --r-panel: 20px;
+  --r-control: 10px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #091421;
-    --text: #e7effb;
-    --muted: #a2b4cb;
-    --panel: rgba(26, 42, 60, 0.72);
-    --edge: rgba(157, 197, 231, 0.25);
-    --bubble: rgba(53, 75, 100, 0.5);
-    --glow: rgba(75, 121, 165, 0.22);
-    --ridge: rgba(147, 195, 232, 0.07);
-    --tint: rgba(54, 128, 205, 0.1);
-    --accent: #69adff;
-    --accent-strong: #4f9bff;
-    --selection: rgba(67, 146, 237, 0.2);
-    --danger: #ff8a7a;
-    --danger-soft: rgba(255, 138, 122, 0.12);
-    --shadow: 0 16px 48px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(200, 228, 255, 0.08);
-    --orb: linear-gradient(145deg, #2a5f9a 5%, #1a3d66 55%, #0f2744 100%);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #091421;
+  --text: #e7effb;
+  --muted: #a2b4cb;
+  --muted-small: #b4c4d8;
+  --panel: rgba(26,42,60,.68);
+  --edge: rgba(157,197,231,.25);
+  --shadow: 0 16px 48px rgba(0,0,0,.23), inset 0 1px 0 rgba(200,228,255,.07);
+  --accent: #69adff;
+  --accent-strong: #69b4ff;
+  --selection: rgba(67,146,237,.18);
+  --bubble: rgba(53,75,100,.46);
+  --sheen: rgba(186,222,255,.1);
+  --solid: #17283b;
+  --success: #50d4b0;
+  --icon-shadow: 0 4px 18px rgba(16,118,242,.23);
+  --orb: linear-gradient(145deg,#79bfff 0%,#277ace 48%,#153956 100%);
+  --danger: #e0796a;
+  --accent-on: #0e1a19;
 }
 [hidden] { display: none !important; }
 * { box-sizing: border-box; }
 
 html, body { height: 100%; }
+/* The workspace's flat backdrop. A card taller than a small window scrolls
+   instead of being cut off at both ends. */
 body {
   margin: 0;
   display: grid;
   place-items: center;
-  overflow: hidden;
+  padding: 44px 16px 16px;
+  overflow: auto;
   color: var(--text);
-  font: 14px/1.5 "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: var(--fs-sm)/1.5 "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
-  background:
-    radial-gradient(ellipse at 50% -25%, var(--glow), transparent 65%),
-    radial-gradient(ellipse at 100% 85%, var(--glow), transparent 60%),
-    radial-gradient(ellipse at 18% 30%, var(--tint), transparent 50%),
-    linear-gradient(155deg, transparent 53%, var(--ridge) 54%, transparent 58%),
-    var(--bg);
+  background: var(--bg);
   user-select: none;
 }
 /* The window has no title bar (main.ts, windowChrome): this strip moves it. */
 body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 44px; -webkit-app-region: drag; app-region: drag; }
-body::after {
-  content: "";
-  position: fixed;
-  top: -63vh;
-  left: 12vw;
-  z-index: -1;
-  width: 125vw;
-  height: 85vh;
-  border: 50px solid var(--ridge);
-  border-radius: 50%;
-  transform: rotate(24deg);
-  pointer-events: none;
-}
 
-/* A glass card, rising into place. */
+/* A glass card: the material of the workspace's dialogs, rising into place. */
 .card {
-  width: min(420px, calc(100vw - 32px));
+  width: min(420px, 100%);
   padding: 28px;
   border: 1px solid var(--edge);
-  border-radius: 22px;
-  background: linear-gradient(135deg, var(--glow), transparent 45%), var(--panel);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  border-radius: var(--r-panel);
+  background: linear-gradient(135deg, var(--sheen), transparent 45%), var(--panel);
+  box-shadow: 0 24px 60px var(--dialog-shadow), var(--shadow);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
   animation: rise 420ms var(--ease) both;
 }
 .card.compact { padding: 22px; }
+/* A page in its own small window (Connect, the SSH prompts): the window is
+   the panel, not a card floating in it. Connect has no title bar, so it keeps
+   the 44px drag strip above its content; a prompt has the system's. */
+body.sheet { padding: 44px 0 0; place-items: stretch; background: linear-gradient(135deg, var(--sheen), transparent 45%), var(--bg); }
+body.sheet.framed { padding-top: 0; }
+body.sheet.framed::before { display: none; }
+body.sheet .card { width: 100%; padding-top: 4px; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.sheet.framed .card { padding-top: 22px; }
 
 /* The Dolphin mark on a glass orb; it breathes while something is loading. */
 .orb {
@@ -109,9 +127,9 @@ body::after {
   border: 1px solid var(--edge);
   border-radius: 50%;
   background: var(--orb);
-  box-shadow: 0 8px 26px rgba(52, 133, 243, 0.28);
+  box-shadow: var(--icon-shadow);
 }
-.orb img { width: 48px; height: 48px; border-radius: 12px; }
+.orb img { width: 48px; height: 48px; border-radius: var(--r-control); }
 .orb.loading::after {
   content: "";
   position: absolute;
@@ -125,10 +143,10 @@ body::after {
 }
 
 .center { text-align: center; }
-h1 { margin: 18px 0 6px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
-h2 { margin: 0 0 6px; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+h1 { margin: 18px 0 6px; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.5px; text-wrap: balance; }
+h2 { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
 p { margin: 0; color: var(--muted); }
-.status { min-height: 21px; transition: opacity 200ms var(--ease); }
+.status { min-height: 20px; transition: opacity 200ms var(--ease); }
 .status.changing { opacity: 0; }
 
 /* An indeterminate bar under the status. */
@@ -153,21 +171,20 @@ p { margin: 0; color: var(--muted); }
 
 /* The error state of the launch page. */
 .error-box {
-  white-space: pre-line;
   margin-top: 18px;
-  padding: 12px 14px;
-  border: 1px solid var(--edge);
-  border-radius: 14px;
-  background: var(--danger-soft);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  border-radius: var(--r-control);
+  background: color-mix(in srgb, var(--danger) 9%, var(--bubble));
   color: var(--text);
   text-align: left;
-  font-size: 13px;
+  font-size: var(--fs-xs);
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
   animation: rise 320ms var(--ease) both;
 }
-.actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
 
 /* Controls. */
 form { display: flex; gap: 8px; margin: 18px 0 0; }
@@ -188,36 +205,45 @@ form { display: flex; gap: 8px; margin: 18px 0 0; }
 }
 input {
   width: 100%;
-  padding: 10px 12px 10px 36px;
+  min-height: 32px;
+  padding: 5px 12px 5px 36px;
   border: 1px solid var(--edge);
-  border-radius: 12px;
+  border-radius: var(--r-control);
   background: var(--bubble);
   color: inherit;
   font: inherit;
   outline: none;
   user-select: text;
-  transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease);
+  transition: border-color 160ms var(--ease), background 160ms var(--ease);
 }
+input::placeholder { color: var(--muted-small); opacity: 1; }
 input.plain { padding-left: 12px; }
-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--selection); }
+/* The workspace's one field: its focus is the accent edge and a selection ring. */
+input:focus { border-color: var(--accent); }
+input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--selection); }
+/* The workspace's one button set (glassSurfaces.css): pills, the primary
+   filled (--accent-on on the strong accent, 4.5:1 in both themes) with the
+   sheen inside it, no glow and no lift. 32px, not the workspace's 28, because
+   these windows hold one or two actions and nothing else. */
 button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--accent), var(--accent-strong));
-  color: #fff;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: var(--accent-on);
   font: inherit;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(52, 133, 243, 0.3);
-  transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), background 160ms var(--ease), opacity 160ms var(--ease);
+  box-shadow: inset 0 1px var(--sheen);
+  transition: background 160ms var(--ease), opacity 160ms var(--ease);
 }
-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(52, 133, 243, 0.36); }
-button:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-strong) 84%, var(--text)); }
 button:disabled { cursor: default; opacity: 0.6; }
 button.secondary {
   border-color: var(--edge);
@@ -227,19 +253,20 @@ button.secondary {
   box-shadow: none;
 }
 button.secondary:hover:not(:disabled) { background: var(--selection); box-shadow: none; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The workspace's focus ring. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #fff;
+  border: 2px solid color-mix(in srgb, currentColor 40%, transparent);
+  border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
 /* Hosts from ~/.ssh/config. */
-.hosts-title { margin: 22px 0 8px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
-ul { display: grid; gap: 6px; max-height: 220px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.hosts-title { margin: 20px 0 8px; color: var(--muted-small); font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+ul { display: grid; gap: 6px; max-height: 220px; margin: 0; padding: 1px 0; overflow: auto; list-style: none; scrollbar-width: thin; }
 li { animation: rise 320ms var(--ease) both; }
 li:nth-child(2) { animation-delay: 40ms; }
 li:nth-child(3) { animation-delay: 80ms; }
@@ -247,7 +274,11 @@ li:nth-child(4) { animation-delay: 120ms; }
 li:nth-child(n + 5) { animation-delay: 160ms; }
 button.host {
   width: 100%;
+  min-height: 44px;
   justify-content: flex-start;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: var(--r-control);
   border-color: var(--edge);
   background: var(--bubble);
   color: var(--text);
@@ -257,18 +288,26 @@ button.host {
 }
 button.host:hover:not(:disabled) { background: var(--selection); box-shadow: none; }
 button.host svg { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
-.error { min-height: 20px; margin-top: 10px; color: var(--danger); font-size: 13px; }
+button.host span { display: grid; gap: 1px; min-width: 0; text-align: left; }
+button.host strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+button.host small { overflow: hidden; color: var(--muted-small); font-size: var(--fs-xs); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+button.host .dot { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--muted); opacity: 0.5; flex-shrink: 0; }
+button.host .dot.on { background: var(--success); opacity: 1; }
+.error { min-height: 20px; margin-top: 10px; color: var(--danger); font-size: var(--fs-xs); }
+.error:empty { min-height: 0; margin-top: 0; }
 
 /* SSH prompts. */
-.prompt-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.prompt-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.prompt-head > div { min-width: 0; }
+.prompt-head p { overflow-wrap: anywhere; }
 .prompt-icon {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   place-items: center;
   border: 1px solid var(--edge);
-  border-radius: 12px;
+  border-radius: var(--r-control);
   background: var(--bubble);
   color: var(--accent);
 }
@@ -277,9 +316,10 @@ button.host svg { width: 16px; height: 16px; color: var(--accent); flex-shrink: 
   margin: 12px 0 0;
   padding: 10px 12px;
   border: 1px solid var(--edge);
-  border-radius: 12px;
+  border-radius: var(--r-control);
   background: var(--bubble);
-  font: 12px/1.5 ui-monospace, "Geist Mono", SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  font: var(--fs-xs)/1.5 "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
   user-select: text;
 }
@@ -293,8 +333,6 @@ button.host svg { width: 16px; height: 16px; color: var(--accent); flex-shrink: 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-
-button.host span { display: grid; gap: 1px; min-width: 0; text-align: left; }
-button.host small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-button.host .dot { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--muted); opacity: 0.5; flex-shrink: 0; }
-button.host .dot.on { background: #23aa83; opacity: 1; }
+@supports not (backdrop-filter: blur(1px)) {
+  .card { background: var(--solid); }
+}

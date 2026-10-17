@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from . import receipts, run_service, tmux_service
+from . import agents, receipts, run_service, tmux_service
 from .models import (
     Project,
     Task,
@@ -877,7 +877,12 @@ async def _launch_task_research_locked(
         no_agent_running = not getattr(
             session, "is_codex_running", True
         ) and not getattr(session, "is_claude_code_running", False)
-        if no_agent_running:
+        engine = await asyncio.to_thread(agents.pick, "claude")
+        if no_agent_running and engine == "codex":
+            # Tracked runs need Claude Code's Stop hook (start_claude). With
+            # only Codex installed, the research still starts, untracked.
+            await tmux_service.start_codex(workspace_path, workflow.session_name, initial_prompt=prompt)
+        elif no_agent_running:
             # DOLPHIN_RUN_ID can only enter an agent's environment at launch.
             # If Claude Code is already running here (e.g. the operator typed
             # `claude` by hand before this task's first launch), that process

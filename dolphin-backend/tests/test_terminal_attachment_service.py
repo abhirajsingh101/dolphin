@@ -441,6 +441,8 @@ async def test_startup_runs_cleanup_and_schedules_both_maintenance_loops(
     if main.fleet_runtime is not None:  # an optional feature, absent from the public build
         monkeypatch.setattr(main.fleet_runtime, "start", nothing)
     monkeypatch.setattr(main.turn_notification_collector, "start", lambda: None)
+    monkeypatch.setattr(main.brain_summaries, "start", lambda: None)
+    monkeypatch.setattr(main.skill_suggestions, "start", lambda: None)
 
     try:
         await main.startup()

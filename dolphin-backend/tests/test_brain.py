@@ -12,13 +12,14 @@ import io
 import json
 import os
 import time
+import sys
 import zipfile
 from pathlib import Path
 
 import httpx
 import pytest
 
-from app import brain
+from app import brain, embedder
 
 FAKE_BUN = r"""#!/bin/sh
 # install: run in the runtime folder; it creates GBrain's CLI.
@@ -28,9 +29,14 @@ if [ "$1" = "install" ]; then
 fi
 shift  # the cli.ts path
 case "$1" in
-  init) mkdir -p "$GBRAIN_HOME/.gbrain" && touch "$GBRAIN_HOME/.gbrain/brain.pglite"
+  init) if [ "$3" = --force ]; then echo "$* url=$LLAMA_SERVER_BASE_URL" >> "$GBRAIN_HOME/embed.log"
+          printf '{"engine":"pglite","embedding_model":"llama-server:granite-97m-r2","embedding_dimensions":1024}' > "$GBRAIN_HOME/.gbrain/config.json"; exit 0; fi
+        mkdir -p "$GBRAIN_HOME/.gbrain" && touch "$GBRAIN_HOME/.gbrain/brain.pglite"
         echo '{"status":"success","engine":"pglite"}' ;;
   config) echo "$@" >> "$GBRAIN_HOME/config.log" ;;
+  migrate|embed) echo "$* url=$LLAMA_SERVER_BASE_URL" >> "$GBRAIN_HOME/embed.log"
+        [ ! -e "$GBRAIN_HOME/fail-migrate" ] || [ "$1" != migrate ] || exit 1
+        if [ "$1" = migrate ]; then printf '{"engine":"pglite","embedding_model":"llama-server:granite-97m-r2","embedding_dimensions":384}' > "$GBRAIN_HOME/.gbrain/config.json"; fi ;;
   call) echo "gbrain 0.60 -> 0.61 available"   # a notice before the JSON, as the real one prints
         printf '{"tool":"%s","args":%s}\n' "$2" "$3" ;;
 esac
@@ -60,6 +66,7 @@ def dolphin_home(tmp_path, monkeypatch):
 
     monkeypatch.setattr(brain, "_download", download)
     monkeypatch.setattr(brain, "_worker", None)
+    monkeypatch.setattr(embedder, "LLAMA_SHA256", {})  # search by meaning has its own tests below
     return downloads
 
 
@@ -76,7 +83,7 @@ def test_setup_installs_bun_and_gbrain_creates_the_brain_and_checks_it(dolphin_h
     brain.install()
 
     status = brain.status()
-    assert status == {"state": "ready", "source": "dolphin", "version": brain.GBRAIN_VERSION, "keyless": True}
+    assert status == {"state": "ready", "source": "dolphin", "version": brain.GBRAIN_VERSION, "keyless": True, "search": "keywords"}
     assert dolphin_home == [f"https://github.com/oven-sh/bun/releases/download/bun-v{brain.BUN_VERSION}/bun-linux-x64.zip"]
     package = json.loads((brain.base() / "runtime" / "package.json").read_text())
     assert package["dependencies"]["gbrain"] == f"github:garrytan/gbrain#{brain.GBRAIN_COMMIT}"
@@ -322,17 +329,143 @@ def _settings_applied() -> list[str]:
 
 def test_setup_keeps_write_receipts_for_a_week(dolphin_home):
     brain.install()
-    assert _settings_applied() == ["config set persistence.receipt_retention_days 7"]
-    assert json.loads((brain.base() / "state.json").read_text())["receipt_retention_days"] == 7
+    assert _settings_applied() == ["config set persistence.receipt_retention_days 7", "config set memory.core.enabled true",
+                                  "config set memory.core.remote_edit allow"]
+    assert json.loads((brain.base() / "state.json").read_text())["settings_version"] == brain.SETTINGS_VERSION
 
 
 def test_a_brain_from_an_earlier_dolphin_gets_the_setting_once(dolphin_home):
     brain.install()
     state = json.loads((brain.base() / "state.json").read_text())
-    del state["receipt_retention_days"]
+    del state["settings_version"]  # a 0.2.5 brain: retention only
     (brain.base() / "state.json").write_text(json.dumps(state))
     (brain.base() / "home" / "config.log").unlink()
     brain.apply_settings()
     brain.apply_settings()
-    assert _settings_applied() == ["config set persistence.receipt_retention_days 7"]
+    assert _settings_applied() == ["config set persistence.receipt_retention_days 7", "config set memory.core.enabled true",
+                                  "config set memory.core.remote_edit allow"]
     assert brain.ready()
+
+
+FAKE_SERVE = r'''
+import json, os, sys
+log = os.environ["FAKE_SERVE_LOG"]
+if sys.argv[1] != "serve":
+    open(log, "a").write("call\n")
+    print(json.dumps({"via": "call"}))
+    sys.exit(0)
+open(log, "a").write("serve\n")
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    method = message["method"]
+    if method == "initialize":
+        result = {"protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": {"name": "gbrain"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": "get_page"}, {"name": "recall"}]}
+    else:
+        name, args = message["params"]["name"], message["params"]["arguments"]
+        if name == "get_page" and args["slug"] == "missing":
+            result = {"isError": True, "content": [{"type": "text", "text": '{"code": "page_not_found", "message": "Page not found"}'}]}
+        elif name == "recall" and args.get("quit"):
+            sys.exit(0)  # GBrain closing itself after its idle timeout
+        else:
+            result = {"content": [{"type": "text", "text": json.dumps({"tool": name, "args": args})}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+'''
+
+
+def test_calls_share_one_long_lived_server_and_reopen_it_after_it_closes(tmp_path, monkeypatch):
+    script, log = tmp_path / "fake_gbrain.py", tmp_path / "log"
+    script.write_text(FAKE_SERVE)
+    monkeypatch.setenv("DOLPHIN_GBRAIN_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setenv("FAKE_SERVE_LOG", str(log))
+    monkeypatch.setattr(brain, "_session", brain._Session())
+    try:
+        assert brain.call("get_page", {"slug": "a"}) == {"tool": "get_page", "args": {"slug": "a"}}
+        assert brain.call("recall", {"query": "b"})["args"] == {"query": "b"}
+        with pytest.raises(brain.BrainNotFound):
+            brain.call("get_page", {"slug": "missing"})
+        assert log.read_text().splitlines() == ["serve"]  # one server for all three
+        with pytest.raises(brain.BrainError):
+            brain.call("recall", {"quit": True})  # it closed mid-call, and closed again on the retry
+        assert brain.call("get_page", {"slug": "c"})["args"] == {"slug": "c"}
+        assert log.read_text().splitlines().count("serve") >= 2 and "call" not in log.read_text()
+    finally:
+        brain.close_session()
+        brain._session.close()
+
+
+def test_a_gbrain_without_a_server_runs_each_call_on_its_own(dolphin_home, monkeypatch):
+    monkeypatch.setattr(brain, "_session", brain._Session())
+    brain.install()
+    assert brain.call("recall", {"query": "x"}) == {"tool": "recall", "args": {"query": "x"}}
+    assert brain._session.unsupported
+
+
+@pytest.fixture
+def embeddable(dolphin_home, monkeypatch):
+    """Search by meaning with a stand-in server: install makes the two files, url() is fixed."""
+    monkeypatch.setattr(embedder, "LLAMA_SHA256", {"linux-x64": ("ubuntu-x64", "x")})
+
+    def install(base, key, download):
+        for path in (embedder._server(base), embedder._model(base)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("stand-in")
+
+    monkeypatch.setattr(embedder, "install", install)
+    monkeypatch.setattr(embedder.embedder, "url", lambda base: "http://127.0.0.1:9/v1")
+    monkeypatch.setattr(brain, "_session", brain._Session())
+    return dolphin_home
+
+
+def _embed_log() -> list[str]:
+    log = brain.base() / "home" / "embed.log"
+    return [line.split()[0] + " " + line.split()[1] if line.split()[0] == "migrate" else line.split()[0]
+            for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_setup_switches_the_brain_to_search_by_meaning(embeddable):
+    brain.install()
+    assert brain.status()["search"] == "meaning" and brain.status()["state"] == "ready"
+    assert _embed_log() == ["init", "migrate embeddings"]
+    log = (brain.base() / "home" / "embed.log").read_text()
+    assert "--embedding-dimensions 1024" in log and "--dim 384" in log and "url=http://127.0.0.1:9/v1" in log
+    assert brain._environment()["LLAMA_SERVER_BASE_URL"] == "http://127.0.0.1:9/v1"
+    brain.upgrade_embeddings()
+    assert _embed_log() == ["init", "migrate embeddings"]  # once
+
+
+def test_a_failed_switch_keeps_keyword_search_and_resumes_next_time(embeddable, monkeypatch):
+    (brain.base() / "home").mkdir(parents=True)
+    (brain.base() / "home" / "fail-migrate").touch()  # GBrain gets a minimal environment: a file says so
+    brain.install()
+    assert brain.status()["search"] == "keywords" and brain.ready()
+    assert "LLAMA_SERVER_BASE_URL" not in brain._environment()
+    assert brain.call("recall", {"query": "x"})["tool"] == "recall"  # memory still answers
+    (brain.base() / "home" / "fail-migrate").unlink()
+    brain.settle()  # the next start: turned on already, so only the migration runs
+    assert _embed_log() == ["init", "migrate embeddings", "migrate embeddings"]
+    assert brain.status()["search"] == "meaning"
+
+
+def test_a_brain_from_0_2_switches_at_startup(embeddable, monkeypatch):
+    monkeypatch.setattr(embedder, "LLAMA_SHA256", {})
+    brain.install()  # before this release: keyword search only
+    assert brain.status()["search"] == "keywords" and _embed_log() == []
+    monkeypatch.setattr(embedder, "LLAMA_SHA256", {"linux-x64": ("ubuntu-x64", "x")})
+    brain.settle()
+    assert _embed_log() == ["init", "migrate embeddings"] and brain.status()["search"] == "meaning"
+
+
+def test_a_catch_up_embeds_what_writes_left_behind_only_when_searching_by_meaning(embeddable):
+    brain.install()
+    brain.catch_up_embeddings()
+    assert _embed_log()[-1] == "embed"
+    log = (brain.base() / "home" / "embed.log").read_text().splitlines()[-1]
+    assert "--stale --catch-up" in log and "url=http://127.0.0.1:9/v1" in log
+    state = json.loads((brain.base() / "state.json").read_text())
+    (brain.base() / "state.json").write_text(json.dumps({**state, "embeddings": 0}))
+    brain.catch_up_embeddings()
+    assert _embed_log().count("embed") == 1  # a keyword brain has nothing to catch up

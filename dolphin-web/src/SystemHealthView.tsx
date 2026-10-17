@@ -568,7 +568,7 @@ export default function SystemHealthView() {
                       <td>{formatBytes(filesystem.used_bytes)}</td>
                       <td>{formatBytes(filesystem.available_bytes)}</td>
                       <td>
-                        <span className={`table-meter ${filesystem.usage_percent >= 90 ? 'hot' : ''}`}>
+                        <span className={`table-meter ${filesystem.usage_percent >= 95 ? 'hot' : filesystem.usage_percent >= 85 ? 'warm' : ''}`}>
                           <i style={{ width: `${Math.min(100, filesystem.usage_percent)}%` }} />
                           {formatPercent(filesystem.usage_percent)}
                         </span>
@@ -699,7 +699,7 @@ export default function SystemHealthView() {
         </div>
 
         <footer className="health-footer">
-          <Activity size={14} /> Telemetry stays on this machine. Dolphin reads the localhost Netdata API through FastAPI.
+          <Activity size={14} aria-hidden="true" /> Telemetry stays on this machine. Dolphin reads it from {summary.source?.startsWith('system') ? 'its built-in monitor' : 'the local Netdata API'}.
         </footer>
       </div>
     </section>

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { motion, useIsPresent } from 'motion/react';
+
+import { closingProps } from '../motion/MotionDialog';
+import { fadeVariants, presence } from '../motion/presets';
 
 import type { Api } from '../api';
 import { GLANCE_DELAY_MS, GLANCE_LINES, GLANCE_REFRESH_MS, lastLines } from './glance';
@@ -77,13 +81,17 @@ export function GlancePopover({ shown, onClose }: { shown: Shown; onClose: () =>
     if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
     setPlace((old) => (old.top === top && old.left === left ? old : { top, left }));
   }, [shown.rect, lines, failed]);
+  // Inside AnimatePresence: it fades in and out (fadeVariants, no travel). A
+  // leaving one gives up the id, so the row's aria-describedby finds the new one.
+  const present = useIsPresent();
   return createPortal(
-    <div ref={box} id={GLANCE_ID} role="tooltip" className="glass-glance" style={place}>
+    <motion.div ref={box} id={present ? GLANCE_ID : undefined} role="tooltip" className="glass-glance" aria-hidden={present ? undefined : true}
+      {...closingProps(present, place)} variants={fadeVariants} {...presence}>
       <strong>{label}</strong>
       {failed ? <p>Preview unavailable. Open the session to see it.</p>
         : lines === null ? <p>Loading preview…</p>
           : lines.length ? <pre>{lines.join('\n')}</pre> : <p>No output yet.</p>}
-    </div>,
+    </motion.div>,
     document.querySelector('.glass-workspace') ?? document.body,
   );
 }

@@ -5,6 +5,7 @@ import {
   searchPalette,
   type PaletteItem,
 } from './commandPaletteModel';
+import { useDialogParts } from './motion/dialogParts';
 import './commandPalette.css';
 
 const LISTBOX_ID = 'cp-listbox';
@@ -45,6 +46,10 @@ export default function CommandPalette({
   const groups = useMemo(() => searchPalette(items, query), [items, query]);
   const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
   const activeItem = flat[cursor];
+  // Plain divs on the board; in the glass workspace, Motion parts that keep
+  // the palette on screen while it animates out, which is why it stays
+  // mounted when closed.
+  const { Presence, Scrim, Panel } = useDialogParts();
 
   useEffect(() => {
     if (!open) return;
@@ -70,8 +75,6 @@ export default function CommandPalette({
   }, [open]);
 
   useEffect(() => setCursor(0), [query]);
-
-  if (!open) return null;
 
   /** Close the palette without a selection (Escape, scrim click) — hand
    * focus back to whatever had it before the palette opened. */
@@ -107,12 +110,15 @@ export default function CommandPalette({
   }
 
   return (
-    <div
+    <Presence>
+    {open && (
+    <Scrim
       className="cp-scrim"
+      key="command-palette"
       onClick={closeWithoutSelection}
       role="presentation"
     >
-      <div
+      <Panel
         aria-label="Command palette"
         aria-modal="true"
         className="cp-panel"
@@ -190,7 +196,9 @@ export default function CommandPalette({
           <span><kbd className="dt-kbd">↵</kbd> open</span>
           <span><kbd className="dt-kbd">esc</kbd> close</span>
         </div>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
+    )}
+    </Presence>
   );
 }

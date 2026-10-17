@@ -18,6 +18,7 @@ import {
   type ResultGroup,
 } from './projectPickerModel';
 import type { WorkspaceDirectory, WorkspaceRoot } from './types';
+import { useDialogParts } from './motion/dialogParts';
 import './projectPicker.css';
 
 /* The coarse-pointer regime, in one place because two things have to agree on
@@ -146,6 +147,7 @@ export default function ProjectPickerDialog({
   const [error, setError] = useState<string | null>(null);
   const [rootsAttempt, setRootsAttempt] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
+  const { Scrim, Panel } = useDialogParts();
   const treeRef = useRef<TreeApi<PickerNode> | undefined>(undefined);
   const coarsePointer = useCoarsePointer();
   const treeHost = useContentWidth(560);
@@ -289,8 +291,8 @@ export default function ProjectPickerDialog({
         : `Clear the search to browse all ${roots.length} workspace roots.`;
 
   return (
-    <div className="picker-scrim" onClick={onClose} role="presentation">
-      <div
+    <Scrim className="picker-scrim" onClick={onClose} role="presentation">
+      <Panel
         aria-label="Link a project"
         aria-modal="true"
         className="picker-panel"
@@ -526,7 +528,7 @@ export default function ProjectPickerDialog({
             </button>
           </div>
         </footer>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

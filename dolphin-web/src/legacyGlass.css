@@ -1,0 +1,212 @@
+/* The board, cockpit, Missions, Morning Radar and System Health in the glass
+   workspace's material (2026-10-17).
+
+   Colour comes from tokens.css: on these routes <html data-surface="legacy">
+   points the semantic tokens at the glass ones ("Legacy routes on glass"), so
+   text, chips, inputs, cards and menus change with no rule here. This sheet
+   adds only what a token cannot carry: the flat backdrop under every page,
+   the panel finish (sheen, white edge, soft shadow) on the large surfaces, the
+   floating rail, frosted dialogs and the glass scrim.
+
+   Every rule is scoped to the legacy surface, so the workspace (which sets
+   data-surface="glass") and Dolphin Desktop (which sets neither) never see
+   it, and the scope's extra specificity wins over the route sheets whatever
+   order the bundle loads them in. No padding, gap or height changes here: the
+   card height contract (120-168px) and the cockpit's 80x40 terminal floor
+   depend on those. */
+
+/* The backdrop: one flat --glass-bg behind every page, as in the workspace. */
+:root[data-surface='legacy'] :is(
+  .app-shell,
+  .project-page,
+  .agent-kanban,
+  .fleet-page,
+  .improvement-radar-view,
+  .system-health-view
+) {
+  background: var(--glass-bg);
+}
+
+/* Bands that ran edge to edge with a fill and a rule under them read as a
+   second app's toolbar. In the workspace the top bar sits on the backdrop. */
+:root[data-surface='legacy'] :is(.dictation-control, .fleet-topbar, .radar-header, .health-header) {
+  border-bottom-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+/* Panel finish, the workspace's .glass-surface over an opaque base: the
+   backdrop is flat, so it looks the same as the translucent panel, and a
+   sticky part of it never shows scrolled content through. */
+:root[data-surface='legacy'] :is(
+  .ak-column,
+  .fleet-column,
+  .fleet-lead,
+  .radar-source-panel,
+  .health-panel,
+  .health-chart-card
+) {
+  border-color: var(--glass-edge);
+  background:
+    linear-gradient(135deg, var(--glass-sheen), transparent 35%, var(--glass-tint)),
+    var(--glass-panel-flat);
+  box-shadow: var(--glass-shadow);
+}
+
+/* A column's sticky header used to paint the column's own fill over it; on
+   the sheen that is a visible flat band. The body is the scroller, so the
+   header never has content under it and can let the panel show. */
+:root[data-surface='legacy'] .ak-column-header {
+  border-bottom-color: var(--glass-edge);
+  background: transparent;
+}
+
+/* The project rail floats like the workspace sidebar: inset 8px from the
+   window, rounded, with the panel finish. Desktop layout only; at 820px and
+   under the rail is a band across the top and stays one. */
+@media (min-width: 821px) {
+  :root[data-surface='legacy'] .project-rail {
+    height: calc(100% - 16px);
+    margin: 8px 0 8px 8px;
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--r-xl);
+    background:
+      linear-gradient(135deg, var(--glass-sheen), transparent 35%, var(--glass-tint)),
+      var(--glass-panel-flat);
+    box-shadow: var(--glass-shadow);
+  }
+
+  /* Collapsed, the rail is 56px less its 8px inset; 40px buttons still fit. */
+  :root[data-surface='legacy'] .project-rail.collapsed .collapsed-project-list {
+    padding: 8px 2px;
+  }
+}
+
+:root[data-surface='legacy'] :is(.collapsed-rail-header, .collapsed-health-button) {
+  border-bottom-color: var(--glass-edge);
+}
+
+/* The cockpit. The terminal stays a dark bezel (the package paints its xterm canvas near-black),
+   but above 1180px the session dock is its own row above it (styles.css), and
+   there it painted a band of terminal black across the page behind light
+   controls. It sits on the backdrop instead, as narrower layouts already do. */
+@media (min-width: 1181px) {
+  :root[data-surface='legacy'] .terminal-workspace[data-pane-count="1"]:not(.has-fullscreen-pane) .terminal-session-dock {
+    border-bottom-color: transparent;
+    background: transparent;
+  }
+}
+
+/* Dialogs, drawers and popovers: the workspace's frosted dialog. */
+:root[data-surface='legacy'] :is(
+  .ak-inspector-backdrop .ak-inspector,
+  .ak-dialog,
+  .workflow-panel,
+  .picker-panel,
+  .cp-panel,
+  .new-session-panel
+) {
+  border-color: var(--glass-edge);
+  background: linear-gradient(135deg, var(--glass-sheen), transparent 45%), var(--glass-solid);
+  box-shadow: 0 24px 60px var(--glass-dialog-shadow), var(--glass-shadow);
+}
+
+/* Floating glass chrome takes --r-xl, as the workspace's dialogs do. Phone
+   widths keep each sheet's own corners, some of which go edge to edge. */
+@media (min-width: 821px) {
+  :root[data-surface='legacy'] :is(.ak-dialog, .workflow-panel, .picker-panel, .cp-panel, .new-session-panel) {
+    border-radius: var(--r-xl);
+  }
+}
+
+/* Scrims. The board's two were --text at 28% and 42%, which is near-white in
+   the dark theme and washed the page out instead of dimming it. */
+:root[data-surface='legacy'] :is(
+  .ak-inspector-backdrop,
+  .ak-dialog-backdrop,
+  .workflow-scrim,
+  .picker-scrim,
+  .cp-scrim,
+  .new-session-scrim
+) {
+  background: var(--glass-scrim);
+  backdrop-filter: blur(4px);
+}
+
+/* The task drawer is read beside the board, so it dims without blurring. */
+:root[data-surface='legacy'] .ak-inspector-backdrop {
+  backdrop-filter: none;
+}
+
+/* Missions (#/fleet) takes the workspace's one button set (glassSurfaces.css):
+   28px pills; primary filled --glass-accent-strong with --accent-on; secondary
+   on the bubble; ghost as text. Its primaries were --accent-ink, a navy no
+   other surface uses, and a disabled one faded to a pale blue that read as a
+   hint. Danger is quiet until it is the confirming step: Stop Fleet is an
+   outline in the danger colour on the bubble (on the bare backdrop that
+   colour is just under 4.5:1), and only the filled buttons inside a
+   .fleet-confirm group (Stop All Agents, Delete Trigger, Cancel Mission) are
+   filled. Height only: fleet.css gives coarse pointers a 44px minimum. */
+:root[data-surface='legacy'] .fleet-page .dt-btn {
+  height: 28px;
+  padding: 0 12px;
+  gap: 6px;
+  border-radius: var(--r-full);
+  font-weight: var(--fw-medium);
+  box-shadow: none;
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--icon {
+  width: 28px;
+  padding: 0;
+  border-radius: var(--r-md);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--primary {
+  background: var(--glass-accent-strong);
+  color: var(--accent-on);
+  font-weight: var(--fw-bold);
+  box-shadow: inset 0 1px var(--glass-sheen);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--primary:hover:not(:disabled) {
+  background: var(--glass-accent-hover);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--secondary {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--secondary:hover:not(:disabled) {
+  background: var(--glass-selection);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--ghost {
+  color: var(--glass-muted-small);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--ghost:hover:not(:disabled) {
+  background: var(--glass-selection);
+  color: var(--glass-text);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--glass-bubble);
+  color: var(--danger);
+}
+:root[data-surface='legacy'] .fleet-page .dt-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--glass-del);
+}
+:root[data-surface='legacy'] .fleet-page .fleet-confirm .dt-btn--danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: var(--danger-on);
+  font-weight: var(--fw-bold);
+}
+:root[data-surface='legacy'] .fleet-page .fleet-confirm .dt-btn--danger:hover:not(:disabled) {
+  background: var(--danger-hover);
+}
+/* Disabled is neutral, not a washed-out copy of its colour. */
+:root[data-surface='legacy'] .fleet-page .dt-btn:disabled {
+  border-color: var(--glass-edge);
+  background: var(--glass-bubble);
+  color: var(--glass-muted-small);
+  box-shadow: none;
+  opacity: 0.7;
+}

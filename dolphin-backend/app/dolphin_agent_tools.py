@@ -5,13 +5,15 @@ import asyncio
 import importlib
 import json
 import re
-import shutil
+
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+
+from . import agents
 
 
 Id = Annotated[str, Field(min_length=1, max_length=128, pattern=r'^[a-zA-Z0-9_-]+$')]
@@ -164,11 +166,34 @@ plainly when nothing is stored. Save with remember only durable decisions the us
 results you verified; evidence must be an exact short quote from the user or a successful tool
 result. Never save secrets, credentials or guesses, and never claim something was saved until
 remember returns a receipt.
+The brain follows every project on every machine Dolphin connects to. For what is going on overall,
+read_brain_page dolphin/now: one line per project, newest first. For one project, read its page
+(projects/<machine>/<project>, linked from dolphin/now): its state, open threads, decisions and
+links to monthly work logs, which hold every exchange with Claude Code or Codex. Read a work log
+only when the summary does not answer the question.
 '''
 if not EXTENSION:
     TOOL_MODELS.update(MEMORY_MODELS)
     DESCRIPTIONS.update(MEMORY_DESCRIPTIONS)
     MUTATIONS.add('remember')
+
+
+TIMELINE_CHARS = 12_000
+
+
+def _newest_timeline(page):
+    """A work log lists the oldest first; a long one keeps its newest entries."""
+    if not isinstance(page, dict) or not isinstance(page.get('timeline'), str) or len(page['timeline']) <= TIMELINE_CHARS:
+        return page
+    lines = page['timeline'].splitlines()
+    kept, size = [], 0
+    for line in reversed(lines):
+        if size + len(line) + 1 > TIMELINE_CHARS:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    dropped = len(lines) - len(kept)
+    return {**page, 'timeline': f'({dropped} older lines left out; the newest follow)\n' + '\n'.join(reversed(kept))}
 
 
 def memory_available() -> bool:
@@ -227,9 +252,10 @@ class DolphinTools:
             tool, payload = 'remember', {'fact': args.fact, 'entity': args.entity, 'kind': args.kind,
                                          'provenance': f'Dolphin turn {self.turn_id}: {args.evidence}'[:500]}
         try:
-            return await asyncio.to_thread(brain.call, tool, payload)
+            result = await asyncio.to_thread(brain.call, tool, payload)
         except brain.BrainError as error:
             raise ToolError(str(error)) from error
+        return _newest_timeline(result) if tool == 'get_page' else result
 
     async def execute(self, name: str, arguments: dict):
         if name not in TOOL_MODELS:
@@ -249,11 +275,10 @@ class DolphinTools:
             path = workspace.get('path')
             if not workspace.get('is_allowed') or not path or not Path(path).is_dir():
                 raise ToolError('Project workspace is unavailable; no session was started.')
-            engine = args.mode
-            if engine == 'claude' and not shutil.which('claude'):
-                engine = 'codex'
-            if not shutil.which(engine):
-                raise ToolError('No requested agent CLI is installed; no session was created.')
+            # The agent asked for, or the other one when only that one is installed.
+            engine = await asyncio.to_thread(agents.pick, args.mode)
+            if engine is None:
+                raise ToolError('Neither Claude Code nor Codex is installed here; no session was created.')
             label = short_label(args.name) if not _looks_like_id(args.name) else task_label(self.user_request or args.instruction)
             created = await self._create_shell(root, label)
             result = {'project_id': project, 'session_name': created['name'], 'engine': engine,

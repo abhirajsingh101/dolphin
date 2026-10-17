@@ -13,7 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from . import tmux_service
+from . import agents, tmux_service
 from .models import Project, Task, TaskQualityContract, TaskWorkflow
 
 
@@ -430,7 +430,9 @@ async def _start_serial_queue_locked(
             session_name,
             mode="shell",
         )
-        await tmux_service.start_codex(
+        # Codex, or Claude Code when only that one is installed.
+        start = tmux_service.start_claude if await asyncio.to_thread(agents.pick, "codex") == "claude" else tmux_service.start_codex
+        await start(
             workspace_path,
             session_name,
             initial_prompt=prompt,

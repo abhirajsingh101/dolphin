@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import agent_clis, agent_hooks_setup, desktop_environment, agent_memory_setup, recent_repos, tmux_projects, turn_notifications
+from . import agent_clis, agent_hooks_setup, desktop_environment, recent_repos, tmux_projects, turn_notifications
 from .database import get_db
 from .models import Project
 
@@ -142,22 +142,6 @@ async def _import_tmux_projects(body: Optional[ImportRequest], dry_run: bool, db
         "added": [{"id": project.id, "name": project.name, "path": project.path, "sessions": names} for project, names in added],
         "pending": [],
     }
-
-
-@router.get("/api/desktop/agent-memory")
-async def agent_memory_status():
-    _helper_mode()
-    return await asyncio.to_thread(agent_memory_setup.status)
-
-
-@router.post("/api/desktop/agent-memory")
-async def connect_agent_memory(body: HooksRequest):
-    """Register Dolphin's memory with the chosen agents (their own `mcp add`)."""
-    _helper_mode()
-    try:
-        return await asyncio.to_thread(agent_memory_setup.connect, list(body.agents))
-    except (ValueError, RuntimeError, OSError) as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get("/api/desktop/environment")

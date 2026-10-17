@@ -750,6 +750,46 @@ class Notification(Base):
     read_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class AgentExchange(Base):
+    """One prompt and the agent's final reply, read from a Claude Code or Codex
+    transcript on this machine (app/transcript_exchanges.py). ``key`` is
+    agent:session:offset, so a rescan never stores a turn twice."""
+
+    __tablename__ = "agent_exchanges"
+
+    id = Column(String, primary_key=True, default=generate_id)
+    key = Column(String, nullable=False, unique=True)
+    agent = Column(String, nullable=False)
+    session_id = Column(String, nullable=False)
+    cwd = Column(Text, nullable=False, default="", server_default="")
+    folder = Column(Text, nullable=False, default="", server_default="")
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    prompt = Column(Text, nullable=False, default="", server_default="")
+    reply = Column(Text, nullable=False, default="", server_default="")
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class TranscriptOffset(Base):
+    """How far each transcript has been read: the start of its first unfinished turn."""
+
+    __tablename__ = "transcript_offsets"
+
+    path = Column(Text, primary_key=True)
+    agent = Column(String, nullable=False)
+    offset = Column(Integer, nullable=False, default=0, server_default="0")
+    size = Column(Integer, nullable=False, default=0, server_default="0")
+    mtime = Column(Float, nullable=False, default=0, server_default="0")
+    session_id = Column(String, nullable=False, default="", server_default="")
+    cwd = Column(Text, nullable=False, default="", server_default="")
+
+
 # --- Fleet: parent-orchestrated parallel agent work ---------------------------
 # Spec: docs/superpowers/specs/2026-09-23-dolphin-fleet-design.md (§11).
 # Attempts live in their own table rather than `runs`: runs.task_id is NOT

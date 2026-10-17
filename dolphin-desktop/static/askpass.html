@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Dolphin — SSH</title><link rel="stylesheet" href="style.css"></head>
-<body>
+<head><meta charset="utf-8"><title>Dolphin — SSH</title><link rel="stylesheet" href="style.css"><script src="theme.js"></script></head>
+<body class="sheet framed">
   <main class="card compact">
     <div class="prompt-head">
       <span class="prompt-icon" id="icon" aria-hidden="true"></span>
@@ -57,6 +57,7 @@
       document.getElementById('title').textContent = mode === 'secret' ? 'Password needed' : 'SSH';
       document.getElementById('question').textContent = question;
       if (mode === 'secret') input.type = 'password';
+      document.getElementById('ok').textContent = mode === 'secret' ? 'Send Password' : 'Send Answer';
       input.focus();
       document.getElementById('form').addEventListener('submit', (event) => { event.preventDefault(); send(input.value); });
     }

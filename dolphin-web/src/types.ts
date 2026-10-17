@@ -473,6 +473,8 @@ export interface SerialQueue {
 
 export interface TmuxSession {
   name: string;
+  /** Set when the agent asked for is not installed and the other one started. */
+  warning?: string | null;
   path: string;
   created_at: string;
   windows: number;
@@ -903,7 +905,7 @@ export interface SessionDiff {
 }
 
 export interface LaunchRequest {
-  mode: 'claude' | 'codex' | 'shell';
+  mode: 'claude' | 'codex' | 'shell' | 'terminal';
   name?: string;
   prompt?: string;
   task_id?: string;
@@ -971,4 +973,26 @@ export interface HistoryItem {
   updated_at: string;
   message_count: number;
   snippets: string[];
+}
+
+/** One skill or plugin the helper suggests for the user's recent work
+    (`GET /api/suggestions/skills`). Dolphin never installs it: `url` is where
+    to read about it and `install` is the command the user runs themselves. */
+export interface SkillSuggestion {
+  key: string;
+  kind: 'skill' | 'plugin';
+  name: string;
+  source: string;
+  url: string;
+  install: string;
+  reason: string;
+  project: string | null;
+  installs: number | null;
+  agent: 'claude' | 'codex' | 'any';
+}
+
+export interface SkillSuggestions {
+  enabled: boolean;
+  items: SkillSuggestion[];
+  generated_at: string | null;
 }

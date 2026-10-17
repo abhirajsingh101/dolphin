@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { DolphinApiError } from './api';
+import { useDialogPresent } from './motion/dialogParts';
 
 /* What the workflow panels (Ports, Usage, History, Diff, Import) share as
    modals: focus moves in on open and back to what opened them on close, and
@@ -47,7 +48,11 @@ export function useModalPanel(panel: RefObject<HTMLElement | null>, onClose: () 
   const hold = useRef(options.holdEscape);
   hold.current = options.holdEscape;
   const focusTarget = options.focus;
+  // A panel animating out (glass workspace) gives Escape and the focus back
+  // as soon as it starts closing, not when it finally unmounts.
+  const present = useDialogPresent();
   useEffect(() => {
+    if (!present) return;
     const id = Symbol('panel');
     open.push(id);
     (focusTarget?.current ?? panel.current)?.focus();
@@ -62,10 +67,11 @@ export function useModalPanel(panel: RefObject<HTMLElement | null>, onClose: () 
       open.splice(open.indexOf(id), 1);
       // Only when the focus went down with the panel: never pull it away from
       // something the user moved to meanwhile (a session a Resume opened).
+      // A closing panel is still in the document, so focus inside it counts as gone.
       const active = document.activeElement;
-      if (opener?.isConnected && (!active || active === document.body)) opener.focus({ preventScroll: true });
+      if (opener?.isConnected && (!active || active === document.body || panel.current?.contains(active))) opener.focus({ preventScroll: true });
     };
-  }, []);
+  }, [present]);
 }
 
 const HELPER_NEEDED = 'This needs the Dolphin helper on that machine.';

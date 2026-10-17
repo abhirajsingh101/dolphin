@@ -99,7 +99,9 @@ describe('route-root writers', () => {
   const SOURCE_DIR = resolve(__dirname);
   const ASSIGNMENT = /(^|[^.\w])document\s*\.\s*title\s*=[^=]/;
   // The public export ships the desktop workspace without the web app's App.tsx.
-  const ROUTE_ROOTS = ['App.tsx', 'GlassWorkspace.tsx'].filter((name) =>
+  // GlassHealthPage is the web app's #/health, which main.tsx renders instead
+  // of App or the workspace, never beside them.
+  const ROUTE_ROOTS = ['App.tsx', 'GlassHealthPage.tsx', 'GlassWorkspace.tsx'].filter((name) =>
     existsSync(resolve(SOURCE_DIR, name)),
   );
 

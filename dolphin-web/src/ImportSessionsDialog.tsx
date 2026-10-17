@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { PendingImport } from './api';
 import { panelError, useModalPanel } from './useModalPanel';
+import { useDialogParts } from './motion/dialogParts';
 import './workflow.css';
 
 /* Connecting to a machine with many tmux sessions running would fill the
@@ -18,6 +19,7 @@ export default function ImportSessionsDialog({ machineLabel, pending, onAnswer }
   const [error, setError] = useState('');
   const sending = useRef(false);
   const panel = useRef<HTMLDivElement>(null);
+  const { Scrim, Panel } = useDialogParts();
   const toggle = (path: string) => setChosen((current) => {
     const next = new Set(current);
     if (next.has(path)) next.delete(path);
@@ -40,8 +42,8 @@ export default function ImportSessionsDialog({ machineLabel, pending, onAnswer }
   };
   useModalPanel(panel, () => void answer(null));
   return (
-    <div className="workflow-scrim" role="presentation">
-      <div ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Add projects from ${machineLabel}`}>
+    <Scrim className="workflow-scrim" role="presentation">
+      <Panel ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Add projects from ${machineLabel}`}>
         <header className="workflow-header">
           <h2>Add {pending.length} projects from {machineLabel}?</h2>
         </header>
@@ -64,7 +66,7 @@ export default function ImportSessionsDialog({ machineLabel, pending, onAnswer }
             {chosen.size === 1 ? 'Add 1 project' : `Add ${chosen.size} projects`}
           </button>
         </footer>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

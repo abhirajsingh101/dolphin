@@ -3,6 +3,7 @@ import { ExternalLink, RefreshCw, X } from 'lucide-react';
 import { useApi } from './apiContext';
 import { machineBridge } from './machines';
 import { panelError, useModalPanel } from './useModalPanel';
+import { useDialogParts } from './motion/dialogParts';
 import type { ListeningPort } from './types';
 import './workflow.css';
 
@@ -26,6 +27,7 @@ export default function PortsPanel({ machineId, machineLabel, remote, onClose }:
   const [revision, setRevision] = useState(0);
   const panel = useRef<HTMLDivElement>(null);
   useModalPanel(panel, onClose);
+  const { Scrim, Panel } = useDialogParts();
   useEffect(() => {
     let current = true;
     const load = () => loadPorts.current()
@@ -49,8 +51,8 @@ export default function PortsPanel({ machineId, machineLabel, remote, onClose }:
     }
   };
   return (
-    <div className="workflow-scrim" role="presentation" onClick={onClose}>
-      <div ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Ports on ${machineLabel}`}
+    <Scrim className="workflow-scrim" role="presentation" onClick={onClose}>
+      <Panel ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`Ports on ${machineLabel}`}
         onClick={(event) => event.stopPropagation()}>
         <header className="workflow-header">
           <h2>Ports on {machineLabel}</h2>
@@ -79,7 +81,7 @@ export default function PortsPanel({ machineId, machineLabel, remote, onClose }:
             </ul>
           )}
         </div>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

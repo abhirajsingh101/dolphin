@@ -42,8 +42,7 @@ export default function HealthOverlay({ machine, target }: { machine: string; ta
     <div ref={root} className="glass-health" role="dialog" aria-modal="true" aria-label="System Health" onKeyDown={keys}>
       <header className="glass-health-top">
         <a className="glass-brand" href="#/workspace" aria-label="Dolphin workspace"><span className="dolphin-mark"><DolphinIcon /></span></a>
-        {target.label && <span className="glass-host" title={`Health of ${target.label}`}>{target.label}</span>}
-        <span className="glass-health-crumb">System Health</span>
+        {target.label && <span className="glass-host" data-state={target.kind === 'unavailable' ? 'offline' : undefined} title={target.kind === 'unavailable' ? `${target.label} is not connected` : `Health of ${target.label}`}>{target.label}</span>}
         <a ref={back} className="glass-health-back" href="#/workspace"><ArrowLeft size={15} aria-hidden="true" /> Back to Workspace</a>
       </header>
       <main className="glass-health-stage">

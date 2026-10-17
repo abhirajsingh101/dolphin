@@ -4,11 +4,12 @@ import json
 import os
 import re
 from pathlib import Path
-import shutil
 import signal
 import tempfile
 import tomllib
 import uuid
+
+from . import agents
 
 SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -85,9 +86,10 @@ async def complete(messages, tools, preferred='claude', on_text=None):
               'Return the required JSON: content is the final Markdown answer when calls is empty; otherwise '
               'calls contains requested tool names and arguments encoded as JSON strings. Never claim a tool '
               'ran until its result appears in the conversation.\n' + json.dumps({'conversation': messages, 'tools': tools}))
-    engines = ['claude', 'codex'] if preferred == 'claude' else ['codex']
-    for engine in engines:
-        executable = shutil.which(engine)
+    # Whichever agents this machine has, the preferred one first (agents.py).
+    found = await asyncio.to_thread(agents.paths)
+    for engine in await asyncio.to_thread(agents.order, preferred):
+        executable = found.get(engine)
         if not executable:
             continue
         try:
@@ -152,7 +154,7 @@ async def complete(messages, tools, preferred='claude', on_text=None):
                     if not isinstance(call.get('name'), str) or not isinstance(call.get('arguments'), str):
                         raise EngineUnavailable('Invalid tool request.')
                     calls.append({'id': uuid.uuid4().hex, 'type': 'function', 'function': call})
-                return {'content': decision['content'], 'tool_calls': calls}, {'provider': engine, 'model': model, 'fallback': engine != 'claude'}
+                return {'content': decision['content'], 'tool_calls': calls}, {'provider': engine, 'model': model, 'fallback': engine != (preferred if preferred in agents.AGENTS else 'claude')}
         except (OSError, ValueError, KeyError, TypeError, StopIteration, asyncio.TimeoutError, EngineUnavailable):
             continue
     if on_text:

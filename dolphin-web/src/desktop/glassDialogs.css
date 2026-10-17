@@ -1,55 +1,7 @@
-/* Dolphin Desktop paint for surfaces the web app shares in its plain style:
-   the folder picker and command palette become glass (their own tokens point
-   at the glass ones), the machine name is a chip, and the loading splash
-   matches the launch page. */
-
-.picker-panel,
-.cp-panel {
-  --surface: var(--glass-solid);
-  --surface-2: transparent;
-  --surface-3: var(--glass-selection);
-  --border: var(--glass-edge);
-  --border-interactive: var(--glass-edge);
-  --text: var(--glass-text);
-  --text-2: var(--glass-muted);
-  --text-3: var(--glass-muted);
-  --accent: var(--glass-accent);
-  --accent-soft: var(--glass-selection);
-  border-color: var(--glass-edge);
-  border-radius: var(--r-xl);
-  background: linear-gradient(135deg, var(--glass-sheen), transparent 45%), var(--glass-panel);
-  box-shadow: 0 24px 60px var(--glass-dialog-shadow), var(--glass-shadow);
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-}
-.picker-scrim,
-.new-session-scrim {
-  background: var(--glass-scrim);
-  backdrop-filter: blur(4px);
-}
-.picker-footer {
-  background: linear-gradient(110deg, var(--glass-bubble), transparent);
-}
-.picker-panel .dt-input {
-  border-color: var(--glass-edge);
-  border-radius: var(--r-md);
-  background: var(--glass-bubble);
-}
-.picker-panel .dt-btn {
-  border-radius: var(--r-full);
-}
-.new-session-panel {
-  --surface: var(--glass-solid);
-  border-color: var(--glass-edge);
-  border-radius: var(--r-xl);
-  background: linear-gradient(135deg, var(--glass-sheen), transparent 45%), var(--glass-panel);
-  box-shadow: 0 24px 60px var(--glass-dialog-shadow), var(--glass-shadow);
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-}
-.new-session-header {
-  border-bottom-color: var(--glass-edge);
-}
+/* Dolphin Desktop paint for what the web app does not show: the machine chip
+   beside the brand, the loading splash, and the crash fallback. The dialogs
+   that were glassed here (the folder picker, the command palette, New Session)
+   are glassed for both builds by src/glassSurfaces.css since 2026-10-17. */
 
 /* The machine this window works on, as a chip beside the brand. */
 .glass-host {
@@ -62,7 +14,7 @@
   border: 1px solid var(--glass-edge);
   border-radius: var(--r-full);
   background: var(--glass-bubble);
-  color: var(--glass-muted);
+  color: var(--glass-muted-small);
   font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,12 +41,9 @@
   justify-items: center;
   gap: 14px;
   color: var(--glass-text);
-  font: 13px/1.5 var(--font-sans);
-  background:
-    radial-gradient(ellipse at 50% -25%, var(--glass-glow), transparent 65%),
-    radial-gradient(ellipse at 100% 85%, var(--glass-glow), transparent 60%),
-    linear-gradient(155deg, transparent 53%, var(--glass-ridge) 54%, transparent 58%),
-    var(--glass-bg);
+  font: var(--fs-sm)/1.5 var(--font-sans);
+  /* The workspace's flat backdrop (its swoosh art went on 2026-10-12). */
+  background: var(--glass-bg);
 }
 .desktop-splash .dolphin-orb {
   display: grid;
@@ -131,18 +80,30 @@
   content: '';
 }
 
-/* New Session: each choice's icon on a small glass tile. */
-.new-session-panel .new-session-option > svg {
-  box-sizing: content-box;
-  width: 16px;
-  height: 16px;
-  margin-top: 0;
-  padding: 8px;
-  border: 1px solid var(--glass-edge);
-  border-radius: var(--r-md);
-  background: var(--glass-bubble);
-  color: var(--glass-accent);
+/* A render crash (ErrorBoundary.tsx) replaces the whole window: in the
+   desktop app, which shows only glass, it is a glass card on the backdrop. */
+.crash-panel {
+  min-height: 100dvh;
+  background: var(--glass-bg);
+  color: var(--glass-text);
 }
-.new-session-option {
-  align-items: center;
+.crash-panel-body {
+  --surface: var(--glass-bubble);
+  --surface-2: var(--glass-bubble);
+  --surface-3: var(--glass-selection);
+  --border: var(--glass-edge);
+  --text: var(--glass-text);
+  --text-2: var(--glass-muted);
+  --accent: var(--glass-accent-strong);
+  --accent-hover: var(--glass-accent-hover);
+  --sh-1: none;
+  border-color: var(--glass-edge);
+  border-radius: var(--r-xl);
+  background: var(--glass-float-fill);
+  box-shadow: var(--glass-float-shadow);
+  backdrop-filter: var(--glass-float-blur);
+}
+.crash-panel-body .dt-btn {
+  height: 28px;
+  border-radius: var(--r-full);
 }

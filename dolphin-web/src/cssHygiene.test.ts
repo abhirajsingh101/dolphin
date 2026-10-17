@@ -17,9 +17,9 @@ function readSheet(name: string): string {
 
 // Every stylesheet the app ships, found on disk so a new sheet cannot be
 // missed. tokens.css is where the literal values live, so it is the exception.
-// The two sheets below predate this discovery, were never on the old hand-kept
-// list, and break the type and radius scales; they stay unchecked until fixed.
-const NOT_YET_CHECKED = new Set(['tokens.css', 'improvementRadar.css', 'taskQuality.css']);
+// improvementRadar.css and taskQuality.css were exempt here until 2026-10-17,
+// when their 8-10px labels, 28px figure and 4px corners moved onto the scales.
+const NOT_YET_CHECKED = new Set(['tokens.css']);
 const SHEETS: [string, string][] = (readdirSync(__dirname, { recursive: true }) as string[])
   .filter((name) => name.endsWith('.css') && !NOT_YET_CHECKED.has(name))
   .sort()
@@ -61,6 +61,14 @@ const NAMED_COLOR_PATTERN = new RegExp(`\\b(${NAMED_COLORS.join('|')})\\b`, 'i')
 describe.each(SHEETS)('%s', (_name, css) => {
   it('declares no raw hex colours', () => {
     expect(css.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).toEqual([]);
+  });
+
+  // Paired with a var(), the prefixed copy made the build's CSS minifier drop
+  // the unprefixed one, so Chromium got no blur at all: the Settings scrim and
+  // panel went see-through (found 2026-10-17). Write only the unprefixed
+  // property with a var(); the build adds what other engines need.
+  it('never pairs a var() backdrop-filter with a -webkit- copy', () => {
+    expect(css.match(/-webkit-backdrop-filter:\s*var\(/g) ?? []).toEqual([]);
   });
 
   it('declares no legacy indigo token names', () => {
@@ -136,7 +144,10 @@ describe.each(SHEETS)('%s', (_name, css) => {
 // The glass sheets name every text size from the --fs-* scale (design
 // contract section 5). A literal pixel size is how a scale stops being the
 // scale. Other sheets join this list as they are cleaned.
-const TYPE_SCALE_SHEETS = ['glass.css'];
+// The sheets that dress System Health, first run and the desktop dialogs in
+// glass joined on 2026-10-17, with the small-text check below.
+const GLASS_FRAME_SHEETS = ['glassHealth.css', 'desktopStart.css', 'firstRunChecklist.css', 'desktop/glassDialogs.css'];
+const TYPE_SCALE_SHEETS = ['glass.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'legacyGlass.css', 'improvementRadar.css', 'taskQuality.css', ...GLASS_FRAME_SHEETS];
 const TYPE_SCALE_TOKENS = ['--fs-display', '--fs-xl', '--fs-lg', '--fs-md', '--fs-sm', '--fs-xs', '--fs-2xs'];
 
 describe('type scale', () => {
@@ -153,7 +164,7 @@ describe('type scale', () => {
     expect([...used].filter((token) => !TYPE_SCALE_TOKENS.includes(token))).toEqual([]);
   });
 
-  it.each(['glass.css', 'sidebar.css'])('%s: small glass text uses the darker muted token', (name) => {
+  it.each(['glass.css', 'sidebar.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'updateControl.css', 'signals.css', 'composerNotice.css', 'skillSuggestions.css', ...GLASS_FRAME_SHEETS])('%s: small glass text uses the darker muted token', (name) => {
     const css = readSheet(name).replace(/\/\*[\s\S]*?\*\//g, '');
     const offenders = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .filter(([, , body]) => /font-size:\s*var\(--fs-(?:xs|2xs)\)/.test(body) && /color:\s*var\(--glass-muted\)/.test(body))

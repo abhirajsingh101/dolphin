@@ -1,39 +1,121 @@
-/* Settings: the glass dialog look (scrim, radius, elevation of the palette). */
-.settings-scrim { position: fixed; inset: 0; z-index: var(--z-dialog); display: grid; justify-items: center; align-items: start; padding-top: 10vh; background: var(--glass-scrim); backdrop-filter: blur(5px); }
+/* Settings: the glass dialog look (scrim, radius, elevation of the palette),
+   a section sidebar beside one scrolling page of grouped rows. A row is its
+   label and hint on the left and its control on the right. */
+.settings-scrim { position: fixed; inset: 0; z-index: var(--z-dialog); display: grid; place-items: center; padding: 16px; background: var(--glass-scrim); backdrop-filter: var(--glass-scrim-blur); }
 .settings-panel {
-  display: flex; flex-direction: column; width: min(520px, calc(100vw - 32px)); max-height: min(720px, 84dvh); overflow: hidden;
+  display: grid; grid-template-columns: 200px minmax(0, 1fr); width: min(820px, calc(100vw - 32px)); height: min(640px, 86dvh);
+  /* clip, not hidden: a hidden box is still a scroll container, and jumping to a
+     section near the end scrolled the whole panel up under its own frame. */
+  overflow: clip;
   border: 1px solid var(--glass-edge); border-radius: var(--r-xl); color: var(--glass-text);
-  background: color-mix(in srgb, var(--glass-solid) 94%, transparent);
-  box-shadow: 0 24px 80px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
-  backdrop-filter: blur(28px) saturate(135%); font: var(--fs-sm)/1.5 var(--font-sans);
+  background: var(--glass-float-fill-solid); box-shadow: var(--glass-float-shadow);
+  backdrop-filter: var(--glass-float-blur); font: var(--fs-sm)/1.5 var(--font-sans);
 }
-.settings-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--glass-edge); }
-.settings-header h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
-.settings-body { display: grid; gap: 18px; padding: 16px; overflow-y: auto; scrollbar-width: thin; }
-.settings-body h3 { margin: 0 0 8px; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-.settings-choice { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; border: 0; }
-.settings-choice legend { margin-bottom: 6px; padding: 0; }
-.settings-choice label, .settings-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.settings-choice input, .settings-check input { accent-color: var(--glass-accent); }
-.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.settings-update { margin-bottom: 10px; }
+.settings-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Sidebar */
+.settings-nav { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 14px 10px; border-right: 1px solid var(--glass-edge); background: var(--glass-bubble); }
+.settings-nav h2 { margin: 2px 6px 0; font-size: var(--fs-md); font-weight: 600; }
+.settings-search { display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--glass-edge); border-radius: var(--r-md); background: var(--glass-solid); color: var(--glass-muted-small); }
+.settings-search input { flex: 1; min-width: 0; padding: 5px 0; border: 0; background: transparent; color: var(--glass-text); font: inherit; outline: none; }
+.settings-panel .settings-search input:focus-visible { outline: none; } /* the field's ring is on .settings-search */
+.settings-search:focus-within { outline: 2px solid var(--glass-accent); outline-offset: 1px; }
+.settings-nav ul { display: grid; gap: 1px; margin: 0; padding: 0; overflow-y: auto; list-style: none; scrollbar-width: thin; }
+.settings-nav li button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--glass-muted); font: inherit; text-align: left; cursor: pointer; transition: background var(--d1), color var(--d1);
+}
+.settings-nav li button:hover { background: var(--glass-selection); color: var(--glass-text); }
+.settings-nav li button[aria-current="true"] { background: var(--glass-selection); color: var(--glass-text); font-weight: 600; }
+.settings-nav li button[aria-current="true"] svg { color: var(--glass-accent); }
+
+/* Page */
+.settings-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.settings-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--glass-edge); font-size: var(--fs-md); font-weight: 600; }
+.settings-header button { display: inline-grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: var(--r-md); background: transparent; color: var(--glass-muted); cursor: pointer; }
+.settings-header button:hover { background: var(--glass-selection); color: var(--glass-text); }
+.settings-body { display: grid; align-content: start; gap: 22px; padding: 16px 20px 28px; overflow-y: auto; scroll-padding-top: 12px; scrollbar-width: thin; }
+.settings-section { display: grid; gap: 8px; scroll-margin-top: 12px; }
+.settings-section[hidden] { display: none; }
+.settings-section h3 { margin: 0 2px; color: var(--glass-muted-small); font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.settings-card { overflow: hidden; border: 1px solid var(--glass-card-edge); border-radius: var(--r-lg); background: var(--glass-card-fill); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 10px 14px; }
+.settings-card > * + * { border-top: 1px solid var(--glass-card-edge); }
+.settings-row--wide { flex-direction: column; align-items: stretch; gap: 10px; }
+.settings-row--wide .settings-row-control { display: block; }
+.settings-row-text { display: grid; gap: 1px; min-width: 0; }
+.settings-row-label { font-weight: 500; }
+.settings-row-hint, .settings-note, .settings-empty { color: var(--glass-muted-small); font-size: var(--fs-xs); }
+.settings-row-control { flex: none; display: flex; align-items: center; }
+.settings-note { margin: 0; padding: 8px 14px; }
+.settings-pad { padding: 10px 14px; }
+.settings-empty { margin: 8px 2px; }
+.settings-alert { margin: 0; padding: 8px 12px; border: 1px solid var(--glass-edge); border-radius: var(--r-md); background: var(--glass-selection); font-size: var(--fs-xs); }
+
+/* Controls */
+.settings-panel .settings-body button, .settings-stepper button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 12px; border: 1px solid var(--glass-edge); border-radius: var(--r-full);
+  background: var(--glass-bubble); color: var(--glass-text); font: inherit; font-weight: var(--fw-medium); cursor: pointer; transition: background var(--d1);
+}
+.settings-panel .settings-body button:hover:not(:disabled) { background: var(--glass-selection); }
+.settings-panel button:disabled { cursor: default; opacity: 0.5; }
+.settings-panel :is(button, input):focus-visible { outline: 2px solid var(--glass-accent); outline-offset: 2px; }
+
+.settings-segmented { display: inline-flex; gap: 2px; margin: 0; padding: 2px; border: 1px solid var(--glass-card-edge); border-radius: var(--r-md); background: var(--glass-solid); }
+.settings-segmented label { position: relative; display: inline-flex; padding: 3px 10px; border-radius: var(--r-sm); color: var(--glass-muted); cursor: pointer; transition: background var(--d1), color var(--d1); }
+.settings-segmented label:hover { color: var(--glass-text); }
+.settings-segmented label[data-checked] { background: var(--glass-selection); color: var(--glass-text); font-weight: 500; }
+.settings-segmented input, .settings-options input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.settings-segmented label:focus-within, .settings-options label:focus-within { outline: 2px solid var(--glass-accent); outline-offset: 1px; }
+
+.settings-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin: 0; padding: 0; border: 0; }
+.settings-options label {
+  position: relative; display: block; padding: 8px 10px; border: 1px solid var(--glass-card-edge); border-radius: var(--r-md);
+  background: var(--glass-solid); cursor: pointer; transition: border-color var(--d1), background var(--d1);
+}
+.settings-options label:hover { border-color: var(--glass-accent); }
+.settings-options label[data-checked] { border-color: var(--glass-accent); background: var(--glass-selection); }
+.settings-options span { display: grid; gap: 1px; }
+.settings-options strong { font-weight: 600; }
+.settings-options small { color: var(--glass-muted-small); font-size: var(--fs-xs); }
+
+.settings-toggle { position: relative; display: inline-flex; cursor: pointer; }
+.settings-toggle input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+/* Off, the track carries the 3:1 control edge: on --glass-edge alone the light
+   theme's off switch was white on white and could not be told from nothing. */
+.settings-toggle-track { pointer-events: none; display: inline-flex; align-items: center; width: 34px; height: 20px; padding: 2px; border-radius: var(--r-full); background: var(--glass-selection); box-shadow: inset 0 0 0 1px var(--glass-control-edge); transition: background var(--d2), box-shadow var(--d2); }
+.settings-toggle-track span { width: 16px; height: 16px; border-radius: var(--r-full); background: var(--glass-solid); box-shadow: 0 1px 2px var(--glass-dialog-shadow); transition: transform var(--d2); }
+.settings-toggle input:checked + .settings-sr + .settings-toggle-track { background: var(--glass-accent); box-shadow: none; }
+.settings-toggle input:checked + .settings-sr + .settings-toggle-track span { transform: translateX(14px); }
+.settings-toggle input:focus-visible + .settings-sr + .settings-toggle-track { outline: 2px solid var(--glass-accent); outline-offset: 2px; }
+
+.settings-stepper { display: inline-flex; align-items: center; gap: 8px; }
+.settings-panel .settings-body .settings-stepper button { width: 28px; padding: 0; justify-content: center; }
+.settings-stepper output { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.settings-agents { display: inline-flex; gap: 6px; }
+.settings-agent { display: grid; padding: 4px 10px; border: 1px solid var(--glass-card-edge); border-radius: var(--r-md); background: var(--glass-solid); font-weight: 500; }
+.settings-agent small { color: var(--glass-muted-small); font-size: var(--fs-2xs); font-weight: 400; }
+.settings-agent[data-found="true"] small { color: var(--glass-accent); }
+.settings-actions { display: inline-flex; gap: 6px; }
+.settings-kbd { padding: 2px 8px; border: 1px solid var(--glass-edge); border-radius: var(--r-sm); background: var(--glass-solid); font: var(--fs-xs) var(--font-mono); white-space: pre; }
+.settings-update { margin-bottom: 0; }
+/* The update row is a row like the others: its padded wrapper must not indent it again. */
+.settings-pad:has(> .settings-update) { padding: 0; }
 .settings-update > span { display: grid; min-width: 0; }
 .settings-update small { color: var(--glass-muted-small); font-size: var(--fs-xs); }
 .settings-update button { flex: none; }
-.settings-stepper { display: inline-flex; align-items: center; gap: 8px; }
-.settings-stepper output { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
-.settings-note { margin: 6px 0 0; color: var(--glass-muted-small); font-size: var(--fs-xs); }
-.settings-machines { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.settings-machines li { display: flex; align-items: center; gap: 8px; }
-.settings-machines li > span { display: grid; flex: 1; min-width: 0; }
-.settings-machines small { color: var(--glass-muted-small); font-size: var(--fs-2xs); }
-.settings-panel button {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--glass-edge); border-radius: var(--r-md);
-  background: var(--glass-bubble); color: inherit; font: inherit; cursor: pointer; transition: background var(--d1);
+
+/* A narrow window: the sections become a row of tabs above the page. */
+@media (max-width: 640px) {
+  .settings-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: 92dvh; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px; border-right: 0; border-bottom: 1px solid var(--glass-edge); }
+  .settings-nav h2 { display: none; }
+  .settings-search { flex: 1 1 100%; }
+  .settings-nav ul { display: flex; gap: 2px; overflow-x: auto; }
+  .settings-nav li button { white-space: nowrap; }
+  .settings-row { flex-wrap: wrap; }
 }
-.settings-panel button:hover:not(:disabled) { background: var(--glass-selection); }
-.settings-panel button:disabled { cursor: default; opacity: 0.5; }
-.settings-panel :is(button, input):focus-visible { outline: 2px solid var(--glass-accent); outline-offset: 2px; }
-.settings-header button { padding: 4px; border-color: transparent; background: transparent; }
-.settings-link { margin-top: 8px; }
-@media (prefers-reduced-motion: reduce) { .settings-panel button { transition: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel button, .settings-nav li button, .settings-segmented label, .settings-options label, .settings-toggle-track, .settings-toggle-track span { transition: none; }
+}

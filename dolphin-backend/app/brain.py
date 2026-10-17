@@ -29,8 +29,10 @@ DOLPHIN_GBRAIN_COMMAND points Dolphin at an existing GBrain instead, e.g.
 from __future__ import annotations
 
 import json
+import re
 import os
 import platform
+import queue
 import shlex
 import shutil
 import subprocess
@@ -40,6 +42,8 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any
+
+from . import embedder
 
 BUN_VERSION = "1.4.2"
 BUN_SHA256 = {
@@ -165,7 +169,8 @@ def status() -> dict[str, Any]:
     if installing:
         return {"state": "installing", "step": state.get("step", "Starting…"), "source": "dolphin"}
     if state.get("state") == "ready" and _paths()["cli"].exists():
-        return {"state": "ready", "source": "dolphin", "version": state.get("version"), "keyless": True}
+        return {"state": "ready", "source": "dolphin", "version": state.get("version"), "keyless": True,
+                "search": "meaning" if state.get("embeddings") == embedder.VERSION else "keywords"}
     if state.get("state") == "failed":
         return {"state": "failed", "source": "dolphin", "error": state.get("error", "Setup failed.")}
     return {"state": "missing", "source": "dolphin"}
@@ -198,7 +203,25 @@ def _environment() -> dict[str, str]:
         "BUN_INSTALL_CACHE_DIR": str(paths["cache"]),
         "LANG": os.getenv("LANG", "C.UTF-8"),
     }
+    url = _embed_url()
+    if url:
+        environment["LLAMA_SERVER_BASE_URL"] = url
     return environment
+
+
+def _embeds() -> bool:
+    """This brain searches by meaning (embedder.py), or is being switched to it."""
+    return _read_state().get("embeddings") == embedder.VERSION or _switching.is_set()
+
+
+def _embed_url() -> str | None:
+    if not _embeds() or not embedder.installed(base()):
+        return None
+    try:
+        return embedder.embedder.url(base())
+    except OSError as error:
+        _log(f"embedding server unavailable: {error}")
+        return None  # GBrain falls back to keyword search
 
 
 def _run(arguments: list[str], *, timeout: float, cwd: Path | None = None, command: list[str] | None = None,
@@ -239,19 +262,159 @@ def _parse(stdout: str) -> Any:
     raise BrainError("GBrain returned something that is not JSON.")
 
 
+def _raise_for(tool: str, output: str, detail: str) -> None:
+    if "already open" in output:
+        raise BrainBusy(f"GBrain {tool} failed: {detail[:300]}")
+    if "page_not_found" in output:
+        raise BrainNotFound(f"GBrain {tool} failed: {detail[:300]}")
+    code = re.search(r'"code"\s*:\s*"([a-z_]+)"', output)
+    raise BrainError(f"GBrain {tool} failed" + (f" ({code.group(1)})" if code else "") + f": {detail[:300]}")
+
+
+class _Session:
+    """One long-lived `gbrain serve` over stdio, so a call costs milliseconds
+    instead of a Bun start (about 1.4 s). GBrain closes it after IDLE_SECONDS
+    without a call, which also lets the database go; the next call opens it
+    again. Calls take turns."""
+
+    IDLE_SECONDS = 120
+
+    def __init__(self) -> None:
+        self.process: subprocess.Popen | None = None
+        self.lines: "queue.Queue[str | None]" = queue.Queue()
+        self.ids = 0
+        self.lock = threading.Lock()
+        self.unsupported = False  # this GBrain has no stdio server: every call runs `gbrain call`
+        self.embed_url: str | None = None
+
+    def _send(self, message: dict[str, Any]) -> None:
+        assert self.process is not None and self.process.stdin is not None
+        self.process.stdin.write(json.dumps(message) + "\n")
+        self.process.stdin.flush()
+
+    def _reply(self, ident: int, deadline: float) -> dict[str, Any]:
+        while True:
+            try:
+                line = self.lines.get(timeout=max(0.0, deadline - time.monotonic()))
+            except queue.Empty:
+                self.close()
+                raise BrainError(f"GBrain did not answer within {CALL_TIMEOUT:g} seconds.") from None
+            if line is None:
+                self.close()
+                raise _Closed()
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and message.get("id") == ident:
+                return message
+
+    def _rpc(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        self.ids += 1
+        self._send({"jsonrpc": "2.0", "id": self.ids, "method": method, "params": params})
+        return self._reply(self.ids, time.monotonic() + timeout)
+
+    def _open(self) -> None:
+        environment = _environment()
+        self.embed_url = environment.get("LLAMA_SERVER_BASE_URL")
+        process = subprocess.Popen([*_command(), "serve", "--surface", "full", "--stdio-idle-timeout", str(self.IDLE_SECONDS)],
+                                   env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        self.process, self.lines = process, queue.Queue()
+        lines = self.lines
+
+        def read() -> None:
+            for line in process.stdout:  # type: ignore[union-attr]
+                lines.put(line)
+            lines.put(None)
+
+        threading.Thread(target=read, name="gbrain-serve", daemon=True).start()
+        try:
+            self._rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                     "clientInfo": {"name": "dolphin", "version": "1"}}, CALL_TIMEOUT)
+            self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            tools = self._rpc("tools/list", {}, CALL_TIMEOUT).get("result", {}).get("tools", [])
+        except _Closed:
+            self.unsupported = True
+            raise
+        if any(tool.get("name") == "gbrain_status" for tool in tools):
+            self.close()  # status-only: another process holds the database
+            raise BrainBusy("GBrain's local database is already open in another process.")
+
+    def call(self, tool: str, arguments: dict[str, Any], timeout: float) -> Any:
+        with self.lock:
+            if _switching.is_set():
+                raise BrainBusy("Dolphin's memory is switching to semantic search; try again in a few minutes.")
+            # The embedding server moved (it stops when idle): GBrain must be told the new address.
+            if self.process is not None and _embed_url() != self.embed_url:
+                self.close()
+            for attempt in (1, 2):
+                if self.process is None or self.process.poll() is not None:
+                    self._open()
+                try:
+                    message = self._rpc("tools/call", {"name": tool, "arguments": arguments}, timeout)
+                    break
+                except _Closed:
+                    if attempt == 2:
+                        raise BrainError(f"GBrain {tool} failed: the server closed.") from None
+                    # It closed while idle between calls: open it again.
+            result = message.get("result") or {}
+            parts = [part.get("text", "") for part in result.get("content", []) if isinstance(part, dict)]
+            text = "\n".join(parts)
+            if "error" in message or result.get("isError"):
+                error = message.get("error") if isinstance(message.get("error"), dict) else {}
+                text = text or json.dumps(error)
+                lines = text.strip().splitlines()
+                _raise_for(tool, text, error.get("message") or (lines[-1] if lines else "no detail"))
+            if isinstance(result.get("structuredContent"), dict):
+                return result["structuredContent"]
+            for part in parts:  # the JSON result first; GBrain may add a rendered text part
+                try:
+                    return json.loads(part)
+                except ValueError:
+                    continue
+            return _parse(text)
+
+    def close(self) -> None:
+        process, self.process = self.process, None
+        if process is not None and process.poll() is None:
+            try:
+                process.stdin.close()  # type: ignore[union-attr]
+                process.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                process.kill()
+
+
+class _Closed(Exception):
+    pass
+
+
+_session = _Session()
+_switching = threading.Event()  # set while upgrade_embeddings holds the database
+
+
+def close_session() -> None:
+    with _session.lock:
+        _session.close()
+
+
 def call(tool: str, arguments: dict[str, Any], timeout: float = CALL_TIMEOUT) -> Any:
     """One GBrain tool call. Raises BrainError when the brain is unavailable."""
     if not ready():
         raise BrainError("Dolphin's memory is not set up on this machine yet.")
+    if _switching.is_set():
+        raise BrainBusy("Dolphin's memory is switching to semantic search; try again in a few minutes.")
+    if not _session.unsupported:
+        try:
+            return _session.call(tool, arguments, timeout)
+        except _Closed:
+            pass  # this GBrain has no stdio server
+        except OSError:
+            _session.unsupported = True
     result = _run(["call", tool, json.dumps(arguments)], timeout=timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no detail"]
-        output = result.stderr + result.stdout
-        if "already open" in output:
-            raise BrainBusy(f"GBrain {tool} failed: {detail[0][:300]}")
-        if "page_not_found" in output:
-            raise BrainNotFound(f"GBrain {tool} failed: {detail[0][:300]}")
-        raise BrainError(f"GBrain {tool} failed: {detail[0][:300]}")
+        _raise_for(tool, result.stderr + result.stdout, detail[0])
     return _parse(result.stdout)
 
 
@@ -338,13 +501,22 @@ def _self_test(paths: dict[str, Path]) -> None:
     _parse(result.stdout)
 
 
+# Dolphin's settings for its brain: write receipts in full for a week, and
+# core memory on, so `context_pack` carries the overview page (dolphin/now).
+# Dolphin itself rewrites that page through its stdio server, which GBrain
+# counts as a remote edit; it is Dolphin's own page, so no review is asked.
+SETTINGS = {"persistence.receipt_retention_days": str(RECEIPT_RETENTION_DAYS), "memory.core.enabled": "true",
+            "memory.core.remote_edit": "allow"}
+SETTINGS_VERSION = 3
+
+
 def _apply_settings(paths: dict[str, Path]) -> bool:
     """Dolphin's settings for its brain. Returns whether GBrain took them."""
-    result = _run(["config", "set", "persistence.receipt_retention_days", str(RECEIPT_RETENTION_DAYS)],
-                  timeout=CALL_TIMEOUT, cwd=paths["home"])
-    if result.returncode != 0:
-        _log(f"settings not applied: {(result.stderr or result.stdout).strip()[-300:]}")
-        return False
+    for key, value in SETTINGS.items():
+        result = _run(["config", "set", key, value], timeout=CALL_TIMEOUT, cwd=paths["home"])
+        if result.returncode != 0:
+            _log(f"settings not applied: {(result.stderr or result.stdout).strip()[-300:]}")
+            return False
     return True
 
 
@@ -354,10 +526,85 @@ def apply_settings() -> None:
     if mode() != "auto" or not ready():
         return
     state = _read_state()
-    if state.get("receipt_retention_days") == RECEIPT_RETENTION_DAYS:
+    if state.get("settings_version") == SETTINGS_VERSION:
         return
+    close_session()  # `config set` needs the database to itself
     if _apply_settings(_paths()):
-        _write_state(**{**state, "receipt_retention_days": RECEIPT_RETENTION_DAYS})
+        _write_state(**{**state, "receipt_retention_days": RECEIPT_RETENTION_DAYS, "settings_version": SETTINGS_VERSION})
+
+
+def settle() -> None:
+    """At startup: bring an existing brain to Dolphin's current settings and search."""
+    apply_settings()
+    upgrade_embeddings()
+
+
+def upgrade_embeddings(installing: bool = False) -> bool:
+    """Switch this brain from keyword search to search by meaning (embedder.py),
+    once. A brain is always created keyword-only first; this then turns
+    embeddings on at the width that keyword brain has (1024) and migrates to
+    the model's 384, which re-embeds every page and keeps pages and facts.
+    Until it succeeds the brain keeps keyword search; the next start retries."""
+    if mode() != "auto" or not (installing or ready()):
+        return False
+    state = _read_state()
+    key = _platform_key()
+    if state.get("embeddings") == embedder.VERSION:
+        return True
+    if not embedder.supported(key):
+        return False
+    paths = _paths()
+    try:
+        if not embedder.installed(paths["root"]):
+            _log("Downloading the search model…")
+        embedder.install(paths["root"], key, _download)  # type: ignore[arg-type]
+    except (BrainError, OSError) as error:
+        _log(f"semantic search not installed: {error}")
+        return False
+    database = paths["home"] / ".gbrain" / "brain.pglite"
+    with _session.lock:
+        _session.close()
+        _switching.set()
+        try:
+            steps = [
+                ["init", "--pglite", "--force", "--embedding-model", embedder.MODEL, "--embedding-dimensions", "1024",
+                 "--path", str(database), "--skip-embed-check"],
+                ["migrate", "embeddings", "--to", embedder.MODEL, "--dim", str(embedder.DIMENSIONS),
+                 "--yes", "--max-cost-usd", "0", "--reranker", "off"],
+            ]
+            config = paths["home"] / ".gbrain" / "config.json"
+            try:
+                current = json.loads(config.read_text())
+            except (OSError, ValueError):
+                current = {}
+            if current.get("embedding_model") == embedder.MODEL and current.get("embedding_dimensions") == embedder.DIMENSIONS:
+                steps = [["embed", "--stale"]]  # switched already; make sure every page has its vector
+            elif current.get("embedding_model") == embedder.MODEL:
+                steps = steps[1:]  # turned on, not yet migrated: resume
+            for arguments in steps:
+                result = _run(arguments, timeout=INSTALL_TIMEOUT * 2, cwd=paths["home"])
+                _log(f"gbrain {' '.join(arguments[:3])}: {(result.stdout + result.stderr).strip()[-1500:]}")
+                if result.returncode != 0:
+                    _log("semantic search not switched on yet; the next start tries again")
+                    return False
+            _write_state(**{**_read_state(), "embeddings": embedder.VERSION})
+            _log("semantic search on")
+            return True
+        finally:
+            _switching.clear()
+
+
+def catch_up_embeddings() -> None:
+    """Give every chunk its vector. GBrain embeds some writes later rather than
+    as they happen; this needs the database to itself, so the session closes
+    for it (usually a few seconds)."""
+    if mode() != "auto" or not ready() or not _embeds() or _switching.is_set():
+        return
+    with _session.lock:
+        _session.close()
+        result = _run(["embed", "--stale", "--catch-up"], timeout=INSTALL_TIMEOUT * 2, cwd=_paths()["home"])
+    if result.returncode != 0:
+        _log(f"embedding catch-up: {(result.stdout + result.stderr).strip()[-300:]}")
 
 
 def _still_wanted() -> None:
@@ -413,7 +660,8 @@ def install() -> None:
         settled = _apply_settings(paths)
         _log("ready")
         _write_state(state="ready", version=GBRAIN_VERSION,
-                     **({"receipt_retention_days": RECEIPT_RETENTION_DAYS} if settled else {}))
+                     **({"receipt_retention_days": RECEIPT_RETENTION_DAYS, "settings_version": SETTINGS_VERSION} if settled else {}))
+        upgrade_embeddings(installing=True)
     except _Declined:
         _decline(paths, created)
     except BrainError as error:
@@ -464,6 +712,9 @@ def set_consent(on: bool) -> dict[str, Any]:
             raise
         if not on and _child is not None:
             _child.kill()
+    if not on:
+        close_session()
+        embedder.embedder.stop()
     if not on:
         return status()
     return start_install(force=_read_state().get("state") == "failed")

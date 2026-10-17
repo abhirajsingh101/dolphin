@@ -156,7 +156,7 @@ def test_codex_dispatch_implicit_session_rejects_multiple_codex_sessions():
         _select_codex_dispatch_session(sessions, None)
 
     assert exc_info.value.status_code == 409
-    assert "Multiple Codex sessions" in exc_info.value.detail
+    assert "Multiple agent sessions" in exc_info.value.detail
 
 
 def test_codex_dispatch_rejects_explicit_session_without_codex():
@@ -166,4 +166,4 @@ def test_codex_dispatch_rejects_explicit_session_without_codex():
         _select_codex_dispatch_session(sessions, "dolphin-shell")
 
     assert exc_info.value.status_code == 409
-    assert "not running Codex" in exc_info.value.detail
+    assert "not running Claude Code or Codex" in exc_info.value.detail

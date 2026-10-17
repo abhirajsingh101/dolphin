@@ -9,7 +9,8 @@ import { SETTINGS_EVENT, THEME_STORAGE_KEY, persistTheme, readStoredTheme } from
 export type Settings = {
   theme: 'system' | 'light' | 'dark';
   'terminal.fontSize': number;
-  'newSession.defaultAgent': 'claude' | 'codex' | 'shell';
+  /** What + starts: `ask` shows the New Session choices every time. `shell` is a tmux session; `terminal` a plain one. */
+  'newSession.defaultAgent': 'ask' | 'claude' | 'codex' | 'shell' | 'terminal';
   'notifications.system': boolean;
 };
 export type SettingKey = keyof Settings;
@@ -18,7 +19,7 @@ export type SettingValue<K extends SettingKey> = Settings[K];
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   'terminal.fontSize': 13,
-  'newSession.defaultAgent': 'claude',
+  'newSession.defaultAgent': 'ask',
   'notifications.system': true,
 };
 
@@ -31,7 +32,7 @@ const EVENT = SETTINGS_EVENT;
 const VALID: { [K in SettingKey]: (value: unknown) => boolean } = {
   theme: (v) => v === 'system' || v === 'light' || v === 'dark',
   'terminal.fontSize': (v) => typeof v === 'number' && Number.isInteger(v) && v >= TERMINAL_FONT_SIZE_MIN && v <= TERMINAL_FONT_SIZE_MAX,
-  'newSession.defaultAgent': (v) => v === 'claude' || v === 'codex' || v === 'shell',
+  'newSession.defaultAgent': (v) => v === 'ask' || v === 'claude' || v === 'codex' || v === 'shell' || v === 'terminal',
   'notifications.system': (v) => typeof v === 'boolean',
 };
 

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { Api } from './api';
-import { AGENT_SETUP_CHANGED, BRAIN_CHANGED, memoryStillSettingUp } from './firstRun';
-import { dismissKey, doneMessage, offerFor, type HookRow, type MemoryRow, type SetupOffer } from './agentSetupModel';
+import { AGENT_SETUP_CHANGED } from './firstRun';
+import { dismissKey, doneMessage, offerFor, type HookRow, type SetupOffer } from './agentSetupModel';
 import './composerNotice.css';
 
 /* Dolphin Desktop: one line per machine above the composer, offering what
@@ -31,12 +31,11 @@ export default function AgentSetupPrompt({ sources, onHolding }: {
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const [round, setRound] = useState(0);
-  // The first-run checklist turned notifications or memory on: look again.
+  // The first-run checklist turned notifications on: look again.
   useEffect(() => {
     const again = () => setRound((value) => value + 1);
     window.addEventListener(AGENT_SETUP_CHANGED, again);
-    window.addEventListener(BRAIN_CHANGED, again);
-    return () => { window.removeEventListener(AGENT_SETUP_CHANGED, again); window.removeEventListener(BRAIN_CHANGED, again); };
+    return () => window.removeEventListener(AGENT_SETUP_CHANGED, again);
   }, []);
   const sourcesKey = sources.map((source) => `${source.id} ${source.api.API_BASE} ${source.api.API_TOKEN}`).join('|');
   const setOffer = (machine: string, offer: SetupOffer | null) => setOffers((all) => {
@@ -47,25 +46,17 @@ export default function AgentSetupPrompt({ sources, onHolding }: {
 
   useEffect(() => {
     let stopped = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
     const poll = async (source: SetupSource) => {
       if (dismissed(source.id)) { settle(source.id, true); return; }
       try {
-        const [hookRows, memoryRows] = await Promise.all([
-          source.api.request<HookRow[]>('/api/desktop/agent-hooks'),
-          source.label ? Promise.resolve([] as MemoryRow[]) : source.api.request<MemoryRow[]>('/api/desktop/agent-memory'),
-        ]);
-        if (stopped || !Array.isArray(hookRows) || !Array.isArray(memoryRows)) return;
-        setOffer(source.id, offerFor(source.id, source.label, hookRows, memoryRows));
-        // Once memory is on it sets itself up; look again until it is ready.
-        const waiting = !source.label && memoryStillSettingUp(memoryRows);
-        if (waiting) timers.push(setTimeout(() => void poll(source), 10_000));
-        // Memory is still setting up: an offer may yet appear, so the machine stays held.
-        else settle(source.id, true);
+        const hookRows = await source.api.request<HookRow[]>('/api/desktop/agent-hooks');
+        if (stopped || !Array.isArray(hookRows)) return;
+        setOffer(source.id, offerFor(source.id, source.label, hookRows));
+        settle(source.id, true);
       } catch { settle(source.id, true); /* an older helper, or not reachable now: offer nothing */ }
     };
     sourcesRef.current.forEach((source) => void poll(source));
-    return () => { stopped = true; timers.forEach(clearTimeout); };
+    return () => { stopped = true; };
   }, [sourcesKey, round]);
 
   const holding = sources.filter((source) => !settled.includes(source.id) || offers[source.id]).map((source) => source.id);
@@ -80,7 +71,6 @@ export default function AgentSetupPrompt({ sources, onHolding }: {
     setResults((all) => ({ ...all, [offer.machine]: { state: 'working', message: '' } }));
     try {
       if (offer.hooks.length) await source.api.request('/api/desktop/agent-hooks', { method: 'POST', body: JSON.stringify({ agents: offer.hooks }) });
-      if (offer.memory.length) await source.api.request('/api/desktop/agent-memory', { method: 'POST', body: JSON.stringify({ agents: offer.memory }) });
       setResults((all) => ({ ...all, [offer.machine]: { state: 'done', message: doneMessage(offer) } }));
       setOffer(offer.machine, null);
     } catch (error) {

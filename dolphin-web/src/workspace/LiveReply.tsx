@@ -7,12 +7,14 @@ import type { ToolActivity } from './chatTypes';
 
 /* A turn in progress: its tool activity and the reply as it is written. It
    polls on its own (150ms for text, 1.5s for activity), so only it re-renders. */
-export default function LiveReply({ thread, running, lastRole, renderActivity, onGrow }: {
+export default function LiveReply({ thread, running, lastRole, renderActivity, onGrow, onStreaming }: {
   thread: string;
   running: boolean;
   lastRole: 'user' | 'assistant' | undefined;
   renderActivity: (items: ToolActivity[]) => ReactNode;
   onGrow: () => void;
+  /** Whether the streamed reply is on screen, so the saved reply can take its place without rising in. */
+  onStreaming?: (streaming: boolean) => void;
 }) {
   const [text, setText] = useState('');
   const [activity, setActivity] = useState<ToolActivity[]>([]);
@@ -46,11 +48,14 @@ export default function LiveReply({ thread, running, lastRole, renderActivity, o
     return () => { alive = false; clearInterval(timer); };
   }, [thread, running]);
   useLayoutEffect(() => { onGrow(); }, [text, activity.length, onGrow]);
+  const streaming = running && !!text && lastRole !== 'assistant';
+  useLayoutEffect(() => { onStreaming?.(streaming); }, [streaming, onStreaming]);
+  useLayoutEffect(() => () => onStreaming?.(false), [onStreaming]);
   if (!running) return null;
   return (
     <>
       {renderActivity(activity)}
-      {text && lastRole !== 'assistant' && (
+      {streaming && (
         <div className="glass-message assistant glass-streaming" aria-label="Dolphin response in progress" aria-busy="true">
           <div className="glass-reply-mark"><span className="dolphin-mark"><DolphinIcon /></span></div>
           <div><MarkdownReply text={text} /></div>

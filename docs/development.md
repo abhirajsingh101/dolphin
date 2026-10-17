@@ -31,8 +31,8 @@ On Linux without a SUID sandbox helper, run `npx electron --no-sandbox .` after
 `npm run build`.
 
 The helper keeps its data in `~/.dolphin-server`. Set `DOLPHIN_HOME` to use a
-scratch folder instead. On first start it also sets up memory (a GBrain, about
-400 MB); set `DOLPHIN_GBRAIN=off` to skip that while developing.
+scratch folder instead. On first start it also sets up memory (a GBrain and
+its search model, about 550 MB); set `DOLPHIN_GBRAIN=off` to skip that while developing.
 
 ## Test
 

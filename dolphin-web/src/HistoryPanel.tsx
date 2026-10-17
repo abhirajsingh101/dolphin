@@ -4,6 +4,7 @@ import { useApi } from './apiContext';
 import { highlight, timeAgo } from './historyModel';
 import { AGENT_NAMES } from './usageModel';
 import { panelError, useModalPanel } from './useModalPanel';
+import { useDialogParts } from './motion/dialogParts';
 import type { HistoryItem } from './types';
 import './workflow.css';
 
@@ -29,6 +30,7 @@ export default function HistoryPanel({ projectId, projectName, onClose, onResume
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useModalPanel(panel, onClose, { focus: input });
+  const { Scrim, Panel } = useDialogParts();
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -40,8 +42,8 @@ export default function HistoryPanel({ projectId, projectName, onClose, onResume
   }, [projectId, query]);
   const now = new Date();
   return (
-    <div className="workflow-scrim" role="presentation" onClick={onClose}>
-      <div ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`History of ${projectName}`}
+    <Scrim className="workflow-scrim" role="presentation" onClick={onClose}>
+      <Panel ref={panel} tabIndex={-1} className="workflow-panel" role="dialog" aria-modal="true" aria-label={`History of ${projectName}`}
         onClick={(event) => event.stopPropagation()}>
         <header className="workflow-header">
           <h2>History of {projectName}</h2>
@@ -73,7 +75,7 @@ export default function HistoryPanel({ projectId, projectName, onClose, onResume
           )}
           {!!items?.length && items.length < 10 && <p className="workflow-note">{RECENT_ONLY}</p>}
         </div>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentCli } from './api';
 import { installThenStart } from './agentInstall';
-import { checklist, memoryStillSettingUp, type ChecklistInput, type Environment } from './firstRun';
+import { checklist, type ChecklistInput, type Environment } from './firstRun';
 
 const cli = (agent: 'claude' | 'codex', found: boolean, install: string | null = null, hint: string | null = null): AgentCli => ({
   agent, name: agent === 'claude' ? 'Claude Code' : 'Codex', found,
@@ -22,15 +22,24 @@ const fresh = (overrides: Partial<ChecklistInput> = {}): ChecklistInput => ({
 });
 
 describe('first-run checklist', () => {
+  it('needs one agent, not both: with neither, both are to do', () => {
+    const items = checklist(fresh({ agents: [cli('claude', false, 'curl -fsSL https://claude.ai/install.sh | bash'), cli('codex', false, 'npm install -g @openai/codex')] }));
+    expect(items.filter((item) => item.id === 'claude' || item.id === 'codex').map((item) => [item.done, item.detail])).toEqual([
+      [false, 'Not installed.'], [false, 'Not installed.'],
+    ]);
+  });
+
   it('lists what a fresh machine lacks, one action each', () => {
     const items = checklist(fresh());
     expect(items.map((item) => item.id)).toEqual(['tmux', 'claude', 'codex', 'notifications', 'memory']);
-    expect(items.map((item) => item.done)).toEqual([true, false, false, false, false]);
+    // Claude Code is installed, so Codex is optional: done, and still offered.
+    expect(items.map((item) => item.done)).toEqual([true, false, true, false, false]);
+    expect(items[2].detail).toBe('Optional: Dolphin uses Claude Code. Not installed.');
     expect(items.map((item) => item.action?.name)).toEqual([
       undefined, 'Sign in to Claude Code', 'Install Codex', 'Turn on notifications', 'Turn on memory',
     ]);
     expect(items[3].action).toMatchObject({ kind: 'notifications', agents: ['claude'] });
-    expect(items[4].detail).toMatch(/about 400 MB/);
+    expect(items[4].detail).toMatch(/about 550 MB/);
   });
 
   it('is all done on a machine that has everything', () => {
@@ -56,7 +65,7 @@ describe('first-run checklist', () => {
     const codex = checklist(fresh({ agents: [cli('claude', true), cli('codex', false, null, 'Install Node.js (npm) first, then Codex.')] }))
       .find((item) => item.id === 'codex');
     expect(codex?.action).toBeUndefined();
-    expect(codex?.detail).toBe('Not installed. Install Node.js (npm) first, then Codex.');
+    expect(codex?.detail).toBe('Optional: Dolphin uses Claude Code. Not installed. Install Node.js (npm) first, then Codex.');
   });
 
   it('works with a helper older than 0.2.0 (no environment endpoint)', () => {
@@ -81,21 +90,11 @@ describe('first-run checklist', () => {
   });
 });
 
-describe('the agent setup line', () => {
-  it('watches memory only while it is being set up', () => {
-    expect(memoryStillSettingUp([{ cli_found: true, memory_ready: false, memory_state: 'installing' }])).toBe(true);
-    expect(memoryStillSettingUp([{ cli_found: true, memory_ready: false, memory_state: 'off' }])).toBe(false);
-    expect(memoryStillSettingUp([{ cli_found: false, memory_ready: false, memory_state: 'installing' }])).toBe(false);
-    // A helper older than 0.2.0 sets memory up by itself and says nothing of its state.
-    expect(memoryStillSettingUp([{ cli_found: true, memory_ready: false }])).toBe(true);
-  });
-});
-
 describe('first-run checklist, untrusted installer', () => {
   it('offers no Install button for a command the client does not know, and shows the hint', () => {
     const odd: AgentCli = { agent: 'codex', name: 'Codex', found: false, install_command: 'curl x | sh', install_then_start: 'curl x | sh && codex', install_hint: 'Install Node.js (npm) first, then Codex.' };
     const item = checklist(fresh({ agents: [cli('claude', true), odd] })).find((row) => row.id === 'codex');
     expect(item?.action).toBeUndefined();
-    expect(item?.detail).toBe('Not installed. Install Node.js (npm) first, then Codex.');
+    expect(item?.detail).toBe('Optional: Dolphin uses Claude Code. Not installed. Install Node.js (npm) first, then Codex.');
   });
 });

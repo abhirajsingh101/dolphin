@@ -46,8 +46,9 @@ test('first run links a recent repo; New Session installs a missing agent and st
     const install = dialog.getByRole('button', { name: /Install Codex/ });
     await install.waitFor({ timeout: 15_000 });
     assert.match(await install.innerText(), /npm install -g @openai\/codex/);
-    assert.ok(await dialog.getByRole('button', { name: /Shell/ }).isVisible());
-    assert.deepEqual(await dialog.locator('.new-session-number').allInnerTexts(), ['1', '2', '3']);
+    assert.ok(await dialog.getByRole('button', { name: /tmux Session/ }).isVisible());
+    assert.ok(await dialog.getByRole('button', { name: /^Terminal/ }).isVisible());
+    assert.deepEqual(await dialog.locator('.new-session-number').allInnerTexts(), ['1', '2', '3', '4']);
     assert.match(await install.locator('code.new-session-command').innerText(), /^npm install -g @openai\/codex$/);
     await window.screenshot({ path: path.join(shots, 'desktop-new-session.png') });
     await install.click();

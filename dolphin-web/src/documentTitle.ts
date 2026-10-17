@@ -8,7 +8,7 @@
  * first.
  *
  * Kept pure and separate from App.tsx so every route's title is asserted in
- * one place. Only mutually exclusive App.tsx / GlassWorkspace.tsx route roots assign `document.title`,
+ * one place. Only mutually exclusive App.tsx / GlassWorkspace.tsx / GlassHealthPage.tsx route roots assign `document.title`,
  * which `documentTitle.test.ts` enforces against the source. SystemHealthView
  * used to assign it too, in a third format. That was invisible to behavioural
  * tests — React flushes child effects before parent ones, so App's assignment

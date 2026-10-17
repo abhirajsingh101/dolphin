@@ -12,7 +12,7 @@ describe('settings', () => {
   it('reads the spec defaults with nothing stored', async () => {
     vi.stubGlobal('localStorage', memoryStorage());
     const { DEFAULT_SETTINGS, getSetting } = await import('./settings');
-    expect(DEFAULT_SETTINGS).toEqual({ theme: 'system', 'terminal.fontSize': 13, 'newSession.defaultAgent': 'claude', 'notifications.system': true });
+    expect(DEFAULT_SETTINGS).toEqual({ theme: 'system', 'terminal.fontSize': 13, 'newSession.defaultAgent': 'ask', 'notifications.system': true });
     expect(getSetting('notifications.system')).toBe(true);
   });
 

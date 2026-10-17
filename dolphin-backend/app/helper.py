@@ -319,6 +319,10 @@ def serve(args: argparse.Namespace) -> int:
         from .agent_hooks_setup import write_shim
 
         write_shim(_self_command())
+        from . import agent_memory_setup
+
+        # Dolphin 0.2 gave agents its memory over MCP; they no longer get it.
+        threading.Thread(target=agent_memory_setup.remove, name="agent-memory-removal", daemon=True).start()
 
         import uvicorn
 

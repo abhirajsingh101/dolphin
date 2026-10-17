@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from . import plain_terminals
 from .terminal_attach import DOLPHIN_TITLE_FORMAT, installed_tmux_version
 from .turn_state import OPTION as TURN_STATE_OPTION, parse_turn_state
 
@@ -1241,6 +1242,11 @@ async def _refresh_sessions_cache() -> list[TmuxSessionInfo]:
 
 
 async def list_all_sessions() -> list[TmuxSessionInfo]:
+    """Every tmux session, then this helper's plain terminals (plain_terminals.py)."""
+    return [*(await _list_tmux_sessions()), *plain_terminals.sessions()]
+
+
+async def _list_tmux_sessions() -> list[TmuxSessionInfo]:
     loop = asyncio.get_running_loop()
     cache = _SESSIONS_CACHE
     if cache["data"] is not None and (loop.time() - cache["at"]) < _SESSIONS_CACHE_TTL:
@@ -1495,6 +1501,12 @@ async def require_workspace_session(
     session newer than that scan is confirmed with `has-session` first, and
     only then re-scanned.
     """
+    if plain_terminals.is_terminal(session_name):
+        terminal = plain_terminals.get(session_name)
+        resolved = workspace_path.resolve()
+        if not path_in_workspace(Path(terminal.path).resolve(), resolved):
+            raise TmuxServiceError("That terminal is not in this project.")
+        return plain_terminals.info(terminal)
     if not _session_name_is_valid(session_name):
         raise TmuxServiceError("Invalid tmux session name.")
     sessions = await (_refresh_sessions_cache() if fresh else list_all_sessions())
@@ -1521,6 +1533,8 @@ async def create_session(
     requested_name: str | None = None,
     mode: str = "shell",
 ) -> TmuxSessionInfo:
+    if mode == "terminal":  # a plain shell, no tmux
+        return await plain_terminals.create(require_workspace_path(workspace_path))
     session_name = make_session_name(project_name, requested_name)
     if mode not in {"shell", "codex", "claude"}:
         raise TmuxServiceError("Unsupported tmux session mode.")
@@ -1600,6 +1614,8 @@ async def rename_session(
     current_name: str,
     requested_name: str,
 ) -> TmuxSessionInfo:
+    if plain_terminals.is_terminal(current_name):
+        raise TmuxServiceError("A terminal keeps its name. Open a tmux session to name it.")
     final_name = make_session_name(project_name, requested_name)
     current_session = await require_workspace_session(
         workspace_path,
@@ -1645,6 +1661,9 @@ async def rename_session(
 
 async def kill_session(workspace_path: Path, session_name: str) -> None:
     await require_workspace_session(workspace_path, session_name)
+    if plain_terminals.is_terminal(session_name):
+        plain_terminals.close(session_name)
+        return
     await _run_tmux("kill-session", "-t", session_name)
     _invalidate_sessions_cache()
 
@@ -1654,6 +1673,9 @@ async def run_in_session(workspace_path: Path, session_name: str, command: str) 
     person would. For commands Dolphin starts without waiting for them
     (a worktree's setup before its agent, a resumed transcript)."""
     await require_workspace_session(workspace_path, session_name)
+    if plain_terminals.is_terminal(session_name):
+        await plain_terminals.write(session_name, (command + "\r").encode())
+        return
     await _run_tmux("send-keys", "-t", session_name, "-l", command)
     await _run_tmux("send-keys", "-t", session_name, "Enter")
 
@@ -1669,6 +1691,13 @@ async def send_input(
     before_enter: Callable[[], Awaitable[bool]] | None = None,
 ) -> bool:
     session = await require_workspace_session(workspace_path, session_name)
+    if plain_terminals.is_terminal(session_name):
+        if require_agent or require_codex:
+            raise TmuxServiceError("This is a plain terminal, not an agent session.")
+        if before_enter is not None and enter and not await before_enter():
+            return False
+        await plain_terminals.write(session_name, (text + ("\r" if enter else "")).encode())
+        return True
     if require_agent:
         _require_observable_agent_session(session)
     if require_codex:
@@ -1784,7 +1813,14 @@ async def send_key(workspace_path: Path, session_name: str, key: str) -> None:
     }
     if key not in allowed_keys:
         raise TmuxServiceError("Unsupported key.")
+    if plain_terminals.is_terminal(session_name):
+        await plain_terminals.write(session_name, _PLAIN_KEYS[key])
+        return
     await _run_tmux("send-keys", "-t", session_name, key)
+
+
+_PLAIN_KEYS = {"Enter": b"\r", "C-c": b"\x03", "C-d": b"\x04", "Escape": b"\x1b", "Up": b"\x1b[A", "Down": b"\x1b[B",
+               "Left": b"\x1b[D", "Right": b"\x1b[C", "BSpace": b"\x7f", "Tab": b"\t"}
 
 
 async def send_terminal_data(
@@ -1793,6 +1829,9 @@ async def send_terminal_data(
     data: str,
 ) -> None:
     await require_workspace_session(workspace_path, session_name)
+    if plain_terminals.is_terminal(session_name):
+        await plain_terminals.write(session_name, data.encode())
+        return
 
     i = 0
     text_buffer: list[str] = []
@@ -1963,6 +2002,8 @@ async def start_codex(
     initial_prompt: str | None = None,
     run_id: str | None = None,
 ) -> None:
+    if plain_terminals.is_terminal(session_name):
+        raise TmuxServiceError("This is a plain terminal, not a tmux session. Start agents in a tmux session.")
     session = await require_workspace_session(workspace_path, session_name)
     if session.is_codex_running:
         return
@@ -2021,6 +2062,8 @@ async def start_claude(
     pane is not proof the agent started, and reporting a run as dispatched when
     nothing is running is the exact dishonesty Phase B removes.
     """
+    if plain_terminals.is_terminal(session_name):
+        raise TmuxServiceError("This is a plain terminal, not a tmux session. Start agents in a tmux session.")
     session = await require_workspace_session(workspace_path, session_name)
     if session.is_claude_code_running:
         return
@@ -2073,6 +2116,8 @@ async def capture_session(
 ) -> TmuxSnapshot:
     await require_workspace_session(workspace_path, session_name)
     bounded_lines = max(40, min(lines, MAX_SNAPSHOT_LINES))
+    if plain_terminals.is_terminal(session_name):
+        return plain_terminals.snapshot(session_name, bounded_lines)
     _, out, _ = await _run_tmux(
         "capture-pane",
         "-p",

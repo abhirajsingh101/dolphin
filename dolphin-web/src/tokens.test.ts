@@ -204,7 +204,8 @@ describe('glass small text contrast', () => {
   }
   function surfaces(tokens: Record<string, string>) {
     const panel = over(tokens['--glass-panel'], tokens['--glass-bg']);
-    return { backdrop: tokens['--glass-bg'], panel, sheen: over(tokens['--glass-sheen'], panel), selected: over(tokens['--glass-selection'], panel), bubble: over(tokens['--glass-bubble'], panel) };
+    // float: dialogs, menus and popovers (--glass-float-fill is 94% of --glass-solid).
+    return { backdrop: tokens['--glass-bg'], panel, sheen: over(tokens['--glass-sheen'], panel), selected: over(tokens['--glass-selection'], panel), bubble: over(tokens['--glass-bubble'], panel), float: tokens['--glass-solid'], floatBubble: over(tokens['--glass-bubble'], tokens['--glass-solid']) };
   }
 
   it.each([['light', light], ['dark', dark]] as const)('%s: --glass-muted-small reads at 4.5:1 or better on every glass surface', (theme, tokens) => {
@@ -215,7 +216,89 @@ describe('glass small text contrast', () => {
     }
   });
 
+  /* The filled glass primary button (glassSurfaces.css) is text on a solid
+     fill: --accent-on on --glass-accent-strong. --glass-accent itself is
+     4.2:1 under white, which is why the button does not use it. */
+  it.each([['light', light, parseBlock(':root {')], ['dark', dark, { ...parseBlock(':root {'), ...parseBlock(':root[data-theme="dark"] {') }]] as const)('%s: primary button text reads at 4.5:1 on --glass-accent-strong', (theme, tokens, base) => {
+    expect(contrast(base['--accent-on'], tokens['--glass-accent-strong']), theme).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('documents why: light --glass-muted is under 4.5:1 on the panel', () => {
     expect(contrast(light['--glass-muted'], surfaces(light).panel)).toBeLessThan(4.5);
+  });
+});
+
+/* The board, cockpit, Missions, Radar and Health keep painting with the
+   semantic tokens; on those routes <html data-surface="legacy"> points them at
+   the glass ones. Resolve that block for real (var() chains, the opaque
+   color-mix() fills, the translucent panel over the backdrop) and hold every
+   text pair those routes draw to the same 4.5:1 the base palette meets. */
+describe('legacy routes on glass', () => {
+  const blocks = [...tokensCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(:root[^{]*)\{([^}]*)\}/g)];
+  const read = (body: string) => Object.fromEntries(
+    [...body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]),
+  );
+  const isDark = (selector: string) => /data-theme=["']dark["']/.test(selector);
+  const isLegacy = (selector: string) => selector.includes("data-surface='legacy'");
+  const base = (dark: boolean) => blocks
+    .filter(([, selector]) => !isLegacy(selector) && (dark || !isDark(selector)))
+    .sort(([, a], [, b]) => Number(isDark(a)) - Number(isDark(b)))
+    .reduce<Record<string, string>>((all, [, , body]) => ({ ...all, ...read(body) }), {});
+  const legacyBlock = blocks.find(([selector]) => isLegacy(selector));
+
+  const hex = (value: string) => value.replace('#', '').match(/../g)!.map((pair) => parseInt(pair, 16));
+  const toHex = (rgb: number[]) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  function resolve(tokens: Record<string, string>, value: string): string {
+    const v = value.trim();
+    const ref = v.match(/^var\((--[a-z0-9-]+)\)$/);
+    if (ref) return resolve(tokens, tokens[ref[1]]);
+    const mix = v.match(/^color-mix\(in srgb, (.+) (\d+)%, (.+)\)$/);
+    if (mix) {
+      const [a, b] = [hex(resolve(tokens, mix[1])), hex(resolve(tokens, mix[3]))];
+      const p = Number(mix[2]) / 100;
+      return toHex(a.map((c, i) => c * p + b[i] * (1 - p)));
+    }
+    if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+    throw new Error(`cannot resolve ${value}`);
+  }
+  function over(rgba: string, under: string): string {
+    const m = rgba.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/)!;
+    const below = hex(under);
+    return toHex([1, 2, 3].map((i, k) => Number(m[4]) * Number(m[i]) + (1 - Number(m[4])) * below[k]));
+  }
+
+  it('declares the block', () => {
+    expect(legacyBlock).toBeTruthy();
+  });
+
+  it.each([['light', false], ['dark', true]] as const)('%s: every text pair reads at 4.5:1', (theme, dark) => {
+    const tokens = { ...base(dark), ...read(legacyBlock![2]) };
+    const color = (name: string) => resolve(tokens, `var(${name})`);
+    const backdrop = color('--bg');
+    const surfaces: Record<string, string> = {
+      '--bg': backdrop,
+      '--surface': color('--surface'),
+      '--surface-2': color('--surface-2'),
+      '--surface-3': color('--surface-3'),
+      '--accent-soft': color('--accent-soft'),
+      'glass panel': over(tokens['--glass-panel'], backdrop),
+    };
+    const failures: string[] = [];
+    const need = (fg: string, bg: string, label: string, min: number) => {
+      const ratio = contrast(fg, bg);
+      if (ratio < min) failures.push(`${theme} ${label}: ${ratio.toFixed(2)}`);
+    };
+    for (const text of ['--text', '--text-2', '--text-3', '--accent', '--warn']) {
+      for (const [name, surface] of Object.entries(surfaces)) need(color(text), surface, `${text} on ${name}`, 4.5);
+    }
+    for (const state of ['--ok', '--danger']) {
+      for (const name of ['--surface', '--surface-2', `${state}-soft`]) need(color(state), color(name), `${state} on ${name}`, 4.5);
+    }
+    need(color('--accent-on'), color('--accent'), '--accent-on on --accent', 4.5);
+    need(color('--accent-on'), color('--accent-hover'), '--accent-on on --accent-hover', 4.5);
+    need(color('--warn-on'), color('--warn'), '--warn-on on --warn', 4.5);
+    for (const name of ['--surface', '--surface-2']) need(color('--border-interactive'), color(name), `--border-interactive on ${name}`, 3);
+    for (const name of ['--term-bg', '--term-surface']) need(color('--term-muted'), color(name), `--term-muted on ${name}`, 4.5);
+    expect(failures).toEqual([]);
   });
 });

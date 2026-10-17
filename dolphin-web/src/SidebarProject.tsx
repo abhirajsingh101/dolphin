@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { sessionLabel } from './workspace/targets';
 import { ChevronDown, Folder, FolderMinus, History as HistoryIcon, Inbox, Pin, Plus } from 'lucide-react';
 import StatusGlyph from './StatusGlyph';
 import type { SessionState } from './sessionState';
@@ -51,7 +52,8 @@ export default function SidebarProject({ project, machine, machineLabel, collaps
   onTogglePin?: (session: ControlCenterSession) => void;
   /** Extra props for a session's open button (the hover glance). Its `aria-describedby` joins the glyph's. */
   rowProps?: (session: ControlCenterSession) => Record<string, unknown>;
-  onNewSession: () => void;
+  /** `ask`: show the choices even when Settings has a default (Option/Alt-click). */
+  onNewSession: (ask?: boolean) => void;
   onRemove?: () => void;
   /** The project's branch and changes. Keep the same reference until it changes (the window is memoised). */
   git?: GitStatus | null;
@@ -78,7 +80,7 @@ export default function SidebarProject({ project, machine, machineLabel, collaps
         <span className="sidebar-row-actions">
           <button type="button" className="sidebar-project-add" aria-label={`New session in ${project.name}`}
             title={`New session in ${project.name}`} disabled={creating}
-            onClick={(event) => { event.preventDefault(); event.stopPropagation(); onNewSession(); }}>
+            onClick={(event) => { event.preventDefault(); event.stopPropagation(); onNewSession(event.altKey); }}>
             <Plus size={14} />
           </button>
           {onHistory && (
@@ -105,11 +107,11 @@ export default function SidebarProject({ project, machine, machineLabel, collaps
           <div key={session.name} className="sidebar-session-line">
           <button type="button" data-nav-row className="sidebar-session" data-state={states[index]}
             aria-current={selectedSession === session.name ? 'true' : undefined}
-            aria-label={`Open ${project.name} / ${session.name}`} aria-describedby={describedBy}
+            aria-label={`Open ${project.name} / ${sessionLabel(session.name)}`} aria-describedby={describedBy}
             {...extra} onClick={() => onOpen(session)}>
             {machineLabel && <span id={`${glyphId(session.name)}-machine`} hidden>{machineLabel}</span>}
             <StatusGlyph state={states[index]} id={glyphId(session.name)} />
-            <span className="sidebar-session-name">{session.name}</span>
+            <span className="sidebar-session-name">{sessionLabel(session.name)}</span>
             {session.agent && <span className="sidebar-session-agent">{AGENT_NAME[session.agent]}</span>}
             <time className="sidebar-session-time" dateTime={rowTime(session) ?? undefined}>{elapsed(rowTime(session), now)}</time>
           </button>

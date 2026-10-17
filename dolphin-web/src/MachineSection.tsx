@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, ChevronDown, FileText, Gauge, KeyRound, Laptop, LoaderCircle, MoreHorizontal, Network, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
 import { machineBridge, type MachineLink } from './machines';
+import { MotionPopover, useOverlayLayer } from './motion/MotionDialog';
 import './connectMachine.css';
 
 /* One machine in the projects list: a heading with its name and whether its
@@ -113,6 +115,7 @@ function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (
   // Ports and Usage both need a live link and the desktop bridge (the endpoints exist only in helper mode).
   const canOpenPanels = link.state === 'connected' && onOpenPanel && machineBridge()?.openPort ? onOpenPanel : null;
   const [open, setOpen] = useState(false);
+  const [layer, layerGone] = useOverlayLayer(open);
   const [key, setKey] = useState<'idle' | 'working' | 'done' | string>('idle');
   const [logError, setLogError] = useState('');
   const showLog = async () => {
@@ -123,7 +126,7 @@ function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (
   };
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState({ top: 0, left: 0 });
+  const [place, setPlace] = useState<{ top: number; left: number; side: 'below' | 'above' }>({ top: 0, left: 0, side: 'below' });
   const target = link.target ?? '';
   // The projects list scrolls and clips, so the menu sits in a layer above
   // it, under its button, kept inside the window.
@@ -133,7 +136,9 @@ function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (
     if (!box) return;
     const width = Math.min(320, window.innerWidth - 32);
     const height = menu.current?.offsetHeight ?? 0;
-    setPlace(placeMachineMenu(box, { width, height }, { width: window.innerWidth, height: window.innerHeight }));
+    const next = placeMachineMenu(box, { width, height }, { width: window.innerWidth, height: window.innerHeight });
+    // It grows from the button: down from below it, up from above it.
+    setPlace({ ...next, side: next.top >= box.bottom ? 'below' : 'above' });
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -166,8 +171,10 @@ function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (
       >
         <MoreHorizontal size={15} />
       </button>
-      {open && createPortal(
-        <div ref={menu} className="machine-menu machine-menu--end" role="menu" aria-label={`${link.label} options`} style={{ top: place.top, left: place.left }}>
+      {layer && createPortal(
+        <AnimatePresence onExitComplete={layerGone}>
+        {open && (
+        <MotionPopover key="menu" ref={menu} side={place.side} align="right" className="machine-menu machine-menu--end" role="menu" aria-label={`${link.label} options`} style={{ top: place.top, left: place.left }}>
           {remote && (
             <div className="machine-current">
               <Server size={16} aria-hidden="true" />
@@ -245,7 +252,9 @@ function MachineMenu({ link, onOpenPanel }: { link: MachineLink; onOpenPanel?: (
               <span>Disconnect</span>
             </button>
           )}
-        </div>,
+        </MotionPopover>
+        )}
+        </AnimatePresence>,
         root.current?.closest('.glass-workspace') ?? document.body,
       )}
     </div>

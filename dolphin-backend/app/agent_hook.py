@@ -284,25 +284,32 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
+def helper_connection(environ, timeout: float):
+    """A connection to this machine's Dolphin helper and its token, or None.
+    Only a helper whose server.json says ``ready`` is usable."""
+    home = environ.get("DOLPHIN_HOME") or os.path.join(os.path.expanduser("~"), ".dolphin-server")
+    with open(os.path.join(home, "run", "server.json"), encoding="utf-8") as handle:
+        server = json.load(handle)
+    if not isinstance(server, dict) or server.get("state") != "ready":
+        return None
+    with open(os.path.join(home, "token"), encoding="utf-8") as handle:
+        token = handle.read().strip()
+    if isinstance(server.get("socket"), str):
+        return _UnixHTTPConnection(server["socket"], timeout), token
+    if isinstance(server.get("port"), int):
+        return http.client.HTTPConnection("127.0.0.1", server["port"], timeout=timeout), token
+    return None
+
+
 def nudge_helper(environ) -> bool:
     """Tell this machine's Dolphin helper that a turn changed, so it looks now
     instead of at its next scan. The request carries nothing but the helper's
-    token; a helper that is not running costs one failed connect. Only a
-    helper whose server.json says ``ready`` is usable."""
+    token; a helper that is not running costs one failed connect."""
     try:
-        home = environ.get("DOLPHIN_HOME") or os.path.join(os.path.expanduser("~"), ".dolphin-server")
-        with open(os.path.join(home, "run", "server.json"), encoding="utf-8") as handle:
-            server = json.load(handle)
-        if not isinstance(server, dict) or server.get("state") != "ready":
+        found = helper_connection(environ, NUDGE_TIMEOUT_SECONDS)
+        if found is None:
             return False
-        with open(os.path.join(home, "token"), encoding="utf-8") as handle:
-            token = handle.read().strip()
-        if isinstance(server.get("socket"), str):
-            connection = _UnixHTTPConnection(server["socket"], NUDGE_TIMEOUT_SECONDS)
-        elif isinstance(server.get("port"), int):
-            connection = http.client.HTTPConnection("127.0.0.1", server["port"], timeout=NUDGE_TIMEOUT_SECONDS)
-        else:
-            return False
+        connection, token = found
         try:
             connection.request("POST", NUDGE_PATH, body=b"",
                                headers={"X-Dolphin-Token": token, "Content-Length": "0"})

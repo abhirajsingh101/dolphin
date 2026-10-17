@@ -8,7 +8,8 @@ import GlassConversations from './GlassConversations';
 import GlassChatTabs, { useChatTabs, useTabState, useTabRef } from './GlassChatTabs';
 import AgentSetupPrompt from './AgentSetupPrompt';
 import { currentPlatform, isMacPlatform, shortcutLabel } from './shortcutLabel';
-import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, readSidebarWidth, writeLayout } from './workspace/layoutMemory';
+import { browserStorage, LAYOUT_KEYS, readChatLayout, readFullscreenProject, readSidebarCollapsed, readSidebarWidth, readWindowHeights, writeLayout } from './workspace/layoutMemory';
+import WindowHeightResizer, { defaultWindowHeightLimits } from './workspace/WindowHeightResizer';
 import SidebarResizer from './workspace/SidebarResizer';
 import { windowKey } from './workspace/windowScope';
 import { parseIds, useSharedStorage } from './workspace/sharedStorage';
@@ -25,11 +26,11 @@ import MachineSection, { type WorkflowPanelKind } from './MachineSection';
 import SidebarProject, { useNow } from './SidebarProject';
 import PinnedList from './workspace/PinnedList';
 import { GlancePopover, useGlance, type GlanceTarget } from './workspace/HoverGlance';
-import { targetKey, type Target } from './workspace/targets';
+import { sessionLabel, targetKey, type Target } from './workspace/targets';
 import { nextRow, visibleProjects } from './sidebarModel';
 import { canConnect, canOpenWindow, machineBridge, terminalReconnectKey, useMachineLinks, type MachineLink } from './machines';
 import { ApiContext } from './apiContext';
-import { useSetting } from './settings';
+import { getSetting, useSetting } from './settings';
 const ProjectPickerDialog = lazy(() => import('./ProjectPickerDialog'));
 const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
@@ -41,6 +42,7 @@ const DiffPanel = lazy(() => import('./DiffPanel'));
 const PortsPanel = lazy(() => import('./PortsPanel'));
 const UsagePanel = lazy(() => import('./UsagePanel'));
 const HistoryPanel = lazy(() => import('./HistoryPanel'));
+const SkillSuggestions = lazy(() => import('./SkillSuggestions'));
 import NotificationBell from './NotificationBell';
 import {
   ChevronDown,
@@ -86,6 +88,7 @@ const OTHER_PROJECT_KEY = 'other';
 const OtherSessions = lazy(() => import('./OtherSessions'));
 const ImportSessionsDialog = lazy(() => import('./ImportSessionsDialog'));
 import './glass.css';
+import './glassSurfaces.css';
 import MarkdownReply, { prefetchMarkdown } from './workspace/MarkdownReply';
 import { loadTerminalFeatures, loadTerminalPane, prefetchWhenIdle } from './workspace/prefetch';
 import { sameProjects } from './workspace/snapshots';
@@ -97,8 +100,12 @@ import { sessionsInViewLabel } from './sessionsInView';
 import type { Message, ToolActivity, TrackedWork, Thread } from './workspace/chatTypes';
 import ChatComposer, { type ComposerHandle } from './workspace/ChatComposer';
 import LiveReply from './workspace/LiveReply';
+import Disclosure from './motion/Disclosure';
+import { useArrivals } from './motion/useArrivals';
+import { arrivalVariants, presence, settleTransition, swapVariants, windowVariants } from './motion/presets';
 import { useStable } from './workspace/useStable';
 import { trackPanelOpeners } from './useModalPanel';
+import { MotionDialogs } from './motion/MotionDialog';
 
 trackPanelOpeners();
 type DashboardContext = { open_windows: { project_id: string; session_name: string; minimized: boolean; tab_hidden?: boolean }[]; pinned_sessions: { project_id: string; session_name: string }[]; focused_session: { project_id: string; session_name: string } | null };
@@ -211,6 +218,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   useEffect(() => { try { localStorage.removeItem('dolphin.glass.focus'); } catch { /* optional */ } }, []);
   const [active, setActive] = useState<Target | null>(restored.active);
   const [sidebarTab, setSidebarTab] = useState<'projects' | 'tasks'>('projects');
+  // The sidebar's panel, and the Tasks panel per project. A panel shown in
+  // place of another fades in; the first one appears in place.
+  const sidebarPanel = sidebarTab === 'tasks' ? `tasks:${active?.projectId ?? ''}` : 'projects';
+  const shownSidebarPanel = useRef<string | null>(null);
+  const panelSwap = shownSidebarPanel.current !== null && shownSidebarPanel.current !== sidebarPanel;
+  useLayoutEffect(() => { shownSidebarPanel.current = sidebarPanel; });
   const [windows, setWindows] = useState<Target[]>(restored.windows);
   const [minimized, setMinimized] = useState<string[]>(restored.minimized);
   const [projectTabs, setProjectTabs] = useState<Record<string, string>>(() => {
@@ -245,7 +258,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     if (!fullscreenProject) return;
     const exit = (event: KeyboardEvent) => {
       // Escape inside the terminal belongs to the program running there.
-      if (event.key !== 'Escape' || (event.target instanceof Element
+      if (event.key !== 'Escape' || event.defaultPrevented || (event.target instanceof Element
         && event.target.closest('.terminal-host, .xterm, input, textarea, select, [contenteditable="true"]'))) return;
       setFullscreenProject(null);
     };
@@ -259,6 +272,26 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     } catch { /* The workspace remains usable when browser storage is unavailable. */ }
   }, [windows, minimized, active]);
   const windowStack = useRef<HTMLDivElement>(null);
+  // Heights set at a stacked window's bottom edge, by project (WindowHeightResizer.tsx).
+  const [windowHeights, setWindowHeights] = useState(() => readWindowHeights(storage));
+  const commitWindowHeight = useCallback((projectId: string, height: number | null) => {
+    setWindowHeights((heights) => {
+      const next = { ...heights };
+      if (height === null) delete next[projectId];
+      else next[projectId] = height;
+      writeLayout(storage, LAYOUT_KEYS.windowHeights, next);
+      return next;
+    });
+  }, [storage]);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  useEffect(() => {
+    const resize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  const windowLimits = defaultWindowHeightLimits(viewportHeight);
+  const windowOf = (projectId: string) => Array.from(windowStack.current?.children ?? [])
+    .find((element) => (element as HTMLElement).dataset.projectId === projectId) as HTMLElement | undefined ?? null;
   const [scrollTarget, setScrollTarget] = useState<{ key: string } | null>(restored.active ? { key: key(restored.active) } : null);
   const reduceMotion = useReducedMotion();
   useEffect(() => {
@@ -520,13 +553,16 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     desktop, mac, canConnect: canConnect(), canUpdate: canUpdate(), canOpenWindow: canOpenWindow(), theme: themeChoice,
     machines: sections.map((link) => ({ id: link.id, label: link.label, kind: link.kind, state: link.state, target: link.target })),
     projects: projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineLabel: labelOf(p.machine), isInbox: p.is_inbox, sessionCount: p.sessions.length })),
-    sessions: sessionTargets.map((t) => ({ id: key(t), label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`, pinned: pinnedKey(t) })),
-    active: active ? { id: key(active), label: `${active.projectName} / ${active.sessionName}`, pinned: pinnedKey(active) } : null,
+    sessions: sessionTargets.map((t) => ({ id: key(t), label: `${onMachine(t)}${t.projectName} / ${sessionLabel(t.sessionName)}`, pinned: pinnedKey(t) })),
+    active: active ? { id: key(active), label: `${active.projectName} / ${sessionLabel(active.sessionName)}`, pinned: pinnedKey(active) } : null,
   });
   const [error, setError] = useTabState(tabId, ''),
     [threads, setThreads] = useState<Thread[]>([]),
     [thread, setThread, tabThreads, setThreadFor] = useTabState(tabId, '', 'dolphin.glass.chat-thread'),
     [messages, setMessages, , setMessagesFor] = useTabState<Message[]>(tabId, []),
+    // The thread the tab's messages were loaded for: a thread switch shows the
+    // old messages until the new ones arrive, and those arrive as a restore.
+    [messagesThread, setMessagesThread, , setMessagesThreadFor] = useTabState(tabId, ''),
     [busy, setBusy, tabBusy] = useTabState(tabId, false),
     [creating, setCreating] = useState(false);
   const [trackedWork, setTrackedWork, , setTrackedWorkFor] = useTabState<TrackedWork[]>(tabId, []);
@@ -575,11 +611,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           <span><strong>{project.name}</strong><span>{sessionName}</span><small>{tracked?.state === 'closed' ? 'Session closed' : tracked?.finished_at ? 'Agent finished its turn · work not independently verified' : tracked ? 'Tracking agent · no model tokens' : item.status === 'submitted' ? 'Task submitted · completion not yet verified' : item.status === 'unknown' ? 'Inspect session · startup not confirmed' : 'Session ready'}</small></span>
           <button disabled={tracked?.state === 'closed'} aria-label={`Open session ${project.name} / ${sessionName}`} onClick={() => open({ projectId: project.id, projectName: project.name, sessionName, machine: project.machine })}>Open session <ArrowUpRight size={14} /></button>
         </div>}
-        <details>
-        <summary><span>{item.tool.replace(/_/g, ' ')}</span><small data-status={item.status}>{item.status}</small></summary>
+        <Disclosure bodyClassName="glass-tool-output" summary={<><span>{item.tool.replace(/_/g, ' ')}</span><small data-status={item.status}>{item.status}</small></>}>
         {!sessionAction && project && typeof sessionName === 'string' && <button onClick={() => open({ projectId: project.id, projectName: project.name, sessionName, machine: project.machine })}>Open session</button>}
         <pre>{JSON.stringify(item.result, null, 2)}</pre>
-      </details></div>;
+      </Disclosure></div>;
     })}</div>;
   }
   const conversation = useRef<HTMLDivElement>(null);
@@ -743,6 +778,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   useEffect(() => {
     if (!thread) {
       setMessages([]);
+      setMessagesThread('');
       setPending(false);
       return;
     }
@@ -756,6 +792,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         }>(`/api/chief/threads/${encodeURIComponent(thread)}`);
         if (current) {
           setMessages(t.messages);
+          setMessagesThread(thread);
           setPending(t.pending_idempotency_keys.length > 0);
           if (t.pending_idempotency_keys.length || busy) timer = setTimeout(load, 2000);
         }
@@ -787,6 +824,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           ]);
           if (!alive) return;
           setMessagesFor(tab.id, detail.messages);
+          setMessagesThreadFor(tab.id, id);
           setPendingFor(tab.id, detail.pending_idempotency_keys.length > 0);
           if (Array.isArray(work)) setTrackedWorkFor(tab.id, work);
           const latest = detail.messages[messages.length - 1];
@@ -817,7 +855,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   // The window map hands these to every window; each takes its target.
   const selectTab = (t: Target) => open(t, { scroll: false });
   const toggleFullscreen = (projectId: string) => setFullscreenProject((current) => (current === projectId ? null : projectId));
-  const newSessionIn = (projectId: string) => { const project = projects.find((item) => item.id === projectId); if (project) void create(project); };
+  const newSessionIn = (projectId: string, ask = false) => { const project = projects.find((item) => item.id === projectId); if (project) void create(project, undefined, { ask }); };
   const toggleCollapsed = (projectId: string) => {
     const group = projectWindows.find((item) => item.projectId === projectId);
     if (!group) return;
@@ -871,11 +909,13 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   }
   const glance = useGlance();
   const creatingNow = useRef(new Set<string>());
-  async function create(project: MachineProject, choice?: SessionChoice) {
-    // Dolphin Desktop asks what to run first: an agent, an install, or a shell.
+  async function create(project: MachineProject, choice?: SessionChoice, { ask = false }: { ask?: boolean } = {}) {
+    // Dolphin Desktop starts the default from Settings, or asks what to run:
+    // an agent, an install, a tmux session or a plain terminal.
     if (desktop && !choice) {
-      setChoosingSession(project);
-      return;
+      const preferred = getSetting('newSession.defaultAgent');
+      if (ask || preferred === 'ask') { setChoosingSession(project); return; }
+      choice = { mode: preferred };
     }
     const client = apiOf(project.machine);
     if (!client) return;
@@ -897,6 +937,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         warning = launched.warning;
       } else {
         s = await client.createTmuxSession(project.id, undefined, choice?.mode ?? 'shell');
+        warning = s.warning ?? null;  // the agent asked for is missing; the other one started
         if (choice?.startup) await client.sendTmuxInput(project.id, s.name, choice.startup);
       }
       await refresh();
@@ -960,6 +1001,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         `/api/chief/threads/${encodeURIComponent(id)}`,
       );
       setMessages(detail.messages);
+      setMessagesThread(id);
       retry.current = null;
       void refresh();
       if (result.status === 'in_progress') setPending(true);
@@ -986,6 +1028,15 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     message.role === 'user' && message.text === optimistic.text && !optimistic.previousIds.includes(message.id))
     ? [...messages, { id: 'sending', role: 'user' as const, text: optimistic.text }]
     : messages;
+  // Only messages sent or received while this conversation is on screen rise
+  // in; restored history, tab and thread switches show in place. The sent
+  // message takes over from its optimistic copy, and a reply from the text
+  // that streamed for it, without rising a second time.
+  const [streaming, setStreaming] = useState(false);
+  const arrived = useArrivals(`${tabId}:${messagesThread}`, [
+    ...visibleMessages.map((message) => ({ id: message.id, standIn: message.role === 'user' ? `user:${message.text}` : 'reply' })),
+    ...(streaming && visibleMessages[visibleMessages.length - 1]?.role !== 'assistant' ? [{ id: 'streaming', standIn: 'reply' }] : []),
+  ]);
   // Insert completion events by their actual timestamp, with the receipt link
   // keeping a summary behind its completion even when timestamps are absent.
   const workAt = new Map<number, TrackedWork[]>();
@@ -1036,7 +1087,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const glanceTarget = (t: Target): GlanceTarget | null => {
     const client = apiOf(machineOfTarget(t));
     const onScreen = projectWindows.some((group) => !group.collapsed && key(group.selected) === key(t));
-    return client && !onScreen ? { key: key(t), label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`, projectId: t.projectId, sessionName: t.sessionName, api: client } : null;
+    return client && !onScreen ? { key: key(t), label: `${onMachine(t)}${t.projectName} / ${sessionLabel(t.sessionName)}`, projectId: t.projectId, sessionName: t.sessionName, api: client } : null;
   };
   // One launch per transcript at a time: a second click before the first
   // resolves must not start a second session.
@@ -1077,7 +1128,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         pinned={(name) => focus.some((f) => f.projectId === p.id && f.sessionName === name)}
         onTogglePin={(s) => togglePin({ projectId: p.id, projectName: p.name, sessionName: s.name, machine: p.machine })}
         rowProps={(s) => glance.bind(glanceTarget({ projectId: p.id, projectName: p.name, sessionName: s.name, machine: p.machine }))}
-        onNewSession={() => void create(p)}
+        onNewSession={(ask) => void create(p, undefined, { ask })}
         onRemove={p.is_inbox ? undefined : () => setRemovingProject(p)}
         git={gitBy[p.machine]?.projects?.[p.id]}
         worktreeOf={(name) => gitBy[p.machine]?.sessions?.[name]}
@@ -1087,7 +1138,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     );
   }
   return (
-    <MotionConfig reducedMotion="user"><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} style={{ '--glass-sidebar-user-width': `${sidebarWidth}px` } as CSSProperties}>
+    <MotionConfig reducedMotion="user"><MotionDialogs><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} style={{ '--glass-sidebar-user-width': `${sidebarWidth}px` } as CSSProperties}>
       <CommandPalette
         items={palette.items}
         open={paletteOpen}
@@ -1125,8 +1176,11 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           }
         }}
       />
+      {/* Each dialog sits in its own AnimatePresence so it can animate out
+          (motion/MotionDialog.tsx); the key is what it is open for. */}
+      <AnimatePresence>
       {pickingProject && apiOf(pickingProject) && (
-        <Suspense fallback={null}>
+        <Suspense key={`picker:${pickingProject}`} fallback={null}>
           <ApiContext.Provider value={apiOf(pickingProject) ?? api}>
             <ProjectPickerDialog
               machine={desktop ? (pickingProject === 'local' ? 'this computer' : labelOf(pickingProject)) : undefined}
@@ -1140,13 +1194,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </ApiContext.Provider>
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {connecting && (
-        <Suspense fallback={null}>
+        <Suspense key="connect" fallback={null}>
           <ConnectMachineDialog onClose={() => setConnecting(false)} currentTarget={null} />
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {removingProject && (
-        <Suspense fallback={null}>
+        <Suspense key={`remove:${removingProject.machine ?? 'local'}:${removingProject.id}`} fallback={null}>
           <ApiContext.Provider value={apiOf(removingProject.machine) ?? api}>
           <RemoveProjectDialog
             project={removingProject}
@@ -1166,8 +1224,10 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </ApiContext.Provider>
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {panel && apiOf(panel.machine) && (
-        <Suspense fallback={null}>
+        <Suspense key={`panel:${JSON.stringify(panel)}`} fallback={null}>
           <ApiContext.Provider value={apiOf(panel.machine) ?? api}>
             {panel.kind === 'ports' && (
               <PortsPanel machineId={panel.machine} machineLabel={labelOf(panel.machine)} remote={panel.machine !== 'local'} onClose={() => setPanel(null)} />
@@ -1180,16 +1240,20 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </ApiContext.Provider>
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {reviewing && apiOf(machineOfTarget(reviewing)) && (
-        <Suspense fallback={null}>
+        <Suspense key={`review:${key(reviewing)}`} fallback={null}>
           <ApiContext.Provider value={apiOf(machineOfTarget(reviewing)) ?? api}>
             <DiffPanel projectId={reviewing.projectId} sessionName={reviewing.sessionName}
               hasAgent={Boolean(sessionOf(reviewing)?.agent ?? sessionOf(reviewing)?.is_codex_running)} onClose={() => setReviewing(null)} />
           </ApiContext.Provider>
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {choosingSession && (
-        <Suspense fallback={null}>
+        <Suspense key={`new-session:${choosingSession.machine ?? 'local'}:${choosingSession.id}`} fallback={null}>
           <ApiContext.Provider value={apiOf(choosingSession.machine) ?? api}>
           <NewSessionDialog
             projectId={choosingSession.id}
@@ -1204,17 +1268,22 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           </ApiContext.Provider>
         </Suspense>
       )}
+      </AnimatePresence>
+      <AnimatePresence>
       {settingsOpen && (
-        <Suspense fallback={null}>
+        <Suspense key="settings" fallback={null}>
           <SettingsDialog returnFocus={settingsReturn.current} onClose={() => setSettingsOpen(false)} machines={desktop ? sections : []} onConnect={desktop && canConnect() ? () => setConnecting(true) : undefined} />
         </Suspense>
       )}
+      </AnimatePresence>
       {/* Held back while the machine's Agent setup line needs a click: a modal over it blocks the button. */}
+      <AnimatePresence>
       {importAsk && setupHolding && !setupHolding.includes(importAsk.machine) && (
-        <Suspense fallback={null}>
+        <Suspense key={`import:${importAsk.machine}`} fallback={null}>
           <ImportSessionsDialog machineLabel={importAsk.label} pending={importAsk.pending} onAnswer={answerImport} />
         </Suspense>
       )}
+      </AnimatePresence>
       <header className="glass-top">
         <button className="glass-desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Expand projects' : 'Collapse projects'} aria-expanded={!sidebarCollapsed} aria-controls="glass-projects" onClick={() => setSidebarCollapsed((value) => !value)}><PanelLeft size={18} /></button>
         <button
@@ -1324,7 +1393,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             </a>
           )}
         </div>
-        {sidebarTab === 'tasks' ? <div key="tasks" id="glass-tasks-panel" role="tabpanel" aria-labelledby="glass-tasks-tab" className="glass-sidebar-panel">
+        {sidebarTab === 'tasks' ? <motion.div key={sidebarPanel} id="glass-tasks-panel" role="tabpanel" aria-labelledby="glass-tasks-tab" className="glass-sidebar-panel" variants={swapVariants} initial={panelSwap ? "hidden" : false} animate="shown">
           {active && apiOf(machineOfTarget(active)) ? <ApiContext.Provider value={apiOf(machineOfTarget(active)) ?? api}><Suspense fallback={null}><GlassProjectTasks
             key={active.projectId}
             projectId={active.projectId}
@@ -1337,7 +1406,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               void refresh().then(() => open(target));
             }}
           /></Suspense></ApiContext.Provider> : <p className="glass-task-empty">Select an open terminal window to see its project’s tasks.</p>}
-        </div> : <div key="projects" id="glass-projects-panel" role="tabpanel" aria-labelledby="glass-projects-tab" className="glass-sidebar-panel">
+        </motion.div> : <motion.div key="projects" id="glass-projects-panel" role="tabpanel" aria-labelledby="glass-projects-tab" className="glass-sidebar-panel" variants={swapVariants} initial={panelSwap ? "hidden" : false} animate="shown">
         <label className="glass-project-filter">
           <Search size={14} />
           <input
@@ -1362,7 +1431,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             glance={(id) => { const t = focus.find((item) => key(item) === id); return t ? glance.bind(glanceTarget(t)) : {}; }}
             items={focus.map((t, index) => ({
               id: key(t),
-              label: `${onMachine(t)}${t.projectName} / ${t.sessionName}`,
+              label: `${onMachine(t)}${t.projectName} / ${sessionLabel(t.sessionName)}`,
               project: `${onMachine(t)}${t.projectName}`,
               session: t.sessionName,
               selected: !!active && key(active) === key(t),
@@ -1486,7 +1555,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             </button>
           )}
         </div>
-        </div>}
+        </motion.div>}
         {!narrow && !sidebarCollapsed && <SidebarResizer width={sidebarWidth} onChange={setSidebarWidth} onCommit={commitSidebarWidth} />}
       </motion.aside>
       <Group
@@ -1508,9 +1577,16 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       >
       {/* Never collapsible: a drag to the edge stops at 30% while windows are open. */}
       <Panel id="dolphin-windows" panelRef={windowsPanel} minSize={hasWindows ? '30%' : '0%'} defaultSize="0%">
-        <div ref={windowStack} className="glass-window-stack" data-multiple={projectWindows.length > 1}>
-          <AnimatePresence initial={false}>
-            {projectWindows.map(group => <motion.section layout="position" layoutDependency={layoutKey} key={group.projectId} className="glass-session-window glass-surface" data-session-key={key(group.selected)} data-project-id={group.projectId} data-active={active?.projectId === group.projectId} data-fullscreen={fullscreenProject === group.projectId || undefined} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.22 }}>
+        {/* A closing window leaves the flow at once (popLayout) so the others
+            move into its place while it fades; it keeps its size, so its
+            terminal is never resized on the way out. */}
+        <motion.div ref={windowStack} className="glass-window-stack" data-multiple={projectWindows.length > 1} layoutScroll>
+          <AnimatePresence initial={false} mode="popLayout">
+            {projectWindows.map(group => {
+              // Only a stacked, open, windowed window has an edge; the others keep their CSS height.
+              const resizable = projectWindows.length > 1 && !group.collapsed && fullscreenProject !== group.projectId;
+              const height = windowHeights[group.projectId];
+              return <motion.section layout="position" layoutDependency={layoutKey} key={group.projectId} className="glass-session-window glass-surface" data-session-key={key(group.selected)} data-project-id={group.projectId} data-active={active?.projectId === group.projectId} data-fullscreen={fullscreenProject === group.projectId || undefined} style={resizable && height ? { height } : undefined} variants={windowVariants} {...presence} transition={settleTransition}>
               {group.sessions.map(target => <div key={key(target)} className="glass-project-terminal" hidden={key(target) !== key(group.selected)}>
                 <ApiContext.Provider value={apiOf(machineOfTarget(target)) ?? api}>
                 <GlassSessionWindow
@@ -1541,9 +1617,19 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 />
                 </ApiContext.Provider>
               </div>)}
-            </motion.section>)}
+              {resizable && <WindowHeightResizer
+                label={group.selected.projectName || group.projectId}
+                remembered={height ?? null}
+                min={windowLimits.min}
+                max={windowLimits.max}
+                stack={() => windowStack.current}
+                target={() => windowOf(group.projectId)}
+                onCommit={(next) => commitWindowHeight(group.projectId, next)}
+              />}
+            </motion.section>;
+            })}
           </AnimatePresence>
-        </div>
+        </motion.div>
       </Panel>
       <Separator
         className="glass-window-separator"
@@ -1613,7 +1699,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 visibleMessages.map((m, index) => (
                   <Fragment key={m.id}>
                   {renderWorkUpdates(workAt.get(index) ?? [])}
-                  <motion.article key={m.id} className={`glass-message ${m.role}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }}>
+                  <motion.article key={m.id} className={`glass-message ${m.role}`} data-arrived={arrived.has(m.id) || undefined} variants={arrivalVariants} initial={arrived.has(m.id) ? 'hidden' : false} animate="shown">
                     {m.role === 'assistant' && (
                       <div className="glass-reply-mark">
                         <span className="dolphin-mark">
@@ -1635,16 +1721,18 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               )}
               {trackingError && <p className="glass-context-note">Work tracking is temporarily unavailable. Retrying…</p>}
               {renderWorkUpdates(workAt.get(visibleMessages.length) ?? [])}
-              <LiveReply key={tabId} thread={thread} running={busy || pending} lastRole={visibleMessages[visibleMessages.length - 1]?.role} renderActivity={renderActivity} onGrow={followIfTailing} />
+              <LiveReply key={tabId} thread={thread} running={busy || pending} lastRole={visibleMessages[visibleMessages.length - 1]?.role} renderActivity={renderActivity} onGrow={followIfTailing} onStreaming={setStreaming} />
             </div>
             <BrainStatus />
             {desktop && <AgentSetupPrompt sources={machineSources} onHolding={setSetupHolding} />}
+            {desktop && <Suspense fallback={null}><SkillSuggestions /></Suspense>}
             {renderSignals?.((text) => composer.current?.setDraft(text))}
             <ChatComposer ref={composer} tabId={tabId} disabled={busy || pending} onSend={(text) => void send(text)} />
       </main>
       </Panel>
       </Group>
-      {glance.shown && <GlancePopover shown={glance.shown} onClose={glance.hide} />}
-    </div></MotionConfig>
+      {/* Keyed by session: moving to another row cross-fades the two previews. */}
+      <AnimatePresence>{glance.shown && <GlancePopover key={glance.shown.target.key} shown={glance.shown} onClose={glance.hide} />}</AnimatePresence>
+    </div></MotionDialogs></MotionConfig>
   );
 }

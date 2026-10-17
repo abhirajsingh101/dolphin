@@ -1,15 +1,18 @@
-/* Memory is a choice the user makes in Dolphin Desktop (settings.ts: `memory`),
- * and every machine follows it: a helper downloads GBrain only after it is
- * told to (app/brain.py, POST /api/brain/consent). No Electron here, so
+/* Memory is a choice the user makes in Dolphin Desktop (settings.ts: `memory`).
+ * Only this computer has a brain: its helper downloads GBrain only after it is
+ * told to (app/brain.py, POST /api/brain/consent). Every machine reached over
+ * SSH is told memory is off, so it never sets one up; its work reaches this
+ * computer's brain through the sync (brainSync.ts). No Electron here, so
  * test/memory-sync.test.mjs can load it. */
 
 export type MemoryEvent = 'connected' | 'changed';
 type Fetch = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{ ok: boolean }>;
 
-/** What to tell a machine, or null for nothing. Connecting only ever opts a
- *  machine in: one is never switched off for having been connected while the
- *  setting was off (its memory may predate the setting). */
-export function memoryChoiceFor(event: MemoryEvent, wanted: boolean): boolean | null {
+/** What to tell a machine, or null for nothing. This computer: connecting
+ *  only ever opts it in (its memory may predate the setting), and a change in
+ *  Settings goes both ways. A machine over SSH: off, once, on connect. */
+export function memoryChoiceFor(event: MemoryEvent, wanted: boolean, kind: 'local' | 'ssh' = 'local'): boolean | null {
+  if (kind === 'ssh') return event === 'connected' ? false : null;
   if (event === 'connected') return wanted ? true : null;
   return wanted;
 }

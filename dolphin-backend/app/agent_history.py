@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .agent_usage import recent_files
+from .agent_usage import agent_home, recent_files
 from .tmux_service import path_in_workspace, worktrees_dir
 
 FILE_LIMIT = 300
@@ -254,7 +254,7 @@ def _load(path: Path, reader) -> Transcript | None:
 
 
 def _claude_paths(home: Path, workspace: Path) -> list[Path]:
-    base = home / ".claude" / "projects"
+    base = agent_home(home, "claude") / "projects"
     if not base.is_dir():
         return []
     prefixes = (_encode(workspace), _encode(worktrees_dir(workspace)))
@@ -265,7 +265,7 @@ def _claude_paths(home: Path, workspace: Path) -> list[Path]:
 
 def _codex_paths(home: Path) -> list[Path]:
     # agent_usage's walk: symlinked folders and files, and FIFOs, are never opened.
-    return recent_files(home / ".codex" / "sessions", ".jsonl", _EPOCH, prefix="rollout-")
+    return recent_files(agent_home(home, "codex") / "sessions", ".jsonl", _EPOCH, prefix="rollout-")
 
 
 def _mine(path: Path, agent: str, workspace: Path) -> Transcript | None:

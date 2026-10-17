@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Laptop, LoaderCircle, Search, Server, X } from 'lucide-react';
 import { filterMachines, machineBridge, SOURCE_LABEL, validTarget, type Machine } from './machines';
+import { useDialogParts } from './motion/dialogParts';
 import './newSession.css';
 import './connectMachine.css';
 
@@ -17,6 +18,7 @@ export default function ConnectMachineDialog({ onClose, currentTarget }: { onClo
   const [error, setError] = useState('');
   const [opening, setOpening] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  const { Scrim, Panel } = useDialogParts();
 
   useEffect(() => {
     input.current?.focus();
@@ -64,8 +66,8 @@ export default function ConnectMachineDialog({ onClose, currentTarget }: { onClo
   // Group the found machines under where they came from, keeping their order.
   let lastGroup = '';
   return (
-    <div className="new-session-scrim" onClick={onClose} role="presentation">
-      <div className="new-session-panel connect-machine-panel" role="dialog" aria-modal="true" aria-label="Connect to a Machine"
+    <Scrim className="new-session-scrim" onClick={onClose} role="presentation">
+      <Panel className="new-session-panel connect-machine-panel" role="dialog" aria-modal="true" aria-label="Connect to a Machine"
         onClick={(event) => event.stopPropagation()} onKeyDown={onKey}>
         <header className="new-session-header">
           <h2>Connect to a Machine</h2>
@@ -127,7 +129,7 @@ export default function ConnectMachineDialog({ onClose, currentTarget }: { onClo
         <p className="connect-machine-foot">
           Dolphin uses your SSH keys or asks for the password, sets itself up on the machine (about half a minute the first time), and stays connected. Your terminals keep running there when you close the window.
         </p>
-      </div>
-    </div>
+      </Panel>
+    </Scrim>
   );
 }

@@ -1,5 +1,6 @@
-// The memory choice reaches every machine: on connect only an opt-in is sent,
+// The memory choice reaches this computer: on connect only an opt-in is sent,
 // a change in Settings goes both ways, and 0.1.x installs start with it on.
+// A machine over SSH is told memory is off: only this computer has a brain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { memoryChoiceFor, seededMemory, sendMemoryChoice } from '../dist/memorySync.js';
@@ -9,6 +10,13 @@ test('connecting only opts a machine in; a change in Settings goes both ways', (
   assert.equal(memoryChoiceFor('connected', false), null);
   assert.equal(memoryChoiceFor('changed', true), true);
   assert.equal(memoryChoiceFor('changed', false), false);
+});
+
+test('a machine over SSH never sets memory up, whatever the setting', () => {
+  assert.equal(memoryChoiceFor('connected', true, 'ssh'), false);
+  assert.equal(memoryChoiceFor('connected', false, 'ssh'), false);
+  assert.equal(memoryChoiceFor('changed', true, 'ssh'), null);
+  assert.equal(memoryChoiceFor('changed', false, 'ssh'), null);
 });
 
 test('the choice goes to the helper with its token', async () => {

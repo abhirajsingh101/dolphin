@@ -18,6 +18,14 @@
   font: var(--fs-sm)/1.5 var(--font-sans);
   background: var(--glass-bg);
 }
+/* The workspace's own chrome is rounder than the scale above. What floats over
+   it (dialogs, menus, popovers) is back on the scale (§4: 6/10/14, dialogs on
+   --r-xl), so a card inside a 20px dialog is never rounder than the dialog. */
+.glass-workspace :is(.cp-scrim, .picker-scrim, .new-session-scrim, .workflow-scrim, .settings-scrim,
+  .glass-notification-panel, .glass-conversation-dialog, .glass-window-menu, .glass-glance, .machine-menu, .update-panel) {
+  --r-lg: 14px;
+  --r-md: 10px;
+}
 .glass-workspace button,
 .glass-workspace select,
 .glass-workspace input,
@@ -107,8 +115,9 @@
   border: 1px solid var(--glass-edge);
   border-radius: var(--r-md);
   background: var(--glass-panel);
-  color: var(--glass-muted);
+  color: var(--glass-muted-small);
 }
+.glass-global-search input::placeholder { color: var(--glass-muted-small); }
 .glass-global-search input {
   border: 0;
   background: transparent;
@@ -149,6 +158,9 @@
   font-size: var(--fs-2xs); font-weight: 500; font-variant-numeric: tabular-nums;
 }
 .glass-sidebar-tabs > a, .glass-sidebar-tabs > .glass-close-projects { flex: 0 0 28px; justify-content: center; padding: 0; }
+/* The web build's add link is a plain anchor: centre its icon like the buttons beside it. */
+.glass-sidebar-tabs > a { display: inline-flex; align-items: center; border-radius: var(--r-md); color: var(--glass-muted); transition: background var(--d1), color var(--d1); }
+.glass-sidebar-tabs > a:hover { background: var(--glass-selection); color: var(--glass-text); }
 .glass-tree { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--glass-scrollbar) transparent; scroll-padding-top: 32px; }
 .glass-tree summary strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :is(.glass-tree, .glass-conversation, .glass-window-stack, .glass-project-tasks)::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -251,7 +263,8 @@
   box-shadow: var(--glass-shadow);
 }
 .glass-welcome h2 { margin: 0 0 8px; font-size: var(--fs-lg); font-weight: 600; text-wrap: balance; }
-.glass-welcome p { max-width: 46ch; margin: 0 auto 18px; color: var(--glass-muted); }
+/* 4.5:1 in light: --glass-muted is 4.2:1 on the panel (tokens.test.ts). */
+.glass-welcome p { max-width: 46ch; margin: 0 auto 18px; color: var(--glass-muted-small); }
 .glass-welcome > div {
   display: flex;
   justify-content: center;
@@ -482,7 +495,7 @@
   font-size: var(--fs-xs);
 }
 .glass-workspace .glass-global-search {
-  color: var(--glass-muted);
+  color: var(--glass-muted-small);
   border-color: var(--glass-edge);
   background: var(--glass-panel);
   padding: 9px 13px;
@@ -495,6 +508,7 @@
   white-space: nowrap;
 }
 .glass-global-search kbd {
+  color: var(--glass-muted-small);
   border: 1px solid var(--glass-edge);
   padding: 1px 5px;
   border-radius: var(--r-sm);
@@ -528,29 +542,6 @@
 .glass-workspace .glass-sidebar-toggle,
 .glass-workspace .glass-sidebar-scrim {
   display: none;
-}
-.glass-workspace .cp-panel {
-  background: var(--glass-dock-fill);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(18px);
-  box-shadow: var(--glass-shadow);
-}
-.glass-workspace .cp-field input {
-  background: transparent;
-  color: var(--glass-text);
-}
-.glass-workspace .cp-row {
-  border-radius: var(--r-md);
-  padding: 12px 18px;
-  color: var(--glass-text);
-}
-.glass-workspace .cp-row.is-active {
-  background: var(--glass-selection);
-}
-.glass-workspace .cp-heading,
-.glass-workspace .cp-row em,
-.glass-workspace .cp-foot {
-  color: var(--glass-muted);
 }
 @media (max-width: 650px) {
   .glass-workspace {
@@ -617,15 +608,13 @@
   }
 }
 @supports not (backdrop-filter: blur(1px)) {
-  .glass-surface,
-  .glass-workspace .cp-panel {
+  .glass-surface {
     background: var(--glass-solid);
   }
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-surface,
-  .glass-composer,
-  .glass-workspace .cp-panel {
+  .glass-composer {
     background: var(--glass-solid);
     backdrop-filter: none;
   }
@@ -696,10 +685,19 @@
 
 .glass-center { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; }
 .glass-center .glass-stage { height: 100%; }
-.glass-window-stack { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow: auto; }
+.glass-window-stack { position: relative; display: flex; flex-direction: column; gap: 10px; height: 100%; overflow: auto; }
 .glass-session-window { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
-.glass-window-stack[data-multiple='true'] .glass-session-window:not(:has([data-collapsed='true'])) { flex: 1 0 auto; height: 45dvh; min-height: 45dvh; resize: vertical; }
-.glass-session-window:has([data-collapsed='true']) { flex: none; height: 42px; min-height: 42px; resize: none; }
+.glass-window-stack[data-multiple='true'] .glass-session-window:not(:has([data-collapsed='true'])) { flex: 1 0 auto; height: 45dvh; min-height: 45dvh; }
+.glass-session-window:has([data-collapsed='true']) { flex: none; height: 42px; min-height: 42px; }
+/* A stacked window's bottom edge, where it is made taller (WindowHeightResizer.tsx).
+   It replaced `resize: vertical`, whose corner stopped where the pointer did. */
+.glass-session-window { position: relative; }
+.glass-window-resizer { position: absolute; right: 12px; bottom: 0; left: 12px; z-index: var(--z-sticky); height: 8px; cursor: row-resize; touch-action: none; }
+.glass-window-resizer::after { position: absolute; right: 0; bottom: 2px; left: 0; height: 2px; border-radius: var(--r-full); background: transparent; content: ''; transition: background 160ms; }
+.glass-window-resizer:is(:hover, :focus-visible, [data-dragging])::after { background: var(--glass-accent); }
+.glass-window-resizer:focus-visible { outline: none; }
+@media (pointer: coarse) { .glass-window-resizer { height: 16px; } }
+@media (prefers-reduced-motion: reduce) { .glass-window-resizer::after { transition: none; } }
 .glass-window-content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .glass-window-title { height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--glass-edge); }
 .glass-window-title h2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); font-weight: 500; margin: 0; }
@@ -740,7 +738,7 @@
 .glass-tool-activity details { border: 1px solid var(--glass-edge); border-radius: var(--r-md); padding: 6px 10px; background: var(--glass-bubble); }
 .glass-tool-activity summary { cursor: pointer; display: flex; align-items: center; gap: 12px; }
 .glass-tool-activity summary > span { flex: 1; text-transform: capitalize; }
-.glass-tool-activity small { color: var(--glass-muted); }
+.glass-tool-activity small { color: var(--glass-muted-small); }
 .glass-tool-activity [data-status='succeeded'], .glass-tool-activity [data-status='submitted'] { color: var(--glass-accent); }
 .glass-tool-activity [data-status='failed'], .glass-tool-activity [data-status='unknown'] { color: var(--glass-alert); }
 .glass-tool-activity pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: var(--fs-2xs); }
@@ -820,7 +818,7 @@
 .glass-project-tasks header { display: flex; align-items: center; gap: 4px; }
 .glass-project-tasks header > div { flex: 1; min-width: 0; }
 .glass-project-tasks header strong, .glass-project-tasks header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.glass-project-tasks header small { margin-top: 3px; color: var(--glass-muted); }
+.glass-project-tasks header small { margin-top: 3px; color: var(--glass-muted-small); }
 .glass-project-tasks form { display: flex; align-items: center; border: 1px solid var(--glass-edge); background: var(--glass-bubble); border-radius: var(--r-lg); padding: 3px; }
 .glass-project-tasks form textarea { min-width: 0; width: 100%; background: transparent; border: 0; padding: 7px; color: var(--glass-text); }
 .glass-task-list { overflow: auto; min-height: 0; }
@@ -841,8 +839,9 @@
 .glass-workspace :is(button, a, summary):focus-visible {
   outline: 2px solid var(--glass-accent);
   outline-offset: 2px;
-  border-radius: var(--r-md);
 }
+/* A link or summary has no radius of its own; a button keeps its own shape. */
+.glass-workspace :is(a, summary):focus-visible { border-radius: var(--r-md); }
 .glass-project-filter, .glass-project-tasks form {
   transition: border-color 180ms, box-shadow 180ms, background 180ms;
 }
@@ -861,23 +860,25 @@
   transition: transform 240ms var(--glass-ease);
 }
 .glass-sidebar-tabs:has(#glass-tasks-tab[aria-selected='true'])::before { transform: translateX(calc(100% + 3px)); }
+/* With the web build's 28px add link ending the row (plus its 3px gap), each tab is that much narrower. */
+.glass-sidebar-tabs:has(> a)::before { width: calc((100% - 40px) / 2); }
+@media (max-width: 650px) {
+  .glass-sidebar-tabs:has(> a)::before { width: calc((100% - 71px) / 2); }
+}
 .glass-sidebar-tabs button[aria-selected='true'] { background: transparent; box-shadow: none; }
 .glass-sidebar-tabs button { transition: color 160ms, background 160ms; border-radius: var(--r-md); }
 .glass-sidebar-tabs button:focus:not(:focus-visible) { outline: none; }
-.glass-sidebar-panel, .glass-project-tasks { animation: glass-content-in 200ms var(--glass-ease) both; }
 @keyframes glass-content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .glass-tree summary { border-radius: var(--r-md); transition: background 160ms, color 160ms; }
 .glass-tree summary:hover { background: var(--glass-bubble); }
 .glass-tree summary > svg:first-child { transition: transform 180ms var(--glass-ease); }
 .glass-tree details:not([open]) summary > svg:first-child { transform: rotate(-90deg); }
-.glass-task-list details[open] > .glass-task-row { animation: glass-content-in 180ms var(--glass-ease) both; }
 .glass-task-row { border-radius: var(--r-md); transition: background 160ms, opacity 160ms; }
 .glass-task-row:hover { background: var(--glass-bubble); }
 .glass-task-row input { transition: box-shadow 160ms; }
 .glass-task-row input:focus-visible { outline-offset: 3px; }
 .glass-tool-activity details { transition: background 180ms, border-color 180ms; }
-.glass-tool-activity details[open] { border-color: var(--glass-accent); }
-.glass-tool-activity details[open] > pre { animation: glass-content-in 180ms var(--glass-ease) both; }
+.glass-tool-activity details[data-state='open'] { border-color: var(--glass-accent); }
 .glass-workspace :is(.glass-top, .glass-window-title, .glass-project-tasks header, .glass-composer) button {
   transition: background 160ms, box-shadow 160ms, scale 180ms var(--glass-ease);
 }
@@ -901,9 +902,9 @@
 .glass-workspace .glass-conversation-trigger { max-width: min(260px, 25vw); gap: 7px; padding: 7px 10px; border: 1px solid var(--glass-edge); background: var(--glass-bubble); font-size: var(--fs-xs); }
 .glass-conversation-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .glass-conversation-trigger > svg { flex-shrink: 0; }
-.glass-conversation-dialog { padding: 0; width: min(560px, calc(100vw - 32px)); max-height: min(680px, 85dvh); border: 1px solid var(--glass-edge); border-radius: var(--r-xl); color: var(--glass-text); background: color-mix(in srgb, var(--glass-solid) 93%, transparent); box-shadow: 0 24px 80px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen); backdrop-filter: blur(28px) saturate(135%); overflow: hidden; }
+.glass-conversation-dialog { padding: 0; width: min(560px, calc(100vw - 32px)); max-height: min(680px, 85dvh); border: 1px solid var(--glass-edge); border-radius: var(--r-xl); color: var(--glass-text); background: var(--glass-float-fill); box-shadow: var(--glass-float-shadow); backdrop-filter: var(--glass-float-blur); overflow: hidden; }
 .glass-conversation-dialog[open] { animation: glass-content-in 180ms var(--glass-ease); }
-.glass-conversation-dialog::backdrop { background: var(--glass-scrim); backdrop-filter: blur(5px); }
+.glass-conversation-dialog::backdrop { background: var(--glass-scrim); backdrop-filter: var(--glass-scrim-blur); }
 .glass-conversation-picker { display: flex; flex-direction: column; max-height: min(680px, 85dvh); padding: 20px; gap: 12px; }
 .glass-conversation-picker header { display: flex; justify-content: space-between; align-items: center; }
 .glass-conversation-picker h2 { font-size: var(--fs-lg); margin: 0; }
@@ -967,7 +968,6 @@
 .glass-chat-tabs { display: flex; align-items: center; gap: 4px; padding: 5px 10px; border-bottom: 1px solid var(--glass-edge); min-width: 0; flex-shrink: 0; }
 .glass-chat-tabs [role="tablist"] { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: thin; flex: 1; }
 .glass-chat-tab { display: flex; align-items: center; border: 1px solid transparent; border-radius: var(--r-md); flex: 0 0 auto; max-width: 210px; transition: background .16s ease, border-color .16s ease; }
-.glass-chat-tab[data-selected="true"] { background: var(--glass-selection); border-color: var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-sheen); }
 .glass-chat-tab [role="tab"] { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px; font-size: var(--fs-xs); }
 .glass-chat-tab [role="tab"] span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .glass-chat-tab > button:last-child { padding: 5px; margin-right: 3px; }
@@ -1009,7 +1009,6 @@
 .glass-project-terminal[hidden] { display: none; }
 .glass-terminal-tabs { display: flex; gap: 4px; padding: 3px 8px; overflow-x: auto; flex-shrink: 0; scrollbar-width: thin; border-bottom: 1px solid var(--glass-edge); }
 .glass-terminal-tab { display: flex; align-items: center; flex-shrink: 0; max-width: 220px; border: 1px solid transparent; border-radius: var(--r-md); }
-.glass-terminal-tab[data-selected="true"] { background: var(--glass-selection); border-color: var(--glass-edge); }
 .glass-terminal-tab > button { background: transparent; padding: 4px 7px; font-size: var(--fs-2xs); }
 .glass-terminal-tab [role="tab"] { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .glass-window-title > .glass-terminal-tabs { flex: 1; min-width: 0; padding: 0; border: 0; }
@@ -1084,7 +1083,6 @@
   margin: 0;
   border: 0;
   border-radius: 0;
-  resize: none;
   transform: none !important;
   background: var(--glass-bg);
 }
@@ -1107,9 +1105,9 @@
   width: min(380px, calc(100vw - 32px)); max-height: min(560px, 70dvh);
   display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid var(--glass-edge); border-radius: var(--r-xl);
-  background: color-mix(in srgb, var(--glass-solid) 94%, transparent);
-  box-shadow: 0 24px 80px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
-  backdrop-filter: blur(28px) saturate(135%);
+  background: var(--glass-float-fill);
+  box-shadow: var(--glass-float-shadow);
+  backdrop-filter: var(--glass-float-blur);
 }
 .glass-notification-panel header,
 .glass-notification-panel footer {
@@ -1147,9 +1145,9 @@
 .glass-notification-toasts li {
   display: flex; color: var(--glass-text); font-size: var(--fs-xs); align-items: flex-start;
   border: 1px solid var(--glass-edge); border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--glass-solid) 94%, transparent);
-  box-shadow: 0 12px 40px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
-  backdrop-filter: blur(28px) saturate(135%);
+  background: var(--glass-float-fill);
+  box-shadow: var(--glass-float-shadow-sm);
+  backdrop-filter: var(--glass-float-blur);
 }
 .glass-notification-toasts button {
   border: 0; background: transparent; color: var(--glass-text); font: inherit; cursor: pointer;
@@ -1161,15 +1159,12 @@
 .glass-notification-toasts .glass-toast-open > svg { flex-shrink: 0; margin-top: 2px; color: var(--glass-accent); }
 .glass-notification-toasts .glass-toast-open > span { display: grid; gap: 2px; min-width: 0; }
 .glass-notification-toasts strong { font-size: var(--fs-xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.glass-notification-toasts small { color: var(--glass-muted); }
+.glass-notification-toasts small { color: var(--glass-muted-small); }
 .glass-notification-toasts .glass-toast-dismiss { flex-shrink: 0; margin: 6px 6px 0 0; padding: 4px; color: var(--glass-muted); }
 /* Another machine's name beside a notification's title; this computer has none. */
 .glass-machine-chip { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--glass-edge); border-radius: var(--r-full); background: var(--glass-bubble); color: var(--glass-muted-small); font-size: var(--fs-2xs); font-weight: 500; vertical-align: 1px; }
 .glass-notification-toasts .glass-toast-open:disabled { cursor: default; opacity: 0.7; }
-@media (prefers-reduced-motion: no-preference) {
-  .glass-notification-toasts li { animation: glass-toast-in 160ms ease-out; }
-}
-@keyframes glass-toast-in { from { opacity: 0; transform: translateY(-4px); } }
+/* Pop-ups animate in and out with Motion (NotificationBell.tsx, toastVariants). */
 
 /* Compact projects list (design contract §4, "Projects list rows"). The
    list's own chrome stays small so sessions get the height, and above
@@ -1272,9 +1267,9 @@
 .glass-window-menu {
   position: fixed; z-index: var(--z-dialog); display: grid; width: 220px; padding: 4px;
   border: 1px solid var(--glass-edge); border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--glass-solid) 94%, transparent);
-  box-shadow: 0 12px 40px var(--glass-dialog-shadow), inset 0 1px var(--glass-sheen);
-  backdrop-filter: blur(28px) saturate(135%);
+  background: var(--glass-float-fill);
+  box-shadow: var(--glass-float-shadow-sm);
+  backdrop-filter: var(--glass-float-blur);
   font: var(--fs-sm)/1.5 var(--font-sans); color: var(--glass-text);
 }
 .glass-window-menu button { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 0; border-radius: var(--r-md); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -1287,8 +1282,9 @@
 /* Hover glance: a session's last lines beside its row. Read-only, takes no focus. */
 .glass-glance {
   position: fixed; z-index: var(--z-popover); width: 420px; max-width: calc(100vw - 16px); padding: 8px 10px;
-  border: 1px solid var(--glass-edge); border-radius: var(--r-md); pointer-events: none;
-  background: color-mix(in srgb, var(--glass-solid) 96%, transparent); box-shadow: 0 12px 40px var(--glass-dialog-shadow);
+  border: 1px solid var(--glass-edge); border-radius: var(--r-lg); pointer-events: none;
+  background: var(--glass-float-fill); box-shadow: var(--glass-float-shadow-sm);
+  backdrop-filter: var(--glass-float-blur);
   color: var(--glass-text); font: var(--fs-xs)/1.5 var(--font-sans);
 }
 .glass-glance strong { display: block; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -1335,7 +1331,7 @@
 .glass-tree .glass-other-sessions > summary small { color: var(--glass-muted-small); font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
 .glass-tree .glass-other-sessions .sidebar-session[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
 .glass-task-row { position: relative; }
-.glass-task-actions { position: absolute; top: var(--sp-1); right: var(--sp-1); display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-1); border-radius: var(--r-sm); background: var(--glass-bubble); opacity: 0; transition: opacity var(--d1); }
+.glass-task-actions { position: absolute; top: var(--sp-1); right: var(--sp-1); display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-1); border-radius: var(--r-sm); background: var(--glass-solid); box-shadow: 0 0 0 1px var(--glass-edge); opacity: 0; transition: opacity var(--d1); }
 .glass-task-row:hover .glass-task-actions,
 .glass-task-row:focus-within .glass-task-actions,
 .glass-task-actions.is-confirming { opacity: 1; }
@@ -1345,3 +1341,19 @@
   .glass-task-row { flex-wrap: wrap; }
   .glass-task-actions { position: static; flex: 1 0 100%; justify-content: flex-end; opacity: 1; padding: 0; background: none; }
 }
+
+/* In-surface motion (2026-10-17). Motion (src/motion/presets.ts) moves these;
+   CSS only paints them, so nothing here is animated by two systems.
+
+   One selection indicator per tab strip glides to the selected tab
+   (layoutId). It sits behind the tab's content and takes the look the
+   selected tab used to have. */
+.glass-chat-tab, .glass-terminal-tab { position: relative; isolation: isolate; }
+.glass-tab-indicator { position: absolute; z-index: -1; inset: -1px; border: 1px solid var(--glass-edge); border-radius: var(--r-md); background: var(--glass-selection); pointer-events: none; }
+.glass-chat-tab .glass-tab-indicator { box-shadow: inset 0 1px 0 var(--glass-sheen); }
+.glass-chat-tab-slot { display: flex; flex: 0 0 auto; min-width: 0; max-width: 210px; }
+.glass-chat-tab-slot > .glass-chat-tab { min-width: 0; }
+/* A disclosure body positions the rows that leave it (popLayout). */
+.glass-task-group { position: relative; }
+.glass-task-item { position: relative; }
+.glass-task-row[data-settling='true'] .glass-task-content > span > span:first-child { text-decoration: line-through; color: var(--glass-muted); }

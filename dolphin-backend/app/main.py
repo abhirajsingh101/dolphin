@@ -49,7 +49,8 @@ from . import (
     task_workflow_service,
 )
 from .database import async_session, get_db, init_db
-from . import brain, brain_api, desktop_api, workflow_api
+from . import agents, brain, brain_api, brain_summaries, desktop_api, plain_terminals, workflow_api
+from . import skill_suggestions, suggestions_api
 
 
 def _optional_module(name: str):
@@ -225,6 +226,7 @@ from .tmux_service import (
 
 app = FastAPI(title="Dolphin Tasks API", version="3.0.0")
 app.include_router(brain_api.router)
+app.include_router(suggestions_api.router)
 app.include_router(desktop_api.router)
 app.include_router(workflow_api.router)
 logger = logging.getLogger(__name__)
@@ -383,7 +385,8 @@ EXCLUDED_DIRECTORY_NAMES = {
 def _select_codex_dispatch_session(
     sessions: list[TmuxSessionInfo], requested_session_name: str | None
 ) -> TmuxSessionInfo:
-    codex_sessions = [session for session in sessions if session.is_codex_running]
+    # Any session running an agent: Claude Code and Codex both take a typed prompt.
+    codex_sessions = [session for session in sessions if session.is_codex_running or session.is_claude_code_running]
 
     if requested_session_name:
         target_session = next(
@@ -395,22 +398,22 @@ def _select_codex_dispatch_session(
                 status_code=404,
                 detail="Selected tmux session does not belong to this project.",
             )
-        if not target_session.is_codex_running:
+        if not (target_session.is_codex_running or target_session.is_claude_code_running):
             raise HTTPException(
                 status_code=409,
-                detail="Selected tmux session is not running Codex. Type `codex` in it first.",
+                detail="Selected tmux session is not running Claude Code or Codex. Type `claude` or `codex` in it first.",
             )
         return target_session
 
     if not codex_sessions:
         raise HTTPException(
             status_code=409,
-            detail="No Codex tmux session is running for this project.",
+            detail="No Claude Code or Codex session is running for this project.",
         )
     if len(codex_sessions) > 1:
         raise HTTPException(
             status_code=409,
-            detail="Multiple Codex sessions are running. Select one target session first.",
+            detail="Multiple agent sessions are running. Select one target session first.",
         )
     return codex_sessions[0]
 
@@ -593,6 +596,10 @@ async def startup():
     if fleet_runtime is not None:
         await fleet_runtime.start(async_session)
     turn_notification_collector.start()
+    # Each project's summary at the top of its brain page (app/brain_summaries.py).
+    brain_summaries.start()
+    # Skills and plugins that fit recent work, every 8 hours (app/skill_suggestions.py).
+    skill_suggestions.start()
     # Built-in System Health (Dolphin Desktop): sample from startup so the
     # last-hour charts are already filled when someone opens the page.
     system_health_service._native()
@@ -600,7 +607,7 @@ async def startup():
     if brain.mode() == "auto" and not brain.ready():
         brain.start_install(force=True)
     else:
-        threading.Thread(target=brain.apply_settings, name="gbrain-settings", daemon=True).start()
+        threading.Thread(target=brain.settle, name="gbrain-settings", daemon=True).start()
     try:
         await _prune_terminal_attachments_once()
     except Exception:
@@ -654,6 +661,11 @@ async def shutdown():
     if fleet_runtime is not None:
         await fleet_runtime.stop()
     await turn_notification_collector.stop()
+    await brain_summaries.stop()
+    await skill_suggestions.stop()
+    brain.close_session()
+    brain.embedder.embedder.stop()
+    plain_terminals.close_all()
     tasks = [
         task
         for task in (
@@ -1681,16 +1693,20 @@ async def create_project_tmux_session(
     db: AsyncSession = Depends(get_db),
 ):
     project, workspace_path = await _workspace_path_for_project(project_id, db)
+    # The agent asked for, or the other one when only that one is installed.
+    mode, switched = await asyncio.to_thread(agents.substitute, data.mode)
     try:
         session = await create_session(
             workspace_path,
             project.name,
             requested_name=data.name,
-            mode=data.mode,
+            mode=mode,
         )
     except TmuxServiceError as error:
         raise _tmux_error(error)
-    return _session_response(session)
+    response = _session_response(session)
+    response.warning = switched
+    return response
 
 
 @app.patch(
@@ -1944,7 +1960,11 @@ async def start_project_tmux_codex(
 ):
     _, workspace_path = await _workspace_path_for_project(project_id, db)
     try:
-        await start_codex(workspace_path, session_name)
+        # Codex, or Claude Code when only that one is installed.
+        if await asyncio.to_thread(agents.pick, "codex") == "claude":
+            await start_claude(workspace_path, session_name)
+        else:
+            await start_codex(workspace_path, session_name)
     except TmuxServiceError as error:
         raise _tmux_error(error)
     return {"status": "ok"}
@@ -2037,9 +2057,9 @@ async def dispatch_project_todos_to_codex(
         )
         task_count = 1
         message = (
-            "Todo was queued in the selected Codex session."
+            "Todo was queued in the selected agent session."
             if data.mode == "queue"
-            else "Todo was sent to the selected Codex session."
+            else "Todo was sent to the selected agent session."
         )
     else:
         quality_task_ids = set(
@@ -2072,7 +2092,7 @@ async def dispatch_project_todos_to_codex(
             tasks=dispatch_tasks,
         )
         task_count = len(active_tasks)
-        message = "Active todos were sent to the selected Codex session."
+        message = "Active todos were sent to the selected agent session."
 
     try:
         await send_input(workspace_path, target_session.name, prompt, enter=True)
@@ -2340,6 +2360,9 @@ async def stream_project_tmux_session(
             return
 
     try:
+        if plain_terminals.is_terminal(session_name):  # a plain shell, no tmux
+            await plain_terminals.attach(websocket, session_name)
+            return
         await _stream_tmux_attach(
             websocket,
             project_id,

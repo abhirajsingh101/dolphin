@@ -1,6 +1,6 @@
 # Dolphin
 
-![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/dolphin-hero.gif)
+![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/dolphin-hero.gif)
 
 Dolphin is a desktop workspace for running coding agents in real terminals, on
 your own computer or on any machine you can reach over SSH.
@@ -12,19 +12,19 @@ is doing.
 
 ## Download
 
-Dolphin 0.2.5. Every release is on
+Dolphin 0.2.6. Every release is on
 [Releases](https://github.com/abhirajsingh101/dolphin/releases).
 
 | Platform | Download |
 |---|---|
-| macOS, Apple Silicon | [Dolphin-0.2.5-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-mac-arm64.dmg) |
-| macOS, Intel | [Dolphin-0.2.5-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-mac-x64.dmg) |
-| Linux x64, AppImage (updates itself) | [Dolphin-0.2.5-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-x86_64.AppImage) |
-| Linux x64, Debian and Ubuntu | [Dolphin-0.2.5-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-amd64.deb) |
-| Linux x64, Fedora and RHEL | [Dolphin-0.2.5-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-x86_64.rpm) |
-| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.5-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-arm64.AppImage) |
-| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.5-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-arm64.deb) |
-| Linux arm64, Fedora and RHEL | [Dolphin-0.2.5-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.5/Dolphin-0.2.5-linux-aarch64.rpm) |
+| macOS, Apple Silicon | [Dolphin-0.2.6-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-mac-arm64.dmg) |
+| macOS, Intel | [Dolphin-0.2.6-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-mac-x64.dmg) |
+| Linux x64, AppImage (updates itself) | [Dolphin-0.2.6-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-x86_64.AppImage) |
+| Linux x64, Debian and Ubuntu | [Dolphin-0.2.6-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-amd64.deb) |
+| Linux x64, Fedora and RHEL | [Dolphin-0.2.6-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-x86_64.rpm) |
+| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.6-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-arm64.AppImage) |
+| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.6-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-arm64.deb) |
+| Linux arm64, Fedora and RHEL | [Dolphin-0.2.6-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-aarch64.rpm) |
 
 On a Mac with Homebrew, once the tap is published:
 
@@ -79,13 +79,18 @@ does the same.
 - **Chat:** ask Dolphin about your projects and sessions, or have it start work
   in a new agent session. It runs on your installed Claude Code or Codex.
 - **Memory (optional, off by default):** turn it on in the first-run checklist
-  or in Settings, and each machine gets its own
-  [GBrain](https://github.com/garrytan/gbrain). Tell the chat to remember
-  something and it recalls it later, and your agents can share it. It runs
-  keyless (keyword search, no API costs) and keeps everything in
-  `~/.dolphin-server/gbrain`. Setting it up downloads Bun and a pinned GBrain
-  release, about 400 MB, checksum-verified. Nothing is downloaded until you
-  turn it on.
+  or in Settings. The [GBrain](https://github.com/garrytan/gbrain) on this
+  computer then follows every project on every machine you connect to: it
+  reads your Claude Code and Codex conversations where those agents keep
+  them, keeps a dated log of what was asked and answered, and keeps each
+  project's state, open threads and decisions current, written by your own
+  Claude Code or Codex. Ask the chat what is going on and it knows. Search
+  works by meaning, in English, Korean and other languages, with a small
+  model that runs on this computer and needs no API key. The brain stays in
+  `~/.dolphin-server/gbrain`; only the summaries go through your Claude Code
+  or Codex login. Setting it up downloads Bun, a pinned
+  GBrain release, llama.cpp and the search model, about 550 MB,
+  checksum-verified. Nothing is downloaded until you turn it on.
 - **Tasks:** a simple task list per project.
 - **System Health:** CPU, memory, disks, network, GPUs and the busiest
   processes, from netdata when it is running and a built-in monitor otherwise.

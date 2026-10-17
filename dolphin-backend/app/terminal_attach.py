@@ -135,10 +135,16 @@ PREVIEW_FIXED_SIZE = (300, 120)
 
 
 def bounded_pty_size(cols: object, rows: object) -> tuple[int, int]:
-    """The same bounds every resize has always had (main._resize_pty)."""
+    """The same bounds every resize has always had (main._resize_pty). A size
+    that is not a number reads as the default, rather than ending the attach."""
+    def number(value: object, default: int) -> int:
+        try:
+            return int(value or default)  # type: ignore[call-overload]
+        except (TypeError, ValueError):
+            return default
     return (
-        max(20, min(int(cols or DEFAULT_PTY_SIZE[0]), 300)),
-        max(8, min(int(rows or DEFAULT_PTY_SIZE[1]), 120)),
+        max(20, min(number(cols, DEFAULT_PTY_SIZE[0]), 300)),
+        max(8, min(number(rows, DEFAULT_PTY_SIZE[1]), 120)),
     )
 
 

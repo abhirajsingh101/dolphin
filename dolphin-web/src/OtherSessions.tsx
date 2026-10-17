@@ -1,4 +1,5 @@
 import { ChevronDown, SquareTerminal } from 'lucide-react';
+import { sessionLabel } from './workspace/targets';
 import StatusGlyph from './StatusGlyph';
 import type { SessionState } from './sessionState';
 import type { OtherSession } from './types';
@@ -39,7 +40,7 @@ export default function OtherSessions({ machine, sessions, stateOf, opening, onO
               onClick={() => { if (session.openable && !opening.has(session.name)) onOpen(session); }}
             >
               <StatusGlyph state={stateOf(session)} id={glyphId(session.name)} />
-              <span className="sidebar-session-name">{session.name}</span>
+              <span className="sidebar-session-name">{sessionLabel(session.name)}</span>
               <span className="sidebar-session-agent">{session.path}</span>
             </button>
           </div>

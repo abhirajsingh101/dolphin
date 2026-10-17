@@ -27,7 +27,7 @@ def test_memory_requires_evidence_and_target():
 from types import SimpleNamespace
 import httpx
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from app import dolphin_agent, tmux_service
+from app import agent_clis, dolphin_agent, tmux_service
 from app.models import DolphinToolRun
 from app.database import Base
 from app.dolphin_agent_tools import DolphinTools, ToolError
@@ -153,7 +153,7 @@ async def test_native_project_work_routes_to_persistent_session(monkeypatch, tmp
     from app import dolphin_agent_tools, dolphin_work_tracker
     from unittest.mock import AsyncMock
     monkeypatch.setattr(dolphin_work_tracker, 'attach', AsyncMock(return_value={'id': 'test', 'state': 'starting'}))
-    monkeypatch.setattr(dolphin_agent_tools.shutil, 'which', lambda name: '/bin/' + name)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     calls = []
     async def launch(path, name, initial_prompt=None):
         calls.append((path, name, initial_prompt))
@@ -204,7 +204,7 @@ async def test_project_work_starts_fresh_session_once_with_prompt(ledger, monkey
     from app import dolphin_agent_tools, dolphin_work_tracker
     from unittest.mock import AsyncMock
     monkeypatch.setattr(dolphin_work_tracker, 'attach', AsyncMock(return_value={'id': 'test', 'state': 'starting'}))
-    monkeypatch.setattr(dolphin_agent_tools.shutil, 'which', lambda name: '/bin/' + name if name == available else None)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name if name == available else None): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     calls = []
     async def handle(request):
         calls.append((request.method, request.url.path))
@@ -290,7 +290,7 @@ async def test_delegated_sessions_are_named_after_the_task(monkeypatch, tmp_path
     from app import dolphin_agent_tools, dolphin_work_tracker
     from unittest.mock import AsyncMock
     monkeypatch.setattr(dolphin_work_tracker, 'attach', AsyncMock(return_value={'id': 'test', 'state': 'starting'}))
-    monkeypatch.setattr(dolphin_agent_tools.shutil, 'which', lambda name: '/bin/' + name)
+    monkeypatch.setattr(agent_clis, 'locate', lambda refresh=False, _which=(lambda name: '/bin/' + name): {tool: _which(tool) for tool in ('claude', 'codex', 'npm', 'brew')})
     monkeypatch.setattr(tmux_service, 'start_claude', AsyncMock())
     requested = []
     async def handle(request):

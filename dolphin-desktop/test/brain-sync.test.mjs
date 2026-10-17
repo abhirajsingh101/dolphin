@@ -31,7 +31,7 @@ test('a machine is exported page by page into this computer with its own label',
   assert.deepEqual(result, { cursor: { turns: 2 }, rounds: 2, busy: false });
   const first = new URL(calls[0].url);
   assert.equal(first.searchParams.get('cursor'), '{"turns":0}');
-  assert.equal(first.searchParams.get('brain_pages'), 'true');
+  assert.equal(first.searchParams.get('brain_pages'), null);  // machines have no brains of their own
   assert.equal(calls[0].init.headers['X-Dolphin-Token'], 'rt');
   assert.equal(new URL(calls[2].url).searchParams.get('cursor'), '{"turns":1}');
   const sent = JSON.parse(calls[1].init.body);
@@ -42,7 +42,6 @@ test('a machine is exported page by page into this computer with its own label',
 test('this computer sends its work under its hostname and keeps its own brain', async () => {
   const { calls, fetcher } = fakeFetch([{ hostname: 'studio-mac', cursor: { turns: 1 } }]);
   await syncMachine({ id: 'local', kind: 'local', endpoint: local }, local, undefined, fetcher);
-  assert.equal(new URL(calls[0].url).searchParams.get('brain_pages'), 'false');
   assert.deepEqual(JSON.parse(calls[1].init.body).machine, { id: 'studio-mac', label: 'studio-mac', kind: 'local' });
 });
 

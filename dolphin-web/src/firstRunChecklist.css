@@ -9,16 +9,21 @@
   gap: 0;
 }
 
+/* Icon, then the text; the action goes under the text at its right edge.
+   Beside the text, in the 216px sidebar, it squeezed the text to two words
+   a line. */
 .desktop-start .first-run-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-1) var(--sp-2);
   padding: var(--sp-1) 0;
   color: var(--glass-text);
 }
 
 .desktop-start .first-run-item > svg {
   flex: none;
+  margin-top: 3px;
   color: var(--glass-muted);
 }
 
@@ -28,7 +33,6 @@
 
 .desktop-start .first-run-item > span {
   display: grid;
-  flex: 1;
   min-width: 0;
 }
 
@@ -43,6 +47,11 @@
   width: auto;
   padding: var(--sp-1) var(--sp-2);
   border-color: var(--glass-edge);
+}
+
+.desktop-start .first-run-item button {
+  grid-column: 2;
+  justify-self: end;
 }
 
 .desktop-start .first-run .first-run-again {

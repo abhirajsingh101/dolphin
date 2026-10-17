@@ -1,0 +1,147 @@
+/* Skill suggestions above the chat composer (Dolphin Desktop). One line until
+ * opened; absent when there is nothing to suggest. Sits inside the shared
+ * .signals-tray frame from composerNotice.css. */
+
+.skill-suggestions-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d1);
+}
+.skill-suggestions-toggle:hover {
+  background: var(--glass-selection);
+}
+.skill-suggestions-toggle:focus-visible,
+.skill-card .skill-open:focus-visible {
+  outline: 2px solid var(--glass-accent);
+  outline-offset: 1px;
+}
+.skill-suggestions-toggle > svg {
+  flex: none;
+  color: var(--glass-accent);
+}
+.skill-suggestions-headline {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.skill-suggestions-hint {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--glass-muted-small);
+  font-size: var(--fs-xs);
+}
+
+.skill-suggestions-list {
+  max-height: 42vh;
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-2);
+  overflow-y: auto;
+  list-style: none;
+}
+.skill-card {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--glass-edge);
+}
+.skill-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.skill-card-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.skill-chip {
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-full);
+  color: var(--glass-muted-small);
+  font-size: var(--fs-2xs);
+}
+.skill-installs {
+  margin-left: auto;
+  color: var(--glass-muted-small);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.skill-reason {
+  margin: 0;
+  color: var(--glass-text);
+}
+.skill-project {
+  color: var(--glass-muted);
+}
+.skill-command {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--glass-solid);
+  color: var(--glass-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.skill-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.skill-card-foot .signals-actions {
+  margin-left: auto;
+}
+/* The same secondary pill as the tray's buttons beside it (composerNotice.css). */
+.skill-card .skill-open {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-full);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+  font-size: var(--fs-xs);
+  text-decoration: none;
+  transition: background var(--d1);
+}
+.skill-card .skill-open:hover {
+  background: var(--glass-selection);
+}
+.skill-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skill-suggestions-toggle,
+  .skill-card .skill-open {
+    transition: none;
+  }
+}

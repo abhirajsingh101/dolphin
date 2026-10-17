@@ -4,7 +4,8 @@
   display: grid;
   gap: var(--sp-2);
   padding: var(--sp-3);
-  color: var(--glass-muted);
+  /* Text here is --fs-xs and below: the small-text muted (design contract §4). */
+  color: var(--glass-muted-small);
   font-size: var(--fs-xs);
 }
 
@@ -14,7 +15,7 @@
 
 .desktop-start h3 {
   margin: var(--sp-2) 0 0;
-  color: var(--glass-muted);
+  color: var(--glass-muted-small);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-strong);
   letter-spacing: 0.04em;
@@ -48,14 +49,14 @@
 .desktop-start .desktop-start-primary {
   justify-content: center;
   border-color: transparent;
-  background: var(--glass-accent);
-  color: var(--glass-solid);
+  background: var(--glass-accent-strong);
+  color: var(--accent-on);
   font-weight: var(--fw-strong);
 }
 
 .desktop-start .desktop-start-primary:hover:not(:disabled),
 .desktop-start .desktop-start-primary:focus-visible {
-  background: var(--glass-accent-strong);
+  background: var(--glass-accent-hover);
 }
 
 .desktop-start button > span {
@@ -65,7 +66,7 @@
 
 .desktop-start button small {
   overflow: hidden;
-  color: var(--glass-muted);
+  color: var(--glass-muted-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
