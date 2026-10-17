@@ -31,6 +31,7 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
   assert.ok(existsSync(helper), `no bundled helper at ${helper}`);
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DOLPHIN_') && key !== 'TMUX' && key !== 'TMUX_PANE'));
   const env = { ...clean, HOME: home, TMUX_TMPDIR: tmuxDir, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' };
+  let checkMemory = () => {};
   const app = await electron.launch({ executablePath: executable, args: [...(process.platform === 'linux' ? ['--no-sandbox'] : []), `--user-data-dir=${path.join(home, 'profile')}`], env });
   try {
     const window = await app.firstWindow();
@@ -43,7 +44,7 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     }
 
     // Memory is opt-in: the checklist turns it on, then it sets itself up in
-    // the background and answers remember and recall.
+    // the background and answers remember and recall (checked after teardown stops the helper).
     await window.getByRole('region', { name: 'Setup checklist' }).getByRole('button', { name: 'Turn on memory' }).click();
     const memory = window.getByRole('region', { name: 'Memory' });
     try {
@@ -60,18 +61,31 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     }
     await window.screenshot({ path: path.join(shots, 'packaged-memory-ready.png') });
     const gbrain = realpathSync(path.join(home, '.dolphin-server', 'gbrain')); // the real path, as the helper uses
-    const brain = (tool, args) => JSON.parse(execFileSync(path.join(gbrain, 'bun', 'bun'),
+    const run = (tool, args) => JSON.parse(execFileSync(path.join(gbrain, 'bun', 'bun'),
       [path.join(gbrain, 'runtime', 'node_modules', 'gbrain', 'src', 'cli.ts'), 'call', tool, JSON.stringify(args)],
-      { env: { HOME: home, PATH: '/usr/bin:/bin', GBRAIN_HOME: path.join(gbrain, 'home') }, encoding: 'utf8' }).replace(/^[^{[]*/, ''));
-    assert.equal(brain('remember', { fact: 'First-run test fact.', entity: 'user', provenance: 'packaged test' }).status, 'inserted');
-    assert.equal(brain('recall', { query: 'first-run' }).facts[0].fact, 'First-run test fact.');
+      { env: { HOME: home, PATH: '/usr/bin:/bin', GBRAIN_HOME: path.join(gbrain, 'home') }, encoding: 'utf8', stdio: 'pipe' }).replace(/^[^{[]*/, ''));
+    // The helper's `gbrain serve` can take a moment to let the database go after the helper stops.
+    const brain = (tool, args) => {
+      for (let attempt = 1; ; attempt += 1) {
+        try { return run(tool, args); } catch (error) {
+          if (attempt === 15 || !/already open/.test(String(error.stderr ?? '') + String(error.stdout ?? '') + error.message)) throw error;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+        }
+      }
+    };
+    // The helper keeps one `gbrain serve` holding the database while it runs,
+    // so remember and recall run once the app and the helper have stopped.
+    checkMemory = () => {
+      assert.equal(brain('remember', { fact: 'First-run test fact.', entity: 'user', provenance: 'packaged test' }).status, 'inserted');
+      assert.equal(brain('recall', { query: 'first-run' }).facts[0].fact, 'First-run test fact.');
+    };
 
     // A project and a terminal, for the README's hero (scripts/make-hero.sh).
     const start = window.getByRole('region', { name: 'Get started' });
     await start.getByRole('button', { name: /demo/ }).click({ timeout: 30_000 });
     await start.waitFor({ state: 'detached', timeout: 15_000 });
     await window.locator('details', { hasText: 'demo' }).getByRole('button', { name: 'New session' }).click({ timeout: 30_000 });
-    await window.getByRole('dialog', { name: 'New session in demo' }).getByRole('button', { name: /Shell/ }).click();
+    await window.getByRole('dialog', { name: 'New session in demo' }).getByRole('button', { name: /tmux Session/ }).click();
     await window.locator('.xterm').first().waitFor({ timeout: 30_000 });
     await window.waitForTimeout(2000);
     await window.screenshot({ path: path.join(shots, 'packaged-terminal.png') });
@@ -86,13 +100,13 @@ test('the packaged app works on first run', { timeout: 480_000, skip: !executabl
     await teardown({ app, helpers: [[path.join(home, '.dolphin-server'), { command: [helper], cwd: undefined, env }]],
       // Only this test's tmux servers, each on an explicit socket under the scratch TMUX_TMPDIR.
       // The host tmux uses .../default; the bundled one (wrapper: -L dolphin) uses .../dolphin.
-      cleanup: ['default', 'dolphin'].map((name) => () => {
+      cleanup: [() => checkMemory(), ...['default', 'dolphin'].map((name) => () => {
         const socket = path.join(tmuxDir, `tmux-${process.getuid()}`, name);
         const binary = name === 'dolphin' ? path.join(home, '.dolphin-server', 'bin', 'tmux') : 'tmux';
         try { execFileSync(binary, ['-S', socket, 'kill-server'], { env, encoding: 'utf8', stdio: 'pipe' }); } catch (error) {
           if (!/no server running|No such file|error connecting|ENOENT/.test(String(error.stderr ?? '') + String(error.message))) throw error;
         }
-      }),
+      })],
       remove: [home] });
   }
 });

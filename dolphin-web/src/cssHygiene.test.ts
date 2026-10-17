@@ -147,7 +147,11 @@ describe.each(SHEETS)('%s', (_name, css) => {
 // The sheets that dress System Health, first run and the desktop dialogs in
 // glass joined on 2026-10-17, with the small-text check below.
 const GLASS_FRAME_SHEETS = ['glassHealth.css', 'desktopStart.css', 'firstRunChecklist.css', 'desktop/glassDialogs.css'];
-const TYPE_SCALE_SHEETS = ['glass.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'legacyGlass.css', 'improvementRadar.css', 'taskQuality.css', ...GLASS_FRAME_SHEETS];
+// Sheets of optional features the public export leaves out (scripts/export-public);
+// checked wherever they exist. Every other named sheet must exist.
+const OPTIONAL_SHEETS = new Set(['improvementRadar.css', 'taskQuality.css', 'signals.css']);
+const present = (names: string[]) => names.filter((name) => !OPTIONAL_SHEETS.has(name) || existsSync(resolve(__dirname, name)));
+const TYPE_SCALE_SHEETS = present(['glass.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'legacyGlass.css', 'improvementRadar.css', 'taskQuality.css', ...GLASS_FRAME_SHEETS]);
 const TYPE_SCALE_TOKENS = ['--fs-display', '--fs-xl', '--fs-lg', '--fs-md', '--fs-sm', '--fs-xs', '--fs-2xs'];
 
 describe('type scale', () => {
@@ -164,7 +168,7 @@ describe('type scale', () => {
     expect([...used].filter((token) => !TYPE_SCALE_TOKENS.includes(token))).toEqual([]);
   });
 
-  it.each(['glass.css', 'sidebar.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'updateControl.css', 'signals.css', 'composerNotice.css', 'skillSuggestions.css', ...GLASS_FRAME_SHEETS])('%s: small glass text uses the darker muted token', (name) => {
+  it.each(present(['glass.css', 'sidebar.css', 'glassSurfaces.css', 'settingsDialog.css', 'connectMachine.css', 'updateControl.css', 'signals.css', 'composerNotice.css', 'skillSuggestions.css', ...GLASS_FRAME_SHEETS]))('%s: small glass text uses the darker muted token', (name) => {
     const css = readSheet(name).replace(/\/\*[\s\S]*?\*\//g, '');
     const offenders = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .filter(([, , body]) => /font-size:\s*var\(--fs-(?:xs|2xs)\)/.test(body) && /color:\s*var\(--glass-muted\)/.test(body))
