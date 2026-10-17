@@ -112,6 +112,11 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("DOLPHIN_FLEET_REVIEWER", "off")
     os.environ.setdefault("DOLPHIN_FLEET_BRAIN", "off")  # never the real brain from tests
     os.environ.setdefault("DOLPHIN_FLEET_GATE", "off")
+    # The Host names test clients send (TestClient's "testserver", and the
+    # base_url hosts httpx clients in this suite use). Production code never
+    # trusts them; the host guard learns them here, the way an operator adds a
+    # name. test_host_guard.py builds its own guards with explicit settings.
+    os.environ.setdefault("DOLPHIN_ALLOWED_HOSTS", "testserver,test,t,radar.test")
 
     configured = os.environ.get("DATABASE_URL")
 

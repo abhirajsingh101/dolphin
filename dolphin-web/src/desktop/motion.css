@@ -87,6 +87,8 @@
 
 /* Machines: a link on its way turns its spinner. */
 .glass-machine-name small > svg { animation: dd-spin 1s linear infinite; }
+/* System Health waiting for a machine's link (HealthOverlay). */
+.health-machine-spin { animation: dd-spin 1s linear infinite; }
 @keyframes dd-spin { to { transform: rotate(360deg); } }
 /* A session's agent at work: its status arc turns. Status, not decoration. */
 .status-glyph[data-state='working'] svg { animation: dd-spin 1s linear infinite; }
@@ -103,7 +105,7 @@
   .signals-tray, .desktop-start > *, .desktop-start li,
   .glass-health .health-overview-grid > *, .glass-health :is(.health-chart-card, .health-panel, .gpu-health-card),
   .desktop-splash > *, .desktop-splash .dolphin-orb, .desktop-splash-bar::after,
-  .update-pill, .glass-machine-name small > svg,
+  .update-pill, .glass-machine-name small > svg, .health-machine-spin,
   .status-glyph[data-state='working'] svg {
     animation: none;
   }

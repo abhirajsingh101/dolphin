@@ -9,7 +9,7 @@ import DolphinIcon from '../DolphinIcon';
 import ErrorBoundary from '../ErrorBoundary';
 import { applyTheme, readStoredTheme, SETTINGS_EVENT, THEME_STORAGE_KEY, type ThemeChoice } from '../theme';
 import { useMachineLinks } from '../machines';
-import { healthTarget } from './healthTarget';
+import { healthMachines, healthTarget } from './healthTarget';
 import { browserStorage } from '../workspace/layoutMemory';
 import { startWindow } from '../workspace/windowScope';
 import '../glass.css';
@@ -58,7 +58,7 @@ function DesktopRouter() {
       </React.Suspense>
       {surface.kind === 'health' && (
         <React.Suspense fallback={null}>
-          <HealthOverlay machine={surface.machine} target={healthTarget(surface.machine, links, host)} />
+          <HealthOverlay machine={surface.machine} target={healthTarget(surface.machine, links, host)} machines={healthMachines(surface.machine, links, host)} />
         </React.Suspense>
       )}
     </>

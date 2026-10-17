@@ -8,7 +8,9 @@ html[data-platform] :is(.glass-top, .glass-health-top) {
   app-region: drag;
   user-select: none;
 }
-html[data-platform] :is(.glass-top, .glass-health-top) :is(a, button, input, select, textarea, label, [role="button"], [tabindex]) {
+/* Controls in the header stay clickable, and so does any menu dropping from
+   it (System Health's machine menu): no part of it drags the window. */
+html[data-platform] :is(.glass-top, .glass-health-top) :is(a, button, input, select, textarea, label, [role="button"], [tabindex], [role="menu"]) {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }

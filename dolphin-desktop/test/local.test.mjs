@@ -154,7 +154,18 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     await window.getByText('gpu-box is not connected.').waitFor();
     assert.equal(await window.getByText(/CPU/).count(), 0);
     // Its chip carries no "connected" dot.
-    assert.equal(await window.locator('.glass-health .glass-host').getAttribute('data-state'), 'offline');
+    assert.equal(await window.locator('.glass-health .health-machine-trigger').getAttribute('data-state'), 'unknown');
+    // The header's machine menu lists this computer and the machine on
+    // screen, and switches in place: the hash moves, the overlay stays.
+    await window.getByRole('button', { name: /Choose a machine/ }).click();
+    const menu = window.getByRole('menu', { name: 'Machines' });
+    await menu.waitFor();
+    assert.equal(await menu.getByRole('menuitemradio', { name: /gpu-box/ }).getAttribute('aria-checked'), 'true');
+    await menu.getByRole('menuitemradio', { name: /This computer/ }).click();
+    await window.waitForFunction(() => location.hash === '#/health');
+    await window.getByText(/CPU/).first().waitFor({ timeout: 30_000 });
+    assert.equal(await window.locator('.glass-health').count(), 1);
+    await window.getByRole('link', { name: /Back to Workspace/ }).focus();
     await window.keyboard.press('Escape');
     await window.getByRole('textbox', { name: 'Message Dolphin' }).waitFor();
     await window.getByRole('textbox', { name: 'Message Dolphin' }).fill('');

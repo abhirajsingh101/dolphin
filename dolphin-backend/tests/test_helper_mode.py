@@ -95,7 +95,7 @@ def test_helper_socket_is_private(tmp_path):
                 break
             time.sleep(0.1)
         assert oct(socket_path.stat().st_mode & 0o777) == "0o600"
-        result = subprocess.run(["curl", "-s", "--unix-socket", str(socket_path), "http://x/health"],
+        result = subprocess.run(["curl", "-s", "--unix-socket", str(socket_path), "http://localhost/health"],
                                 capture_output=True, text=True, timeout=10)
         assert '"ok"' in result.stdout
     finally:

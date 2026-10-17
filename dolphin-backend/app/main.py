@@ -362,6 +362,136 @@ class StreamSafeGZipMiddleware(GZipMiddleware):
 
 app.add_middleware(StreamSafeGZipMiddleware, minimum_size=1_000, compresslevel=5)
 
+
+# Names this machine always answers to. The Electron renderer's own origin is
+# trusted only in helper mode, where it is the one browser that should talk.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_DESKTOP_APP_ORIGIN = "app://dolphin"
+# What self_api.self_client and agent_hook put in Host over the helper's Unix
+# socket. Accepted only on a Unix-socket connection (scope "server" is None).
+_UNIX_SOCKET_HOST = "dolphin"
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _host_name(value: str) -> str:
+    """The hostname in a Host header: port dropped, IPv6 brackets removed."""
+    value = value.strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        name = value[1:end] if end != -1 else ""
+    elif value.count(":") == 1:
+        name = value.split(":", 1)[0]
+    else:
+        name = value  # bare name, or an unbracketed IPv6 literal (never valid with a port)
+    return name.rstrip(".")
+
+
+def _parse_allowed_hosts(raw: str) -> set[str]:
+    """DOLPHIN_ALLOWED_HOSTS: names split on commas, colons or spaces.
+    An IPv6 literal must be written in brackets so its colons survive."""
+    return {_host_name(token) for token in re.findall(r"\[[^\]]*\]|[^,:\s\[\]]+", raw) if _host_name(token)}
+
+
+def _origin_parts(origin: str) -> tuple[str, str, str] | None:
+    """(normalised origin, hostname, host[:port]) or None if it is not a URL origin."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(origin.strip())
+        hostname = (parts.hostname or "").rstrip(".")
+        parts.port  # noqa: B018 - raises on a malformed port
+    except ValueError:
+        return None
+    if not parts.scheme or not hostname:
+        return None
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}", hostname, parts.netloc.lower()
+
+
+class HostGuardMiddleware:
+    """DNS-rebinding and cross-site protection, without a login.
+
+    Anything that reaches :8400 can drive ``tmux send-keys``, and a web page can
+    point its own hostname at 127.0.0.1. Its requests then arrive with that
+    hostname in Host, so a request is served only when Host names this machine:
+    localhost, 127.0.0.1, ::1, the hostnames in DOLPHIN_CORS_ORIGINS (the
+    tailnet names the web app is opened under) and DOLPHIN_ALLOWED_HOSTS.
+
+    WebSockets and POST/PUT/PATCH/DELETE are also checked for Origin, which a
+    browser always sends on those and a page cannot forge. It must be a CORS
+    origin, an origin on a DOLPHIN_ALLOWED_HOSTS name, the request's own
+    origin, or (helper mode) the desktop app's ``app://dolphin``. No Origin at
+    all is a non-browser client (curl, scripts, agent hooks, MCP) and passes;
+    ``Origin: null`` (sandboxed frames, file pages) is refused.
+
+    On the helper's Unix socket the host ``dolphin`` (self_api, agent_hook) is
+    also accepted. The socket's other traffic, the desktop relay and the SSH
+    forward, is loopback TCP on the desktop's side and carries 127.0.0.1:<port>,
+    so the check still applies to it.
+    """
+
+    def __init__(self, app, cors_origins: list[str] | None = None, extra_hosts: str | None = None,
+                 helper_mode: bool | None = None):
+        self.app = app
+        cors = DOLPHIN_CORS_ORIGINS if cors_origins is None else cors_origins
+        extras = _parse_allowed_hosts(os.getenv("DOLPHIN_ALLOWED_HOSTS", "") if extra_hosts is None else extra_hosts)
+        self.helper_mode = bool(os.getenv("DOLPHIN_HELPER_VERSION")) if helper_mode is None else helper_mode
+        self.cors_origins = set()
+        cors_hosts = set()
+        for origin in cors:
+            parsed = _origin_parts(origin)
+            if parsed:
+                self.cors_origins.add(parsed[0])
+                if parsed[0] != _DESKTOP_APP_ORIGIN:
+                    cors_hosts.add(parsed[1])
+        if self.helper_mode:
+            self.cors_origins.add(_DESKTOP_APP_ORIGIN)
+        self.extra_hosts = extras
+        self.allowed_hosts = _LOOPBACK_HOSTS | cors_hosts | extras
+
+    def _origin_allowed(self, origin: str, host_header: str) -> bool:
+        parsed = _origin_parts(origin)
+        if parsed is None:
+            return False  # includes "null"
+        normalised, hostname, netloc = parsed
+        return (normalised in self.cors_origins or hostname in self.extra_hosts
+                or netloc == host_header.strip().lower())
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        host_header = origin = None
+        for name, value in scope.get("headers", []):
+            if name == b"host" and host_header is None:
+                host_header = value.decode("latin-1")
+            elif name == b"origin" and origin is None:
+                origin = value.decode("latin-1")
+        allowed = self.allowed_hosts | ({_UNIX_SOCKET_HOST} if scope.get("server") is None else set())
+        if host_header is None or _host_name(host_header) not in allowed:
+            await self._refuse(scope, send, 421, b"Unrecognised Host header. Add the name to DOLPHIN_ALLOWED_HOSTS.\n")
+            return
+        checks_origin = scope["type"] == "websocket" or scope.get("method") in _STATE_CHANGING_METHODS
+        if checks_origin and origin is not None and not self._origin_allowed(origin, host_header):
+            await self._refuse(scope, send, 403, b"Cross-origin request refused.\n")
+            return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _refuse(scope, send, status: int, body: bytes) -> None:
+        if scope["type"] == "websocket":
+            # Closing before accept makes the server answer the upgrade with 403.
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"text/plain; charset=utf-8"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+# Outside CORS, the token gate and GZip, so a foreign Host never reaches any of
+# them; observability (below) stays outermost and still logs the refusal.
+app.add_middleware(HostGuardMiddleware)
+
 # Request/error logging. Installed last so its middleware sits outermost and
 # therefore also times and records anything CORS or GZip reject.
 observability.install(app)

@@ -28,6 +28,22 @@ export type MachineLink = {
   agentError?: string | null;
 };
 
+/** What each link state reads as (the projects list's machine bands, System Health's machine menu). */
+export const MACHINE_STATE: Record<MachineLink['state'], string> = {
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  reconnecting: 'Reconnecting…',
+  offline: 'Disconnected',
+  failed: "Couldn't connect",
+};
+
+/** One line about a machine: this computer's host name, otherwise how its link is. */
+export function machineStatus(link: MachineLink): string {
+  if (link.kind === 'local') return link.hostname ?? 'This computer';
+  if (link.state === 'connecting' && link.status) return link.status;
+  return MACHINE_STATE[link.state];
+}
+
 type Bridge = {
   machines?: () => Promise<Machine[]>;
   machineList?: () => MachineLink[];

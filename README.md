@@ -148,6 +148,9 @@ must carry a random token stored in `~/.dolphin-server/token`. For SSH machines
 the app forwards a loopback port to that socket through your SSH connection, so
 nothing listens beyond loopback.
 
+[SECURITY.md](SECURITY.md) describes what this protects against and how to
+report a problem privately.
+
 Dolphin has no account, no cloud service of its own and no telemetry. Its data
 lives in `~/.dolphin-server` on each machine. Claude Code and Codex, including
 the ones the chat runs on, talk to their providers as they do when you run them
@@ -173,7 +176,8 @@ Crash reports stay on this computer under Help → Show Crash Reports, are never
 
 ## Build from source
 
-See [docs/development.md](docs/development.md).
+See [docs/development.md](docs/development.md), and
+[CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
 
 ## License
 

@@ -71,9 +71,170 @@
   width: 20px;
   height: 20px;
 }
-/* A machine that is not connected shows no green "connected" dot. */
-.glass-health .glass-host[data-state='offline']::before {
-  background: var(--glass-muted);
+/* Dolphin Desktop: the machine on screen as a chip beside the brand, with the
+   projects list's icon and connection dot, opening a menu of every machine
+   (desktop/HealthMachineSwitcher.tsx). The web app has one machine and no chip. */
+.health-machine-switch {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  margin-left: -6px;
+}
+.health-machine-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 260px;
+  height: 30px;
+  padding: 0 9px 0 10px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--r-full);
+  background: var(--glass-bubble);
+  color: var(--glass-text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
+.health-machine-trigger:hover,
+.health-machine-trigger[aria-expanded='true'] {
+  background: var(--glass-selection);
+}
+.health-machine-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.health-machine-chevron {
+  flex-shrink: 0;
+  color: var(--glass-muted);
+  transition: transform 150ms;
+}
+.health-machine-trigger[aria-expanded='true'] > .health-machine-chevron {
+  transform: rotate(180deg);
+}
+/* On the chip and in the menu the dot's ring is the surface under it. */
+.glass-health .glass-machine-icon > .glass-machine-dot {
+  box-shadow: 0 0 0 2px var(--glass-solid);
+}
+/* The menu: the machine menu's float (connectMachine.css), dropped from the
+   chip, its rows on the floating scale (6/10/14). */
+.glass-health .health-machine-menu {
+  --r-lg: 14px;
+  --r-md: 10px;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(300px, calc(100vw - 32px));
+}
+.health-machine-group {
+  margin: 4px 10px 4px;
+  color: var(--glass-muted-small);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.health-machine-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.health-machine-item:hover {
+  background: var(--glass-selection);
+}
+/* The machine on screen: a row with its own lift (the float's card fill). */
+.health-machine-item[aria-checked='true'] {
+  background: var(--glass-card-fill);
+}
+.glass-health .health-machine-item:focus-visible {
+  outline-offset: -2px;
+}
+.health-machine-item > span:not(.glass-machine-icon) {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+.health-machine-item strong {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.health-machine-item small {
+  overflow: hidden;
+  color: var(--glass-muted-small);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.health-machine-item small:is([data-state='offline'], [data-state='failed'], [data-state='unknown']) {
+  color: var(--danger);
+}
+.health-machine-check {
+  flex-shrink: 0;
+  color: var(--glass-accent);
+}
+
+/* A machine System Health cannot read now: what is happening, and Reconnect. */
+.health-machine-state {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+.health-machine-state p {
+  margin: 0;
+}
+.health-machine-state strong {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.health-machine-spin {
+  color: var(--glass-alert);
+}
+.health-machine-detail {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--glass-muted-small);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.health-machine-reconnect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-top: 10px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--glass-accent-strong);
+  color: var(--accent-on);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.health-machine-reconnect:hover {
+  background: var(--glass-accent-hover);
 }
 .glass-health-back {
   display: inline-flex;
@@ -97,7 +258,10 @@
 }
 
 /* The page sits in a glass panel, like the chat. Its own area scrolls. */
+/* Its own stacking context: the page's sticky header (z-index 15 at narrow
+   widths) stays inside it, under the machine menu dropping from the header. */
 .glass-health-stage {
+  isolation: isolate;
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
@@ -202,19 +366,35 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .glass-health-back {
+  .glass-health-back,
+  .health-machine-trigger,
+  .health-machine-chevron,
+  .health-machine-item,
+  .health-machine-reconnect {
     transition: none;
   }
 }
 @media (max-width: 700px) {
-  .glass-health-top .glass-host {
-    display: none;
+  .health-machine-trigger {
+    max-width: calc(100vw - 210px);
   }
   .glass-health .health-header {
     padding: 12px 14px;
   }
   .glass-health .health-scroll-area {
     padding: 14px 12px 20px;
+  }
+}
+/* A phone-width window: Back keeps its arrow and its name for assistive tech. */
+@media (max-width: 480px) {
+  .glass-health-back-label {
+    display: none;
+  }
+  .glass-health-back:has(.glass-health-back-label) {
+    padding: 5px 9px;
+  }
+  .health-machine-trigger {
+    max-width: calc(100vw - 130px);
   }
 }
 

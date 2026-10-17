@@ -59,6 +59,7 @@ import {
   MessageSquare,
   PanelRightClose,
   FolderClosed,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import {
   api,
@@ -402,6 +403,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsReturn = useRef<HTMLElement | null>(null);
   const paletteTrigger = useRef<HTMLButtonElement>(null);
+  const settingsButton = useRef<HTMLButtonElement>(null);
   const openSettings = (from: HTMLElement | null) => { settingsReturn.current = from; setSettingsOpen(true); };
   useEffect(() => syncThemeSetting(), []);
   // Menu commands (spec: "Keyboard"). The ref always holds the current state;
@@ -515,12 +517,20 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         setPaletteOpen((value) => !value);
         return;
       }
+      // Cmd/Ctrl+, opens Settings. Dolphin Desktop's menu owns that key
+      // (keymap.ts) and the page must leave it alone there.
+      if (!desktop && mod && !event.shiftKey && !event.altKey && event.key === ',' && fromTerminal) {
+        event.preventDefault();
+        if (document.querySelector('[aria-modal="true"]')) return;
+        openSettings(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+        return;
+      }
       if (inTerminal) return;
       if (event.key === 'Escape') setSidebarOpen(false);
     };
     window.addEventListener('keydown', keyboard);
     return () => window.removeEventListener('keydown', keyboard);
-  }, []);
+  }, [desktop]);
   const activeTitle = useTerminalActivity(active ? terminalKey(machineOfTarget(active), active.projectId, active.sessionName) : null).title;
   useEffect(() => {
     document.title = glassDocumentTitle(active, activeTitle);
@@ -1352,6 +1362,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
           onClick={() => chooseTheme(theme === 'light' ? 'dark' : 'light')}
         >
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+        </button>
+        <button
+          ref={settingsButton}
+          className="glass-settings-button"
+          aria-label="Settings"
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+          title={`Settings (${mac ? '⌘,' : 'Ctrl+,'})`}
+          onClick={() => openSettings(settingsButton.current)}
+        >
+          <SettingsIcon size={18} aria-hidden="true" />
         </button>
         {desktop ? (
           <a href="#/health" aria-label="System Health" title="System Health">

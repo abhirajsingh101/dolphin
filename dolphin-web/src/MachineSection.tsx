@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { createPortal } from 'react-dom';
 import { Activity, ChevronDown, FileText, Gauge, KeyRound, Laptop, LoaderCircle, MoreHorizontal, Network, Plus, RefreshCw, Server, Unplug } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
-import { machineBridge, type MachineLink } from './machines';
+import { MACHINE_STATE as STATE, machineBridge, machineStatus, type MachineLink } from './machines';
 import { MotionPopover, useOverlayLayer } from './motion/MotionDialog';
 import './connectMachine.css';
 
@@ -13,19 +13,7 @@ import './connectMachine.css';
    added from Connect to a Machine follows, each with a menu to reconnect, set
    up sign-in without a password, or disconnect. */
 
-const STATE: Record<MachineLink['state'], string> = {
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  reconnecting: 'Reconnecting…',
-  offline: 'Disconnected',
-  failed: "Couldn't connect",
-};
-
-export function machineStatus(link: MachineLink): string {
-  if (link.kind === 'local') return link.hostname ?? 'This computer';
-  if (link.state === 'connecting' && link.status) return link.status;
-  return STATE[link.state];
-}
+export { machineStatus };
 
 /** Under the button when it fits, above it when it does not, always inside the window. */
 export function placeMachineMenu(

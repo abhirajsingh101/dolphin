@@ -1,1 +1,5 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/abhirajsingh101/dolphin/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
