@@ -5,10 +5,11 @@
 Dolphin is a desktop workspace for running coding agents in real terminals, on
 your own computer or on any machine you can reach over SSH.
 
-Each project gets its own tmux sessions running Claude Code, Codex or a plain
-shell. Sessions keep running when you close the app, and Dolphin tells you when
-an agent finishes a turn. A built-in System Health view shows what the machine
-is doing.
+Each project gets its own tmux sessions running Claude Code, Codex or a shell,
+or a plain terminal without tmux. tmux sessions keep running when you close the
+app, and Dolphin tells you when an agent finishes a turn. A built-in System
+Health view shows what the machine is doing. Every screen shares one glass
+design, in light and dark.
 
 ## Download
 
@@ -54,10 +55,12 @@ does the same.
 - **First run:** a checklist shows what this machine has (tmux, Claude Code,
   Codex, whether each is signed in, notifications, memory) and offers one
   click for each thing it lacks, then lists your recent repositories to open.
-- **Projects and terminals:** open a folder, then start Claude Code, Codex or a
-  shell in it. Every session is a real tmux session, so it outlives the app and
-  your network connection. A session can start in a new git worktree, and
-  Review Changes shows what an agent changed.
+- **Projects and terminals:** open a folder, then start Claude Code, Codex, a
+  tmux session or a plain terminal in it. tmux sessions outlive the app and
+  your network connection; a plain terminal is a login shell that ends when you
+  close it. Tick Always start this and + starts your choice directly
+  (Option/Alt-click on + still asks). A session can start in a new git
+  worktree, and Review Changes shows what an agent changed.
 - **This computer or SSH:** choose Connect to a Machine. Dolphin lists the
   machines it finds on this computer (your SSH config, the servers you ssh
   into, your Tailscale devices), or you type `user@host`. It installs a small
@@ -77,7 +80,9 @@ does the same.
 - **Notifications:** one click gives Claude Code and Codex Dolphin's turn
   notifications, so you hear when an agent finishes.
 - **Chat:** ask Dolphin about your projects and sessions, or have it start work
-  in a new agent session. It runs on your installed Claude Code or Codex.
+  in a new agent session. It runs on your installed Claude Code or Codex:
+  the one you prefer, or the other when only one is installed. Every feature
+  that starts an agent picks it the same way.
 - **Memory (optional, off by default):** turn it on in the first-run checklist
   or in Settings. The [GBrain](https://github.com/garrytan/gbrain) on this
   computer then follows every project on every machine you connect to: it
@@ -91,7 +96,15 @@ does the same.
   or Codex login. Setting it up downloads Bun, a pinned
   GBrain release, llama.cpp and the search model, about 550 MB,
   checksum-verified. Nothing is downloaded until you turn it on.
+- **Skill suggestions:** at most two well-known skills a day may appear above
+  the chat when they would clearly help your recent work, with a link and the
+  install command. Dolphin never installs them. Turn them off in Settings.
 - **Tasks:** a simple task list per project.
+- **Settings:** one searchable page, grouped by section.
+- **Look and motion:** one glass design on every screen and dialog, in light
+  and dark. Dialogs, menus and tabs move with short, quiet animations;
+  terminals never animate, and with your system's Reduce Motion on, nothing
+  moves.
 - **System Health:** CPU, memory, disks, network, GPUs and the busiest
   processes, from netdata when it is running and a built-in monitor otherwise.
 
@@ -112,10 +125,13 @@ when your computer wakes. When there is one, an Update pill appears in the
 header. To check yourself, click the Dolphin logo: the About panel shows your
 version, when Dolphin last checked, and a Check for Updates button.
 
-- **AppImage:** the update downloads in the background; choose Restart to
-  Update when it suits you, or it installs the next time you quit.
-- **macOS, .deb and .rpm:** Dolphin tells you a new version is out and opens the
-  right installer. macOS cannot update an unsigned app in place yet.
+- **AppImage and macOS:** the update downloads in the background; choose
+  Restart to Update when it suits you, or it installs the next time you quit.
+  On a Mac this works when Dolphin runs from a folder you can write to, such
+  as Applications; run from the disk image or Downloads, it opens the
+  download instead and says why.
+- **.deb and .rpm:** Dolphin tells you a new version is out and opens the
+  right installer.
 - **Beta:** choose the Beta update channel in Settings to get prereleases
   too. Switching back to Stable drops an offered beta and never downgrades;
   you get the next stable release that is newer than the one you run.
