@@ -181,8 +181,9 @@ async def test_a_run_suggests_the_relevant_new_items_only(home, monkeypatch):
     assert sorted(model.candidates) == sorted(["skill:acme/py/fastapi-pro", "skill:web/qa/playwright-e2e",
                                                "skill:gen/eral/best-practices"])
     assert "About playwright-e2e & more" in model.prompts[1]
-    # Relevance of at least 8, best first, two at most; unknown keys ignored.
-    assert [item["key"] for item in items] == ["skill:web/qa/playwright-e2e", "skill:acme/py/fastapi-pro"]
+    # One a day: the best with relevance of at least KEEP_RELEVANCE; unknown keys ignored.
+    assert ss.KEEP == 1 and ss.KEEP_RELEVANCE == 7
+    assert [item["key"] for item in items] == ["skill:web/qa/playwright-e2e"]
     skill = items[0]
     assert skill == {"key": "skill:web/qa/playwright-e2e", "kind": "skill", "name": "playwright-e2e",
                      "source": "web/qa", "url": "https://skills.sh/web/qa/playwright-e2e",
@@ -198,18 +199,22 @@ async def test_a_run_suggests_the_relevant_new_items_only(home, monkeypatch):
 
     # Once a day: too soon for another run.
     assert ss.INTERVAL_SECONDS == 24 * 3600 and await ss.run_once(now=NOW + 3600) == []
-    # The next day nothing new clears the bar: nothing is added, and what was shown is not offered again.
-    model2 = FakeModel({"skill:gen/eral/best-practices": 7})
+    # The next day, yesterday's runner-up is today's suggestion; what was shown is not offered again.
+    model2 = FakeModel({"skill:acme/py/fastapi-pro": 8, "skill:gen/eral/best-practices": 6})
     monkeypatch.setattr(ss, "_ask", model2)
-    assert await ss.run_once(now=NOW + ss.INTERVAL_SECONDS + 1) == []
-    assert model2.candidates == ["skill:gen/eral/best-practices"]
-    assert [i["key"] for i in ss.view()["items"]] == [i["key"] for i in items]
-    # Installing a suggested skill takes it off the list at the next run.
-    _write(home / ".claude" / "skills" / "playwright-e2e" / "SKILL.md", "x")
-    await ss.run_once(now=NOW + 2 * ss.INTERVAL_SECONDS + 2)
+    day2 = NOW + ss.INTERVAL_SECONDS + 1
+    assert [i["key"] for i in await ss.run_once(now=day2)] == ["skill:acme/py/fastapi-pro"]
+    assert sorted(model2.candidates) == ["skill:acme/py/fastapi-pro", "skill:gen/eral/best-practices"]
     assert [i["key"] for i in ss.view()["items"]] == ["skill:acme/py/fastapi-pro"]
-    # A suggestion leaves after ITEM_DAYS.
-    await ss.run_once(now=NOW + (ss.ITEM_DAYS + 1) * 86400)
+    # The day after, nothing clears the bar: nothing is added and the current one stays.
+    model3 = FakeModel({"skill:gen/eral/best-practices": 6})
+    monkeypatch.setattr(ss, "_ask", model3)
+    assert await ss.run_once(now=day2 + ss.INTERVAL_SECONDS + 1) == []
+    assert model3.candidates == ["skill:gen/eral/best-practices"]
+    assert [i["key"] for i in ss.view()["items"]] == ["skill:acme/py/fastapi-pro"]
+    # Installing the suggested skill takes it off the list at the next run.
+    _write(home / ".claude" / "skills" / "fastapi-pro" / "SKILL.md", "x")
+    await ss.run_once(now=day2 + 2 * ss.INTERVAL_SECONDS + 2)
     assert ss.view()["items"] == []
 
 
@@ -259,8 +264,11 @@ async def test_ranking_keeps_variety(home, monkeypatch):
                            "project": "api" if c["name"] == "alembic" else "web"} for c in candidates]}
 
     monkeypatch.setattr(ss, "_ask", model)
+    # One a day: the best, and one fork of a name.
+    assert [item["key"] for item in await ss.rank(projects, candidates)] == ["skill:a/r/playwright-e2e"]
+    monkeypatch.setattr(ss, "KEEP", 2)
     kept = await ss.rank(projects, candidates)
-    # One fork of a name, and with two projects in play each gets one of the two places.
+    # With more places, two projects in play each get one.
     assert [item["key"] for item in kept] == ["skill:a/r/playwright-e2e", "skill:e/r/alembic"]
 
 
@@ -326,3 +334,15 @@ def test_the_endpoints(home, monkeypatch):
     ss._update(lambda s: s.update(backoff_until=_iso(time.time() + 3600)))
     monkeypatch.setattr(ss, "_refresh_task", None)
     assert client.post("/api/suggestions/skills/refresh").json() == {"started": False}
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_leaves_after_item_days(home, monkeypatch):
+    _installed(home)
+    _brain({"projects/web": ("Web", NOW - 60, "A React app tested with Playwright.")})
+    monkeypatch.setattr(ss, "_get", FakeWeb())
+    monkeypatch.setattr(ss, "_ask", FakeModel({"skill:web/qa/playwright-e2e": 9}))
+    assert [i["key"] for i in await ss.run_once(now=NOW)] == ["skill:web/qa/playwright-e2e"]
+    monkeypatch.setattr(ss, "_ask", FakeModel({}))
+    await ss.run_once(now=NOW + (ss.ITEM_DAYS + 1) * 86400)
+    assert ss.view()["items"] == []

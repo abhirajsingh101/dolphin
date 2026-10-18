@@ -310,7 +310,7 @@ export default function SettingsDialog({ onClose, machines = [], onConnect, retu
                   <p className="settings-note">Memory reads what you ask Claude Code and Codex, and their replies, on every connected machine, and keeps each project's state on this computer. Your own Claude Code or Codex writes the summaries.</p>
                   {skills !== null && (
                     <>
-                      <Row label="Skill suggestions" hint="Once a day, suggests up to two well-known skills that would improve your recent work. Dolphin never installs them.">
+                      <Row label="Skill suggestions" hint="Once a day, suggests the one well-known skill that would most improve your recent work. Dolphin never installs it.">
                         <span className="settings-actions">
                           <button type="button" disabled={!skills || checking === 'working'} onClick={checkSkills}>Check Now</button>
                           <Toggle label="Suggest skills that would improve your recent work" checked={skills} onChange={saveSkills} />

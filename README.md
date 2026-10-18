@@ -1,6 +1,6 @@
 # Dolphin
 
-![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/dolphin-hero.gif)
+![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/dolphin-hero.gif)
 
 Dolphin is a desktop workspace for running coding agents in real terminals, on
 your own computer or on any machine you can reach over SSH.
@@ -13,19 +13,19 @@ design, in light and dark.
 
 ## Download
 
-Dolphin 0.2.6. Every release is on
+Dolphin 0.2.7. Every release is on
 [Releases](https://github.com/abhirajsingh101/dolphin/releases).
 
 | Platform | Download |
 |---|---|
-| macOS, Apple Silicon | [Dolphin-0.2.6-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-mac-arm64.dmg) |
-| macOS, Intel | [Dolphin-0.2.6-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-mac-x64.dmg) |
-| Linux x64, AppImage (updates itself) | [Dolphin-0.2.6-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-x86_64.AppImage) |
-| Linux x64, Debian and Ubuntu | [Dolphin-0.2.6-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-amd64.deb) |
-| Linux x64, Fedora and RHEL | [Dolphin-0.2.6-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-x86_64.rpm) |
-| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.6-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-arm64.AppImage) |
-| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.6-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-arm64.deb) |
-| Linux arm64, Fedora and RHEL | [Dolphin-0.2.6-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.6/Dolphin-0.2.6-linux-aarch64.rpm) |
+| macOS, Apple Silicon | [Dolphin-0.2.7-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-mac-arm64.dmg) |
+| macOS, Intel | [Dolphin-0.2.7-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-mac-x64.dmg) |
+| Linux x64, AppImage (updates itself) | [Dolphin-0.2.7-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-x86_64.AppImage) |
+| Linux x64, Debian and Ubuntu | [Dolphin-0.2.7-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-amd64.deb) |
+| Linux x64, Fedora and RHEL | [Dolphin-0.2.7-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-x86_64.rpm) |
+| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.7-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-arm64.AppImage) |
+| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.7-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-arm64.deb) |
+| Linux arm64, Fedora and RHEL | [Dolphin-0.2.7-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-aarch64.rpm) |
 
 On a Mac with Homebrew, once the tap is published:
 
@@ -96,9 +96,10 @@ does the same.
   or Codex login. Setting it up downloads Bun, a pinned
   GBrain release, llama.cpp and the search model, about 550 MB,
   checksum-verified. Nothing is downloaded until you turn it on.
-- **Skill suggestions:** at most two well-known skills a day may appear above
-  the chat when they would clearly help your recent work, with a link and the
-  install command. Dolphin never installs them. Turn them off in Settings.
+- **Skill suggestions:** once a day, with memory on, the one well-known skill
+  that would most help your recent work appears above the chat, with a link
+  and the install command. Dolphin never installs it. Turn suggestions off in
+  Settings.
 - **Tasks:** a simple task list per project.
 - **Settings:** one searchable page, grouped by section.
 - **Look and motion:** one glass design on every screen and dialog, in light

@@ -9,9 +9,8 @@ import {
 import './composerNotice.css';
 import './skillSuggestions.css';
 
-/* Dolphin Desktop: at most two skills that would improve the user's recent work, as one
-   quiet line above the composer. This computer's helper picks them a few
-   times a day. Dolphin never installs anything: each card has the page to
+/* Dolphin Desktop: the one skill a day that would most improve the user's recent work, as one
+   quiet line above the composer. This computer's helper picks it once a day. Dolphin never installs anything: each card has the page to
    read and the command to copy and run yourself. Nothing here takes focus. */
 
 const COPIED_MS = 1600;
