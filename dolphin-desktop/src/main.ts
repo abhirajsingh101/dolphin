@@ -9,9 +9,9 @@
  * machine's address and token in the machine list; it is served from the
  * app:// origin, which the helpers' CORS allows. */
 
-import { app, BrowserWindow, BrowserWindowConstructorOptions, crashReporter, ipcMain, Menu, nativeTheme, net, Notification, powerMonitor, protocol, screen, shell } from 'electron';
+import { app, BrowserWindow, BrowserWindowConstructorOptions, crashReporter, DownloadItem, ipcMain, Menu, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell } from 'electron';
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +22,7 @@ import { commandItem, CommandId, keyBindings, newWindowAccelerator } from './key
 import { checkFromMenu, installUpdateOnQuit, startUpdateChecks } from './updates';
 import { connectLocal, connectSsh, Connection, fetchRemoteLog, helperDir, HostSpec, installKey, LinkState, setSshEnv, sshConfigHosts } from './hosts';
 import { contentSecurityPolicy } from './csp';
+import { downloadPath } from './downloads';
 import { openableExternally } from './links';
 import { isLoopbackUrl, remotePortOf, rewriteToLocal, validPort } from './forwards';
 import { DEFAULT_SETTINGS, onSettingsChange, patchIsValid, readRawSettings, readSettings, writeSettings } from './settings';
@@ -758,6 +759,75 @@ ipcMain.handle('dolphin:open-url', (event, machineId: unknown, url: unknown) => 
   return openOnThisComputer(machineId, url);
 });
 
+/* A file path clicked in a terminal. On this computer it is shown in its
+   folder (Finder, File Explorer, the file manager); on a machine over SSH it
+   is saved to this computer's Downloads, with no dialog, and the answer waits
+   for the download to finish. */
+type FileResult = { shown?: string; saved?: string; error?: string };
+const awaitingDownload = new Map<string, (result: FileResult) => void>();
+let nextDownload = 1;
+/** How long a machine has to start sending a file. */
+const DOWNLOAD_START_MS = 30_000;
+const reservedDownloads = new Set<string>();
+
+ipcMain.handle('dolphin:open-file', async (event, machineId: unknown, file: unknown): Promise<FileResult> => {
+  if (!windowOf(event.sender)) return { error: 'Not from this window.' };
+  if (typeof file !== 'string' || !file || file.length > 4096 || file.includes('\0')) return { error: 'That is not a file path.' };
+  const machine = machineOf(machineId);
+  if (machineId === 'local' || machine?.host.kind === 'local') {
+    if (!path.isAbsolute(file)) return { error: 'That is not a file path.' };
+    try {
+      statSync(file);
+    } catch {
+      return { error: `${path.basename(file)} is not on this computer.` };
+    }
+    shell.showItemInFolder(file);
+    return { shown: file };
+  }
+  if (!machine) return { error: 'That machine is not in this window.' };
+  const connection = machine.connection;
+  if (!connection || machine.link !== 'connected') return { error: `${machine.title} is not connected.` };
+  // The download is matched by its own id: Chromium may re-encode the rest of the URL.
+  const id = String(nextDownload++);
+  const url = `${connection.apiBase}/api/workspaces/file?path=${encodeURIComponent(file)}&token=${encodeURIComponent(connection.token)}&download=${id}`;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (awaitingDownload.delete(id)) resolve({ error: `${machine.title} did not send ${path.posix.basename(file)}.` });
+    }, DOWNLOAD_START_MS);
+    awaitingDownload.set(id, (result) => { clearTimeout(timer); resolve(result); });
+    event.sender.downloadURL(url);
+  });
+});
+
+/** Every download goes straight to Downloads under a free name. */
+function saveDownload(item: DownloadItem): void {
+  let id = '';
+  try { id = new URL(item.getURLChain()[0] ?? item.getURL()).searchParams.get('download') ?? ''; } catch { /* not ours */ }
+  const answer = awaitingDownload.get(id);
+  awaitingDownload.delete(id);
+  const dir = app.getPath('downloads');
+  let file: string;
+  try {
+    mkdirSync(dir, { recursive: true });
+    file = downloadPath(dir, item.getFilename(), (candidate) => reservedDownloads.has(candidate) || existsSync(candidate));
+  } catch (error) {
+    item.cancel();
+    answer?.({ error: `Could not save to ${dir}: ${error instanceof Error ? error.message : String(error)}` });
+    return;
+  }
+  reservedDownloads.add(file);
+  item.setSavePath(file);
+  item.once('done', (_event, state) => {
+    reservedDownloads.delete(file);
+    if (state === 'completed') {
+      if (process.platform === 'darwin') app.dock?.downloadFinished(file);
+      answer?.({ saved: file });
+    } else {
+      answer?.({ error: state === 'cancelled' ? 'The download was cancelled.' : `Could not download ${path.basename(file)}.` });
+    }
+  });
+}
+
 ipcMain.on('dolphin:machine-list', (event) => { event.returnValue = machineList(); });
 // This computer's link, for the launch page.
 ipcMain.on('dolphin:connection-state', (event) => {
@@ -975,6 +1045,7 @@ if (!app.requestSingleInstanceLock()) {
     nativeTheme.themeSource = readTheme(app.getPath('userData'));
     nativeTheme.on('updated', followTheme);
     serveApp();
+    session.defaultSession.on('will-download', (_event, item) => saveDownload(item));
     setSshEnv(startAskpass());
     startUpdateChecks();
     buildMenu();

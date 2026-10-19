@@ -37,6 +37,8 @@ export type TerminalFeatureOptions = {
   /** The machine's download URL for an absolute path. */
   fileUrl: (path: string) => string;
   download?: (url: string) => void;
+  /** Opens a file path. Defaults to downloading fileUrl(path). */
+  openFile?: (path: string) => void;
   /** Opens an http(s) link. Defaults to window.open (noopener). */
   openWeb?: (href: string) => void;
   /** terminalKey(machine, project, session). */
@@ -87,13 +89,17 @@ const keys: FeatureModule = (terminal, options) => {
 
 const fontSize: FeatureModule = (terminal, options) => attachFontSize(terminal, options.refit ?? refitTerminals);
 
+const openFile = (options: TerminalFeatureOptions, path: string) => (
+  options.openFile ? options.openFile(path) : (options.download ?? downloadUrl)(options.fileUrl(path))
+);
+
 /* Links are looked up only when the pointer is over a row (xterm asks the
    provider on hover), so a hidden terminal never resolves anything, and the
    resolver remembers answers and batches by 300. */
 const pathLinks: FeatureModule = (terminal, options) => attachPathLinks(terminal, {
   resolve: createPathResolver((candidates) => options.resolvePaths(candidates)),
   mac: options.mac,
-  openFile: (path) => (options.download ?? downloadUrl)(options.fileUrl(path)),
+  openFile: (path) => openFile(options, path),
 });
 
 /* http(s) text links and OSC 8 hyperlinks open on Cmd/Ctrl-click; file: links
@@ -102,7 +108,7 @@ const hyperlinks: FeatureModule = (terminal, options) => {
   const deps = {
     mac: options.mac,
     openWeb: options.openWeb ?? openWebLink,
-    openFile: (path: string) => (options.download ?? downloadUrl)(options.fileUrl(path)),
+    openFile: (path: string) => openFile(options, path),
   };
   const cleanups = [attachWebLinks(terminal, deps), attachOsc8Links(terminal, deps)];
   return () => cleanups.reverse().forEach((cleanup) => cleanup());

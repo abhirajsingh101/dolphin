@@ -20,6 +20,8 @@ import GitBadge from './GitBadge';
 import type { GitStatus, TmuxSession } from './types';
 import type { Terminal as Xterm } from '@xterm/xterm';
 import { openLink } from './openLink';
+import { fileLinkTitle, openTerminalFile } from './openFile';
+import { machineBridge } from './machines';
 import type { TerminalFeatureOptions, TerminalFeatures } from './terminal';
 import { terminalKey } from './terminal/terminalKey';
 import { clearTerminalBell } from './terminal/activity';
@@ -420,9 +422,45 @@ function GlassSessionWindowView(props: SessionWindowProps) {
     fileUrl: (path) => clientRef.current.fileDownloadUrl(path),
     activityKey: terminalId,
     openWeb: (href) => void openLink(href, machineId),
+    // Dolphin Desktop: shown in its folder here, saved to Downloads from a machine over SSH.
+    openFile: machineBridge()?.openFile ? (path) => void openTerminalFile(path, machineId, showNotice) : undefined,
     isForeground: () => foregroundRef.current && document.hasFocus(),
     opaqueBackground: () => getComputedStyle(document.documentElement).getPropertyValue('--glass-term-solid'),
   };
+  // Select mode's path links (the terminal package's copy layer) are download
+  // anchors; in Dolphin Desktop a click goes the same way as above, and the
+  // tooltip says which.
+  useEffect(() => {
+    const element = root.current;
+    if (!element || !machineBridge()?.openFile) return;
+    const linkOf = (event: Event) => (event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a.terminal-path-link') : null);
+    const pathOf = (link: HTMLAnchorElement) => {
+      try { return new URL(link.href).searchParams.get('path'); } catch { return null; }
+    };
+    const onClick = (event: MouseEvent) => {
+      const link = linkOf(event);
+      const path = link && pathOf(link);
+      if (!path) return;
+      event.preventDefault();
+      // A drag that selects text and ends on the link is not a click on it.
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      openTerminalFile(path, machineId, showNotice);
+    };
+    const onOver = (event: MouseEvent) => {
+      const link = linkOf(event);
+      const path = link && pathOf(link);
+      if (!link || !path || link.dataset.titled === (machineId ?? '')) return;
+      link.title = fileLinkTitle(path, machineId) + (/ · [^·]+$/.exec(link.title)?.[0] ?? '');
+      link.dataset.titled = machineId ?? '';
+    };
+    element.addEventListener('click', onClick, true);
+    element.addEventListener('mouseover', onOver, true);
+    return () => {
+      element.removeEventListener('click', onClick, true);
+      element.removeEventListener('mouseover', onOver, true);
+    };
+  }, [machineId, showNotice]);
   const featureOptionsRef = useRef(featureOptions);
   featureOptionsRef.current = featureOptions;
   const featuresRef = useRef<TerminalFeatures | null>(null);

@@ -1,6 +1,6 @@
 # Dolphin
 
-![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/dolphin-hero.gif)
+![Dolphin: a project's terminal, the first-run checklist and System Health](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/dolphin-hero.gif)
 
 Dolphin is a desktop workspace for running coding agents in real terminals, on
 your own computer or on any machine you can reach over SSH.
@@ -13,19 +13,19 @@ design, in light and dark.
 
 ## Download
 
-Dolphin 0.2.7. Every release is on
+Dolphin 0.2.8. Every release is on
 [Releases](https://github.com/abhirajsingh101/dolphin/releases).
 
 | Platform | Download |
 |---|---|
-| macOS, Apple Silicon | [Dolphin-0.2.7-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-mac-arm64.dmg) |
-| macOS, Intel | [Dolphin-0.2.7-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-mac-x64.dmg) |
-| Linux x64, AppImage (updates itself) | [Dolphin-0.2.7-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-x86_64.AppImage) |
-| Linux x64, Debian and Ubuntu | [Dolphin-0.2.7-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-amd64.deb) |
-| Linux x64, Fedora and RHEL | [Dolphin-0.2.7-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-x86_64.rpm) |
-| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.7-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-arm64.AppImage) |
-| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.7-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-arm64.deb) |
-| Linux arm64, Fedora and RHEL | [Dolphin-0.2.7-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.7/Dolphin-0.2.7-linux-aarch64.rpm) |
+| macOS, Apple Silicon | [Dolphin-0.2.8-mac-arm64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-mac-arm64.dmg) |
+| macOS, Intel | [Dolphin-0.2.8-mac-x64.dmg](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-mac-x64.dmg) |
+| Linux x64, AppImage (updates itself) | [Dolphin-0.2.8-linux-x86_64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-x86_64.AppImage) |
+| Linux x64, Debian and Ubuntu | [Dolphin-0.2.8-linux-amd64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-amd64.deb) |
+| Linux x64, Fedora and RHEL | [Dolphin-0.2.8-linux-x86_64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-x86_64.rpm) |
+| Linux arm64, AppImage (updates itself) | [Dolphin-0.2.8-linux-arm64.AppImage](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-arm64.AppImage) |
+| Linux arm64, Debian and Ubuntu | [Dolphin-0.2.8-linux-arm64.deb](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-arm64.deb) |
+| Linux arm64, Fedora and RHEL | [Dolphin-0.2.8-linux-aarch64.rpm](https://github.com/abhirajsingh101/dolphin/releases/download/desktop-v0.2.8/Dolphin-0.2.8-linux-aarch64.rpm) |
 
 On a Mac with Homebrew, once the tap is published:
 
@@ -75,6 +75,9 @@ does the same.
   transcripts, and Resume in new session continues one.
 - **Usage:** Usage in a connected machine's menu shows the Claude Code and Codex tokens used on it, from the agents' own logs.
 - **Ports:** lists the ports a machine is listening on.
+- **File paths:** in Select Text, or with Cmd/Ctrl-click, a file path printed
+  in a terminal opens: on this computer it is shown in Finder or File
+  Explorer, and on a machine over SSH it is saved to your Downloads folder.
 - **Agent setup:** if Claude Code or Codex is missing, Dolphin offers to install
   it in a terminal you can watch. Nothing installs without your click.
 - **Notifications:** one click gives Claude Code and Codex Dolphin's turn

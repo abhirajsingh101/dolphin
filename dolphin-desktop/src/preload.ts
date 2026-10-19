@@ -100,6 +100,9 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   // forwarded over SSH and rewritten when it is the machine's localhost.
   openPort: (machine: string, port: number): Promise<{ url?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-port', machine, port),
   openUrl: (machine: string, url: string): Promise<{ url?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-url', machine, url),
+  // A file path on a machine: shown in its folder when the machine is this
+  // computer, otherwise saved to this computer's Downloads.
+  openFile: (machine: string, file: string): Promise<{ shown?: string; saved?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-file', machine, file),
 });
 
 // The network changed (Wi-Fi back, VPN up): every machine link checks at

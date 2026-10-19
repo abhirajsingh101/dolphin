@@ -5,7 +5,7 @@
 // The remote helper uses the real tmux server, so nothing here starts a session.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -220,6 +220,19 @@ test('a port on the machine opens on this computer and comes back after a reconn
     assert.ok(relay, 'This Computer has a relay address');
     assert.ok((await window.evaluate((url) => window.dolphinDesktop.openUrl('local', url), relay)).error, 'a Dolphin port is refused');
     assert.equal((await app.evaluate(() => globalThis.__opened)).length, 2);
+
+    // A file path on the machine is saved to this computer's Downloads (an
+    // apostrophe, which Chromium re-encodes in the URL, still gets its answer).
+    const remoteFile = path.join(remoteHome, "the machine's file.txt");
+    writeFileSync(remoteFile, 'machine file\n');
+    const downloads = await app.evaluate(({ app: electronApp }) => electronApp.getPath('downloads'));
+    const saved = await window.evaluate((file) => window.dolphinDesktop.openFile('localhost', file), remoteFile);
+    assert.equal(saved.saved, path.join(downloads, "the machine's file.txt"), saved.error);
+    assert.equal(readFileSync(saved.saved, 'utf8'), 'machine file\n');
+    const again = await window.evaluate((file) => window.dolphinDesktop.openFile('localhost', file), remoteFile);
+    assert.equal(again.saved, path.join(downloads, "the machine's file (1).txt"), again.error);
+    const gone = await window.evaluate((file) => window.dolphinDesktop.openFile('localhost', file), path.join(remoteHome, 'gone.txt'));
+    assert.ok(gone.error, 'a file the machine does not serve is an error');
   } finally {
     server.close();
     try { execFileSync('ssh', ['-o', `ControlPath=${controlPath}`, '-O', 'exit', 'localhost'], { stdio: 'ignore' }); } catch { /* no master */ }
