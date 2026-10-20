@@ -24,3 +24,38 @@ export function downloadPath(dir: string, suggested: string, taken: (file: strin
   }
   return path.join(dir, `${stem} (${Date.now()})${ext}`);
 }
+
+/** One download, as the windows show it (the page's DownloadsControl). */
+export type Download = {
+  id: string;
+  name: string;
+  /** Where it is saved on this computer. */
+  file: string;
+  /** The machine it came from, when a terminal path asked for it. */
+  machine?: string;
+  received: number;
+  /** 0 when the machine did not say. */
+  total: number;
+  state: 'progressing' | 'completed' | 'cancelled' | 'failed';
+  error?: string;
+  started: number;
+};
+
+/** The downloads list keeps this many; the oldest finished ones go first. */
+export const KEEP_DOWNLOADS = 20;
+
+/** Newest first, at most `keep`, never dropping one still in progress. */
+export function keepRecent(list: Download[], keep = KEEP_DOWNLOADS): Download[] {
+  const sorted = [...list].sort((a, b) => b.started - a.started);
+  let extra = sorted.length - keep;
+  for (let index = sorted.length - 1; index >= 0 && extra > 0; index -= 1) {
+    if (sorted[index].state !== 'progressing') { sorted.splice(index, 1); extra -= 1; }
+  }
+  return sorted;
+}
+
+/** What a download that did not complete says. */
+export function downloadFailure(state: 'cancelled' | 'interrupted', machine?: string): string {
+  if (state === 'cancelled') return 'Cancelled';
+  return machine ? `Stopped: check that ${machine} is still connected, then click the path again.` : 'Stopped before it finished.';
+}

@@ -1,14 +1,19 @@
 /* The ssh options every Dolphin connection uses, apart from hosts.ts so they
  * can be tested without Electron (test/agent-forwarding.test.mjs). */
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export function controlPath(): string {
+/** One socket per machine, named from the target alone. ssh's own %C also
+ *  hashes this computer's hostname, which macOS changes with the network; a
+ *  new name loses the running master, whose forward then holds the link's
+ *  port, so every reconnect failed to forward and started over. */
+export function controlPath(target: string): string {
   const dir = path.join(os.homedir(), '.dolphin-desktop', 'ssh');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return path.join(dir, '%C');
+  return path.join(dir, createHash('sha1').update(target).digest('hex').slice(0, 24));
 }
 
 /** Dolphin's own SSH key, made only when the user sets up passwordless sign-in.
@@ -39,7 +44,7 @@ export function sshArgs(target: string, extra: string[] = [], shared = true): st
     // Added to the user's own keys, never instead of them.
     ...(existsSync(dolphinKey()) ? ['-o', `IdentityFile=${dolphinKey()}`] : []),
     ...(shared
-      ? ['-o', 'ForwardAgent=no', '-o', 'ControlMaster=auto', '-o', `ControlPath=${controlPath()}`, '-o', 'ControlPersist=10m']
+      ? ['-o', 'ForwardAgent=no', '-o', 'ControlMaster=auto', '-o', `ControlPath=${controlPath(target)}`, '-o', 'ControlPersist=10m']
       : []),
     ...extra,
     '--',

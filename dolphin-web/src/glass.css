@@ -1134,6 +1134,64 @@
 .glass-workspace .glass-notification-panel li > button:disabled { cursor: default; opacity: 0.7; }
 .glass-notification-empty { margin: 0; padding: 24px 16px; text-align: center; font-size: var(--fs-xs); color: var(--glass-muted-small); }
 
+/* Dolphin Desktop's downloads (DownloadsControl.tsx): a top-bar button that
+   rings with progress, and a list like the bell's. */
+.glass-downloads { position: relative; display: flex; }
+.glass-workspace .glass-downloads-button { position: relative; }
+.glass-workspace .glass-downloads-button[data-active='true'] { color: var(--glass-accent-strong); }
+.glass-downloads-ring {
+  position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+  transform: rotate(-90deg); pointer-events: none; fill: none; stroke-width: 2;
+}
+.glass-downloads-track { stroke: var(--glass-edge); }
+.glass-downloads-arc { stroke: var(--glass-accent); stroke-linecap: round; transition: stroke-dashoffset 160ms linear; }
+.glass-downloads-ring[data-indeterminate='true'] { animation: glass-downloads-spin 1s linear infinite; }
+@keyframes glass-downloads-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+.glass-downloads-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70dvh);
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--glass-edge); border-radius: var(--r-xl);
+  background: var(--glass-float-fill);
+  box-shadow: var(--glass-float-shadow);
+  backdrop-filter: var(--glass-float-blur);
+}
+.glass-downloads-panel header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--glass-edge);
+}
+.glass-downloads-panel header strong { font-size: var(--fs-sm); }
+.glass-workspace .glass-downloads-panel header button { padding: 4px 8px; font-size: var(--fs-xs); color: var(--glass-accent); }
+.glass-workspace .glass-downloads-panel header button:disabled { color: var(--glass-muted-small); cursor: default; }
+.glass-downloads-panel ul { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; overflow-y: auto; overscroll-behavior: contain; }
+.glass-downloads-panel li {
+  display: flex; align-items: flex-start; gap: 10px; padding: 8px 6px 8px 10px; border-radius: var(--r-md);
+}
+.glass-downloads-panel li > svg { flex-shrink: 0; margin-top: 1px; color: var(--glass-muted); }
+.glass-downloads-panel li[data-state='completed'] > svg { color: var(--glass-success); }
+.glass-downloads-panel li[data-state='failed'] > svg { color: var(--glass-alert); }
+.glass-download-text { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.glass-download-text strong { font-size: var(--fs-xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glass-download-text small { font-size: var(--fs-2xs); color: var(--glass-muted-small); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.glass-download-bar {
+  position: relative; display: block; height: 3px; margin-top: 2px; overflow: hidden;
+  border-radius: var(--r-full); background: var(--glass-edge);
+}
+.glass-download-bar i {
+  position: absolute; inset: 0; border-radius: var(--r-full); background: var(--glass-accent);
+  transform-origin: left; transform: scaleX(0); transition: transform 160ms linear;
+}
+.glass-download-bar[data-indeterminate='true'] i { transform: scaleX(.3); animation: glass-download-sweep 1.2s var(--glass-ease) infinite; }
+@keyframes glass-download-sweep { from { translate: -100% 0; } to { translate: 340% 0; } }
+.glass-workspace .glass-download-action {
+  flex-shrink: 0; width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  border-radius: var(--r-md); color: var(--glass-muted);
+}
+.glass-workspace .glass-download-action:hover { background: var(--glass-bubble); color: var(--glass-text); }
+.glass-downloads-panel footer {
+  padding: 8px 12px; border-top: 1px solid var(--glass-edge); font-size: var(--fs-xs); color: var(--glass-alert);
+}
+
 /* Pop-ups under the bell for turns that finish while the list is closed.
    Never focused automatically: the terminal keeps the keyboard. */
 .glass-notification-toasts {
@@ -1177,8 +1235,9 @@
 
 /* Terminal notices (OSC 52 "Copied"): a quiet line in the corner, never focus. */
 .glass-terminal { position: relative; }
+/* Above select mode's copy layer (z-index 5), which covers the terminal. */
 .glass-terminal-toast {
-  position: absolute; right: 12px; bottom: 12px; z-index: 2; margin: 0; padding: 4px 10px;
+  position: absolute; right: 12px; bottom: 12px; z-index: 6; margin: 0; padding: 4px 10px;
   max-width: calc(100% - 24px); border: 1px solid var(--glass-term-border); border-radius: var(--r-sm);
   background: var(--glass-term-copy); color: var(--glass-term-text); font-size: var(--fs-2xs);
   pointer-events: none;

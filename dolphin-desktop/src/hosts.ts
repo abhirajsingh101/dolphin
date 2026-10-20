@@ -303,7 +303,13 @@ export async function connectSsh(target: string, bundles: string, onStatus: (tex
   let listener: (state: LinkState, info: { reason?: string; tokenChanged?: boolean }) => void = () => undefined;
   const openTunnel = (extra: string[] = []) => {
     const child = tunnels.replace(() => spawn('ssh', [...sshArgs(target, [...extra, '-N', '-o', 'ExitOnForwardFailure=yes', '-o', 'StreamLocalBindUnlink=yes', '-L', `127.0.0.1:${port}:${remote.socket}`])], { stdio: 'ignore', env: { ...process.env, ...sshEnv } }));
-    child.once('exit', (code) => { if (tunnels.isCurrent(child) && !closed && code !== 0) void recover(); });
+    // A refused forward while the port still answers (a master ssh no longer
+    // reaches holds it) is no drop: recovering would refuse it again, forever.
+    // The watchdog sees a real one.
+    child.once('exit', (code) => {
+      if (!tunnels.isCurrent(child) || closed || code === 0) return;
+      void healthOnce(apiBase, 5_000).then((up) => { if (!up && tunnels.isCurrent(child) && !closed) void recover(); });
+    });
   };
   /** Give the loopback port back to this machine: the shared connection
    *  (ControlMaster) holds the forward itself, keyed by the socket it went to. */

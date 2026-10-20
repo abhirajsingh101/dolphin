@@ -36,6 +36,7 @@ const NewSessionDialog = lazy(() => import('./NewSessionDialog'));
 const RemoveProjectDialog = lazy(() => import('./RemoveProjectDialog'));
 const ConnectMachineDialog = lazy(() => import('./ConnectMachineDialog'));
 const DesktopStart = lazy(() => import('./DesktopStart'));
+const DownloadsControl = lazy(() => import('./DownloadsControl'));
 const SettingsDialog = lazy(() => import('./SettingsDialog'));
 const GlassProjectTasks = lazy(() => import('./GlassProjectTasks'));
 const DiffPanel = lazy(() => import('./DiffPanel'));
@@ -1356,6 +1357,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
         >
           <MessageSquare size={17} aria-hidden="true" />
         </button>
+        {desktop && <Suspense fallback={null}><DownloadsControl /></Suspense>}
         <NotificationBell onOpen={open} onTurn={refreshSoon} sources={desktop ? machineSources : undefined} />
         <button
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}

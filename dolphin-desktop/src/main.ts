@@ -22,7 +22,7 @@ import { commandItem, CommandId, keyBindings, newWindowAccelerator } from './key
 import { checkFromMenu, installUpdateOnQuit, startUpdateChecks } from './updates';
 import { connectLocal, connectSsh, Connection, fetchRemoteLog, helperDir, HostSpec, installKey, LinkState, setSshEnv, sshConfigHosts } from './hosts';
 import { contentSecurityPolicy } from './csp';
-import { downloadPath } from './downloads';
+import { Download, downloadFailure, downloadPath, keepRecent } from './downloads';
 import { openableExternally } from './links';
 import { isLoopbackUrl, remotePortOf, rewriteToLocal, validPort } from './forwards';
 import { DEFAULT_SETTINGS, onSettingsChange, patchIsValid, readRawSettings, readSettings, writeSettings } from './settings';
@@ -762,9 +762,11 @@ ipcMain.handle('dolphin:open-url', (event, machineId: unknown, url: unknown) => 
 /* A file path clicked in a terminal. On this computer it is shown in its
    folder (Finder, File Explorer, the file manager); on a machine over SSH it
    is saved to this computer's Downloads, with no dialog, and the answer waits
-   for the download to finish. */
-type FileResult = { shown?: string; saved?: string; error?: string };
-const awaitingDownload = new Map<string, (result: FileResult) => void>();
+   for the download to finish. `download` names its row in the downloads list
+   (the page shows progress there, so it does not repeat an error that is
+   already on that row). */
+type FileResult = { shown?: string; saved?: string; error?: string; download?: string };
+const awaitingDownload = new Map<string, { machine: string; answer: (result: FileResult) => void }>();
 let nextDownload = 1;
 /** How long a machine has to start sending a file. */
 const DOWNLOAD_START_MS = 30_000;
@@ -788,23 +790,47 @@ ipcMain.handle('dolphin:open-file', async (event, machineId: unknown, file: unkn
   const connection = machine.connection;
   if (!connection || machine.link !== 'connected') return { error: `${machine.title} is not connected.` };
   // The download is matched by its own id: Chromium may re-encode the rest of the URL.
-  const id = String(nextDownload++);
+  const id = `d${nextDownload++}`;
   const url = `${connection.apiBase}/api/workspaces/file?path=${encodeURIComponent(file)}&token=${encodeURIComponent(connection.token)}&download=${id}`;
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      if (awaitingDownload.delete(id)) resolve({ error: `${machine.title} did not send ${path.posix.basename(file)}.` });
+      if (awaitingDownload.delete(id)) resolve({ error: `${machine.title} did not send ${path.posix.basename(file)}. Check that it is still connected, then try again.` });
     }, DOWNLOAD_START_MS);
-    awaitingDownload.set(id, (result) => { clearTimeout(timer); resolve(result); });
+    awaitingDownload.set(id, { machine: machine.title, answer: (result) => { clearTimeout(timer); resolve(result); } });
     event.sender.downloadURL(url);
   });
 });
+
+/* The downloads list every window shows: kept in memory for this run, sent
+   on every change (progress at most every 150 ms). */
+let downloads: Download[] = [];
+const downloadItems = new Map<string, DownloadItem>();
+let downloadsTimer: NodeJS.Timeout | null = null;
+function sendDownloads(now = false): void {
+  const send = () => {
+    downloadsTimer = null;
+    for (const window of liveWindows()) window.webContents.send('dolphin:downloads', downloads);
+  };
+  if (now) {
+    if (downloadsTimer) clearTimeout(downloadsTimer);
+    send();
+  } else if (!downloadsTimer) {
+    downloadsTimer = setTimeout(send, 150);
+  }
+}
+function changeDownload(id: string, change: Partial<Download>, now = false): void {
+  downloads = downloads.map((entry) => (entry.id === id ? { ...entry, ...change } : entry));
+  sendDownloads(now);
+}
 
 /** Every download goes straight to Downloads under a free name. */
 function saveDownload(item: DownloadItem): void {
   let id = '';
   try { id = new URL(item.getURLChain()[0] ?? item.getURL()).searchParams.get('download') ?? ''; } catch { /* not ours */ }
-  const answer = awaitingDownload.get(id);
-  awaitingDownload.delete(id);
+  const awaiting = id ? awaitingDownload.get(id) : undefined;
+  if (awaiting) awaitingDownload.delete(id);
+  if (!awaiting) id = `d${nextDownload++}`;
+  const answer = (result: FileResult) => awaiting?.answer({ ...result, download: id });
   const dir = app.getPath('downloads');
   let file: string;
   try {
@@ -812,21 +838,48 @@ function saveDownload(item: DownloadItem): void {
     file = downloadPath(dir, item.getFilename(), (candidate) => reservedDownloads.has(candidate) || existsSync(candidate));
   } catch (error) {
     item.cancel();
-    answer?.({ error: `Could not save to ${dir}: ${error instanceof Error ? error.message : String(error)}` });
+    awaiting?.answer({ error: `Could not save to ${dir}: ${error instanceof Error ? error.message : String(error)}` });
     return;
   }
   reservedDownloads.add(file);
   item.setSavePath(file);
+  downloadItems.set(id, item);
+  downloads = keepRecent([{ id, name: path.basename(file), file, machine: awaiting?.machine, received: 0, total: item.getTotalBytes(), state: 'progressing', started: Date.now() }, ...downloads]);
+  sendDownloads(true);
+  item.on('updated', () => changeDownload(id, { received: item.getReceivedBytes(), total: item.getTotalBytes() }));
   item.once('done', (_event, state) => {
     reservedDownloads.delete(file);
+    downloadItems.delete(id);
     if (state === 'completed') {
       if (process.platform === 'darwin') app.dock?.downloadFinished(file);
-      answer?.({ saved: file });
+      const size = item.getReceivedBytes();
+      changeDownload(id, { state: 'completed', received: size, total: Math.max(size, item.getTotalBytes()) }, true);
+      answer({ saved: file });
     } else {
-      answer?.({ error: state === 'cancelled' ? 'The download was cancelled.' : `Could not download ${path.basename(file)}.` });
+      const error = downloadFailure(state, awaiting?.machine);
+      changeDownload(id, { state: state === 'cancelled' ? 'cancelled' : 'failed', error, received: item.getReceivedBytes() }, true);
+      answer({ error });
     }
   });
 }
+
+ipcMain.on('dolphin:downloads-get', (event) => { event.returnValue = downloads; });
+ipcMain.on('dolphin:download-cancel', (event, id: unknown) => {
+  if (windowOf(event.sender) && typeof id === 'string') downloadItems.get(id)?.cancel();
+});
+ipcMain.handle('dolphin:download-show', (event, id: unknown) => {
+  if (!windowOf(event.sender)) return { error: 'Not from this window.' };
+  const entry = downloads.find((item) => item.id === id && item.state === 'completed');
+  if (!entry) return { error: 'That download is not finished.' };
+  if (!existsSync(entry.file)) return { error: `${entry.name} is no longer in Downloads.` };
+  shell.showItemInFolder(entry.file);
+  return { ok: true };
+});
+ipcMain.on('dolphin:downloads-clear', (event) => {
+  if (!windowOf(event.sender)) return;
+  downloads = downloads.filter((entry) => entry.state === 'progressing');
+  sendDownloads(true);
+});
 
 ipcMain.on('dolphin:machine-list', (event) => { event.returnValue = machineList(); });
 // This computer's link, for the launch page.

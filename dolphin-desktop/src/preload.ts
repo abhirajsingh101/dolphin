@@ -102,7 +102,17 @@ contextBridge.exposeInMainWorld('dolphinDesktop', {
   openUrl: (machine: string, url: string): Promise<{ url?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-url', machine, url),
   // A file path on a machine: shown in its folder when the machine is this
   // computer, otherwise saved to this computer's Downloads.
-  openFile: (machine: string, file: string): Promise<{ shown?: string; saved?: string; error?: string }> => ipcRenderer.invoke('dolphin:open-file', machine, file),
+  openFile: (machine: string, file: string): Promise<{ shown?: string; saved?: string; error?: string; download?: string }> => ipcRenderer.invoke('dolphin:open-file', machine, file),
+  // Downloads (main.ts): the list, its changes, and each row's actions.
+  downloads: (): unknown[] => ipcRenderer.sendSync('dolphin:downloads-get'),
+  onDownloads: (listener: (downloads: unknown[]) => void) => {
+    const heard = (_event: unknown, list: unknown[]) => listener(list);
+    ipcRenderer.on('dolphin:downloads', heard);
+    return () => { ipcRenderer.removeListener('dolphin:downloads', heard); };
+  },
+  cancelDownload: (id: string) => ipcRenderer.send('dolphin:download-cancel', id),
+  showDownload: (id: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('dolphin:download-show', id),
+  clearDownloads: () => ipcRenderer.send('dolphin:downloads-clear'),
 });
 
 // The network changed (Wi-Fi back, VPN up): every machine link checks at

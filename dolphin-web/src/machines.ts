@@ -58,7 +58,13 @@ type Bridge = {
   openPort?: (machine: string, port: number) => Promise<{ url?: string; error?: string }>;
   openUrl?: (machine: string, url: string) => Promise<{ url?: string; error?: string }>;
   /** A file path: shown in its folder on this computer, saved to Downloads from a machine over SSH. */
-  openFile?: (machine: string, file: string) => Promise<{ shown?: string; saved?: string; error?: string }>;
+  openFile?: (machine: string, file: string) => Promise<{ shown?: string; saved?: string; error?: string; download?: string }>;
+  /** This run's downloads (newest first), their changes, and each row's actions. */
+  downloads?: () => unknown[];
+  onDownloads?: (listener: (downloads: unknown[]) => void) => (() => void) | void;
+  cancelDownload?: (id: string) => void;
+  showDownload?: (id: string) => Promise<{ ok?: boolean; error?: string }>;
+  clearDownloads?: () => void;
   remoteLog?: (target: string) => Promise<{ ok?: boolean; file?: string; error?: string }>;
   onConnectOpen?: (listener: () => void) => (() => void) | void;
   /** A click on a system notification (main.ts): open this session. */

@@ -60,6 +60,18 @@ test('ordinary commands still share the ControlMaster, and never forward the age
   assert.equal(first(sshArgs('gpu-box'), 'ForwardAgent'), 'ForwardAgent=no');
 });
 
+test('the shared connection is named from the machine alone, never from this computer\'s hostname', () => {
+  // ssh's %C hashes the local hostname too; macOS changes it with the network,
+  // and a new name lost the running master, so the link reconnected in a loop.
+  const socket = (target) => first(sshArgs(target), 'ControlPath').slice('ControlPath='.length);
+  assert.doesNotMatch(socket('gpu-box'), /%/);
+  assert.equal(socket('gpu-box'), socket('gpu-box'));
+  assert.notEqual(socket('gpu-box'), socket('me@gpu-box'));
+  assert.equal(path.dirname(socket('gpu-box')), path.join(scratchHome, '.dolphin-desktop', 'ssh'));
+  // macOS allows 104 bytes for a socket path, and ssh adds a 17-character suffix while making it.
+  assert.ok(path.basename(socket('gpu-box')).length <= 24);
+});
+
 /* --- lifecycle, with fake ssh processes ---------------------------------- */
 
 /** A fake `ssh` keeper: says `ready` when told to, exits when killed. */
