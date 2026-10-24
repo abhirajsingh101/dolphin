@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { AnimatePresence } from 'motion/react';
-import { ArrowDownToLine, CircleAlert, CircleCheck, CircleX, FileDown, FolderOpen, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowDown, ArrowDownToLine, CircleAlert, CircleCheck, CircleX, FileDown, FolderOpen, X } from 'lucide-react';
 import { MotionPopover } from './motion/MotionDialog';
+import { EASE_OUT } from './motion/presets';
 import { machineBridge } from './machines';
 import { fileManagerName } from './openFile';
 import { downloadDetail, downloadsLabel, fractionOf, overallProgress, type Download } from './downloads';
@@ -9,6 +10,10 @@ import { downloadDetail, downloadsLabel, fractionOf, overallProgress, type Downl
 /** How long the list stays after its last download finishes, when it opened by itself. */
 export const AUTO_CLOSE_MS = 4000;
 const RING = 2 * Math.PI * 12;
+/** A download that starts drops an arrow into the button, which then rings once. */
+const DROP_S = 0.42;
+
+const calm = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /* Dolphin Desktop's downloads, beside the bell: the button appears with the
    first download of this run and rings with progress; the list opens by
@@ -22,6 +27,8 @@ export default function DownloadsControl() {
   const [announce, setAnnounce] = useState('');
   const [holding, setHolding] = useState(false);
   const [focused, setFocused] = useState(false);
+  // Counts download starts; each new value plays the drop once.
+  const [drops, setDrops] = useState(0);
   const trigger = useRef<HTMLButtonElement>(null);
   const openedByItself = useRef(false);
   const seen = useRef(new Set(downloads.map((download) => download.id)));
@@ -52,6 +59,7 @@ export default function DownloadsControl() {
     if (said.length) setAnnounce((current) => `${said.join(' ')}${current.endsWith('\u200b') ? '' : '\u200b'}`);
     if (downloads.length === 0) setOpen(false);
     if (started) {
+      if (!calm()) setDrops((count) => count + 1);
       setOpen((current) => {
         if (!current) openedByItself.current = true;
         return true;
@@ -107,7 +115,20 @@ export default function DownloadsControl() {
         data-active={active > 0}
         onClick={() => { openedByItself.current = false; setOpen((value) => !value); }}
       >
-        <ArrowDownToLine size={16} aria-hidden="true" />
+        <motion.span key={`icon:${drops}`} className="glass-downloads-icon" initial={drops ? { y: 0, scale: 1 } : false}
+          animate={{ y: [0, 0, 3, 0], scale: [1, 1, 1.2, 1] }} transition={{ duration: DROP_S * 1.5, times: [0, 0.55, 0.72, 1], ease: EASE_OUT }}>
+          <ArrowDownToLine size={16} aria-hidden="true" />
+        </motion.span>
+        {drops > 0 && (
+          <span key={`drop:${drops}`} className="glass-downloads-drop" data-drop={drops} aria-hidden="true">
+            <motion.span className="glass-downloads-ripple" initial={{ scale: 0.7, opacity: 0 }}
+              animate={{ scale: [0.7, 2], opacity: [0, 0.7, 0] }} transition={{ delay: DROP_S * 0.75, duration: DROP_S, ease: EASE_OUT }} />
+            <motion.span className="glass-downloads-arrow" initial={{ y: -30, opacity: 0 }}
+              animate={{ y: [-30, 0], opacity: [0, 1, 1, 0] }} transition={{ duration: DROP_S, ease: EASE_OUT, opacity: { duration: DROP_S * 1.1, times: [0, 0.25, 0.8, 1] } }}>
+              <ArrowDown size={18} strokeWidth={2.5} />
+            </motion.span>
+          </span>
+        )}
         {active > 0 && (
           <svg className="glass-downloads-ring" viewBox="0 0 28 28" aria-hidden="true" data-indeterminate={fraction === null}>
             <circle className="glass-downloads-track" cx="14" cy="14" r="12" />

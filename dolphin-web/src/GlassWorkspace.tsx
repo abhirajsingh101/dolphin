@@ -247,6 +247,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const [fullscreenProject, setFullscreenProject] = useState<string | null>(() => readFullscreenProject(storage));
   useEffect(() => writeLayout(storage, LAYOUT_KEYS.fullscreen, fullscreenProject), [storage, fullscreenProject]);
   const fullscreenGroup = projectWindows.find(group => group.projectId === fullscreenProject);
+  // Fullscreen puts the projects list and the chat away. Shown again from the
+  // top bar, they sit beside the window (glass.css) until fullscreen ends;
+  // the remembered layout is never touched, so leaving it restores that.
+  const fullscreenOn = fullscreenProject !== null;
+  const [fullscreenShows, setFullscreenShows] = useState({ sidebar: false, chat: false });
+  useEffect(() => { if (!fullscreenOn) setFullscreenShows({ sidebar: false, chat: false }); }, [fullscreenOn]);
   // Motion measures the window stack only when the window list changes, not on every render.
   const layoutKey = `${projectWindows.map((group) => `${group.projectId}:${group.collapsed}:${group.sessions.length}`).join('|')}|${fullscreenProject ?? ''}`;
   // A remembered fullscreen waits for its window; it is dropped only once the
@@ -262,6 +268,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       // Escape inside the terminal belongs to the program running there.
       if (event.key !== 'Escape' || event.defaultPrevented || (event.target instanceof Element
         && event.target.closest('.terminal-host, .xterm, input, textarea, select, [contenteditable="true"]'))) return;
+      // An open list or menu (the bell's, Downloads) takes this Escape for itself.
+      if (document.querySelector('.glass-workspace :is([role="dialog"], [role="menu"])')) return;
       setFullscreenProject(null);
     };
     window.addEventListener('keydown', exit);
@@ -326,12 +334,14 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const centre = useRef<HTMLDivElement>(null);
   const savedChat = useRef(readChatLayout(storage)).current;
   const chatWidth = useRef(savedChat.width);
-  const [chatCollapsed, setChatCollapsed] = useState(savedChat.collapsed);
+  const [chatFolded, setChatCollapsed] = useState(savedChat.collapsed);
+  const chatCollapsed = fullscreenOn ? !fullscreenShows.chat : chatFolded;
   const chatCollapsedRef = useRef(chatCollapsed);
   chatCollapsedRef.current = chatCollapsed;
   // Every person-made change to the chat column is remembered; the narrow-window
   // auto-fold calls setChatCollapsed directly and is not.
   function rememberChat(collapsed: boolean) {
+    if (fullscreenOn) { setFullscreenShows((shows) => ({ ...shows, chat: !collapsed })); return; }
     setChatCollapsed(collapsed);
     writeLayout(storage, LAYOUT_KEYS.chat, { width: chatWidth.current, collapsed });
   }
@@ -446,9 +456,37 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   // Connect to Machine… in the menu opens this window's dialog.
   useEffect(() => (desktop ? machineBridge()?.onConnectOpen?.(() => setConnecting(true)) ?? undefined : undefined), [desktop]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(storage));
-  useEffect(() => writeLayout(storage, LAYOUT_KEYS.sidebar, sidebarCollapsed), [storage, sidebarCollapsed]);
+  const [sidebarFolded, setSidebarCollapsed] = useState(() => readSidebarCollapsed(storage));
+  useEffect(() => writeLayout(storage, LAYOUT_KEYS.sidebar, sidebarFolded), [storage, sidebarFolded]);
+  const sidebarCollapsed = fullscreenOn ? !fullscreenShows.sidebar : sidebarFolded;
+  const toggleSidebar = () => {
+    if (fullscreenOn) setFullscreenShows((shows) => ({ ...shows, sidebar: !shows.sidebar }));
+    else setSidebarCollapsed((value) => !value);
+  };
   const [sidebarWidth, setSidebarWidth] = useState(() => readSidebarWidth(storage));
+  const workspace = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const host = workspace.current;
+    const stack = windowStack.current;
+    const edges = ['--glass-fullscreen-left', '--glass-fullscreen-right', '--glass-fullscreen-bottom'];
+    if (!host) return;
+    if (!fullscreenOn || !stack) { edges.forEach((edge) => host.style.removeProperty(edge)); return; }
+    // The window takes the place the window stack has: all of it, less the
+    // projects list and the chat when they show.
+    const place = () => {
+      const rect = stack.getBoundingClientRect();
+      const sidebar = !sidebarCollapsed && !window.matchMedia('(max-width: 650px)').matches;
+      const chat = !chatCollapsed;
+      host.style.setProperty(edges[0], `${sidebar ? Math.round(rect.left) : 0}px`);
+      host.style.setProperty(edges[1], `${chat && !narrow ? Math.round(window.innerWidth - rect.right) : 0}px`);
+      host.style.setProperty(edges[2], `${chat && narrow ? Math.round(window.innerHeight - rect.bottom) : 0}px`);
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(stack);
+    window.addEventListener('resize', place);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', place); };
+  }, [fullscreenOn, sidebarCollapsed, chatCollapsed, narrow]);
   const commitSidebarWidth = (width: number) => { setSidebarWidth(width); writeLayout(storage, LAYOUT_KEYS.sidebarWidth, width); };
   const sessionTargets: Target[] = projects.flatMap((p) =>
     p.sessions.map((s) => ({
@@ -1149,7 +1187,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
     );
   }
   return (
-    <MotionConfig reducedMotion="user"><MotionDialogs><div className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} style={{ '--glass-sidebar-user-width': `${sidebarWidth}px` } as CSSProperties}>
+    <MotionConfig reducedMotion="user"><MotionDialogs><div ref={workspace} className="glass-workspace" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} style={{ '--glass-sidebar-user-width': `${sidebarWidth}px` } as CSSProperties}>
       <CommandPalette
         items={palette.items}
         open={paletteOpen}
@@ -1296,7 +1334,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
       )}
       </AnimatePresence>
       <header className="glass-top">
-        <button className="glass-desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Expand projects' : 'Collapse projects'} aria-expanded={!sidebarCollapsed} aria-controls="glass-projects" onClick={() => setSidebarCollapsed((value) => !value)}><PanelLeft size={18} /></button>
+        <button className="glass-desktop-sidebar-toggle" aria-label={sidebarCollapsed ? 'Expand projects' : 'Collapse projects'} aria-expanded={!sidebarCollapsed} aria-controls="glass-projects" onClick={toggleSidebar}><PanelLeft size={18} /></button>
         <button
           className="glass-sidebar-toggle"
           aria-label="Toggle projects"

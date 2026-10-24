@@ -1070,15 +1070,18 @@
 
 /* Project fullscreen (2026-10-07). The glass window, not one terminal, owns
    fullscreen: its header with the project's tab strip and new-session button
-   stays on top, and switching tabs keeps the window fullscreen. It sits just
-   under dialogs so the command palette still opens over it. */
+   stays on top, and switching tabs keeps the window fullscreen. It fills
+   everything under the top bar, whose buttons keep working (2026-10-23):
+   what they open (the bell's list, Downloads, the narrow projects drawer)
+   floats over it, and the projects list or chat, shown again, sit beside it
+   (GlassWorkspace.tsx sets the two edges). */
 .glass-session-window[data-fullscreen='true'],
 .glass-window-stack[data-multiple='true'] .glass-session-window[data-fullscreen='true'] {
   position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-dialog) - 1);
-  width: 100vw;
-  height: 100dvh;
+  inset: 44px var(--glass-fullscreen-right, 0px) var(--glass-fullscreen-bottom, 0px) var(--glass-fullscreen-left, 0px);
+  z-index: calc(var(--z-popover) - 2);
+  width: auto;
+  height: auto;
   min-height: 0;
   margin: 0;
   border: 0;
@@ -1143,6 +1146,13 @@
   position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
   transform: rotate(-90deg); pointer-events: none; fill: none; stroke-width: 2;
 }
+.glass-downloads-icon { display: inline-flex; }
+/* The start of a download: an arrow drops into the button and one ring spreads
+   from it (DownloadsControl.tsx, Motion; nothing plays under reduced motion). */
+.glass-downloads-drop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.glass-downloads-drop > * { grid-area: 1 / 1; }
+.glass-downloads-arrow { display: inline-flex; padding: 3px; border-radius: var(--r-full); color: var(--accent-on); background: var(--glass-accent-strong); box-shadow: var(--glass-shadow); }
+.glass-downloads-ripple { width: 28px; height: 28px; border: 2px solid var(--glass-accent); border-radius: var(--r-full); background: var(--glass-selection); }
 .glass-downloads-track { stroke: var(--glass-edge); }
 .glass-downloads-arc { stroke: var(--glass-accent); stroke-linecap: round; transition: stroke-dashoffset 160ms linear; }
 .glass-downloads-ring[data-indeterminate='true'] { animation: glass-downloads-spin 1s linear infinite; }

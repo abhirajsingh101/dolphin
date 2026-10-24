@@ -71,21 +71,18 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     // Machine sections: one sticky 28px row each.
     const head = await window.locator('.glass-machine-head').first().evaluate((element) => ({ position: getComputedStyle(element).position, height: Math.round(element.getBoundingClientRect().height) }));
     assert.deepEqual(head, { position: 'sticky', height: 28 });
-    // A fullscreen project window starts below the window controls in a window;
-    // in macOS full screen its header keeps the traffic lights' corner free.
-    // desktop.css keys both on attributes, so each case is set and measured here.
+    // A fullscreen project window starts below the top bar, which keeps the
+    // window controls (and in macOS full screen the traffic lights' corner).
+    // desktop.css keys the platforms on attributes, so each case is set and measured here.
     const fullscreen = await window.evaluate(() => {
       const root = document.documentElement;
       const before = { platform: root.dataset.platform, full: 'fullscreen' in root.dataset };
       const frame = document.createElement('section');
       frame.className = 'glass-session-window';
       frame.dataset.fullscreen = 'true';
-      const title = document.createElement('div');
-      title.className = 'glass-window-title';
-      frame.append(title);
       document.querySelector('.glass-workspace').append(frame);
       const firstControl = document.querySelector('.glass-top :is(button, a, input)');
-      const measure = () => ({ top: frame.getBoundingClientRect().top, left: parseFloat(getComputedStyle(title).paddingLeft), control: firstControl.getBoundingClientRect().left });
+      const measure = () => ({ top: frame.getBoundingClientRect().top, control: firstControl.getBoundingClientRect().left });
       delete root.dataset.fullscreen;
       const here = measure();
       root.dataset.platform = 'darwin';
@@ -99,8 +96,7 @@ test('this computer opens the workspace and System Health', { timeout: 120_000 }
     });
     assert.equal(fullscreen.here.top, 44, JSON.stringify(fullscreen));
     assert.equal(fullscreen.macWindow.top, 44, JSON.stringify(fullscreen));
-    assert.equal(fullscreen.macFull.top, 0, JSON.stringify(fullscreen));
-    assert.ok(fullscreen.macFull.left >= 72, JSON.stringify(fullscreen));
+    assert.equal(fullscreen.macFull.top, 44, JSON.stringify(fullscreen));
     // In a Mac window the traffic lights end near x 70; the first header control starts clear of them.
     assert.ok(fullscreen.macWindow.control >= 78, JSON.stringify(fullscreen));
 
