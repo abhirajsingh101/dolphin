@@ -29,3 +29,17 @@ The same patch adds three props (spec: "Terminal pane extension points"):
   1 s (`dist/terminalDropRetry.js`). Without it, such a socket stays closed.
 - `onTerminal(terminal)`: called once after the xterm instance is opened; the
   cleanup it returns runs before dispose. Terminal features attach here.
+
+# Wrapped paths in select mode
+
+`@dolphin-terminal/core@0.3.0` finds file paths one line at a time. Claude
+Code and Codex wrap their own output with real newlines (often indenting the
+rest), which tmux's `capture-pane -J` cannot rejoin, so a long path split
+across lines was never a link. The core patch adds one more candidate where a
+token runs to the end of its line and the next line starts with a token: the
+two (and further lines, while each is wholly a piece of it) joined. The
+server still decides which candidates are files. A joined one carries
+`parts`, and `buildSnapshotSegments` links each piece to the same file while
+the newline and indent stay text, so select mode still shows exactly what the
+terminal printed. Tests: `src/terminal/wrappedPaths.test.ts` and
+`e2e/glass-file-links.spec.ts`.

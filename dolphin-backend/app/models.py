@@ -144,6 +144,9 @@ class Task(Base):
     position = Column(Integer, default=0)
     origin = Column(String, default="human", server_default="human", nullable=False)
     execution_prompt = Column(Text, default="", server_default="", nullable=False)
+    # The tmux session that was selected when the todo was added. A name, not
+    # a key: the session may be gone, and the todo then just lists normally.
+    created_in_session = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     completed_at = Column(DateTime, nullable=True)

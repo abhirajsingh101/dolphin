@@ -111,6 +111,16 @@ class TaskCreate(BaseModel):
     due_date: Optional[date] = None
     due_time: Optional[time] = None
     label_ids: list[str] = []
+    # The tmux session selected in the workspace when the todo was added.
+    session_name: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("session_name")
+    @classmethod
+    def _one_line_session_name(cls, value: Optional[str]) -> Optional[str]:
+        normalized = (value or "").strip()
+        if any(character in normalized for character in "\x00\r\n"):
+            raise ValueError("session name must be one line")
+        return normalized or None
 
     @field_validator("title")
     @classmethod
@@ -190,6 +200,7 @@ class TaskResponse(BaseModel):
     due_time: Optional[time] = None
     is_done: bool
     position: int
+    created_in_session: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None

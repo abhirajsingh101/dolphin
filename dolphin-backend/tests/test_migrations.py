@@ -35,7 +35,7 @@ DIRECTION_REVISION = "e2c8b4195a7d"
 PRE_PLANNING_REVISION = "f6b4c8d21e30"
 # The last revision that still had Learn/Active automation and learned planning.
 PRE_REMOVAL_REVISION = "9324cf29e61e"
-HEAD_REVISION = "92e8549e6f2b"
+HEAD_REVISION = "0c122761af16"
 FLEET_TABLES = {
     "fleet_missions",
     "fleet_tasks",
@@ -632,6 +632,7 @@ def _domain_rows(path):
                     row.pop("origin", None)
                     row.pop("execution_prompt", None)
                     row.pop("source_proposal_id", None)
+                    row.pop("created_in_session", None)  # added by 0c122761af16
             if table == "projects":
                 for row in rows:
                     row.pop("is_hidden", None)  # added by c41d7e9a2b58

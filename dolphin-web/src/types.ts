@@ -141,6 +141,8 @@ export interface Task {
   due_time?: string | null;
   is_done: boolean;
   position: number;
+  /** The tmux session that was selected when the todo was added. */
+  created_in_session?: string | null;
   created_at?: string;
   updated_at?: string;
   completed_at?: string | null;

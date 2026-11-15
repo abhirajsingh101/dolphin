@@ -824,6 +824,9 @@
 .glass-task-list { overflow: auto; min-height: 0; }
 .glass-task-list summary { cursor: pointer; padding: 8px 0; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
 .glass-task-list summary span { float: right; }
+/* The selected session's own todos: an accent heading and an accent edge on each row. */
+.glass-task-session-group > summary { color: var(--glass-accent-ink); font-weight: 600; }
+.glass-task-session-group .glass-task-row { padding-left: 9px; box-shadow: inset 2px 0 var(--glass-accent); }
 .glass-task-row { display: flex; align-items: flex-start; gap: 9px; padding: 10px 3px; border-bottom: 1px solid var(--glass-edge); font-size: var(--fs-xs); cursor: pointer; }
 .glass-task-row input { margin: 3px 0 0; accent-color: var(--glass-accent); }
 .glass-task-row > span { min-width: 0; overflow-wrap: anywhere; }

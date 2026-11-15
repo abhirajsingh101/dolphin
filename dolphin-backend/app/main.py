@@ -840,6 +840,7 @@ async def _task_response(task: Task, db: AsyncSession) -> TaskResponse:
         due_time=task.due_time,
         is_done=task.is_done,
         position=task.position,
+        created_in_session=task.created_in_session,
         created_at=task.created_at,
         updated_at=task.updated_at,
         completed_at=task.completed_at,
@@ -1888,6 +1889,14 @@ async def rename_project_tmux_session(
         )
     except TmuxServiceError as error:
         raise _tmux_error(error)
+    if session.name != session_name:
+        # Todos added in this session follow it to its new name.
+        await db.execute(
+            update(Task)
+            .where(Task.project_id == project.id, Task.created_in_session == session_name)
+            .values(created_in_session=session.name)
+        )
+        await db.commit()
     return _session_response(session)
 
 
@@ -2723,6 +2732,7 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db)):
         description=data.description,
         origin="human",
         execution_prompt=execution_prompt,
+        created_in_session=data.session_name,
         priority=data.priority,
         due_date=data.due_date,
         due_time=data.due_time,

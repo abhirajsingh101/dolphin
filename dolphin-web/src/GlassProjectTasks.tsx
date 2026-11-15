@@ -8,11 +8,13 @@ import { useApi } from './apiContext';
 import StatusGlyph from './StatusGlyph';
 import { seenAt, sessionState } from './sessionState';
 import { getSetting } from './settings';
+import { groupTasks, launchedSession } from './taskSession';
 import type { ControlCenterSession, SessionLink, Task } from './types';
 
 /* The selected terminal's project's todos. Each open todo can start its own
    agent session with its text as the first prompt. A todo with a session
-   shows that session's state and opens it. Todos can be edited and deleted. */
+   shows that session's state and opens it. Todos can be edited and deleted.
+   The selected session's own open todos are listed first (taskSession.ts). */
 
 export default function GlassProjectTasks({ projectId, projectName, sessionName, machine, sessions, onOpenSession }: {
   projectId: string;
@@ -141,21 +143,12 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName,
     setEditing(null); setEditError('');
     if (title !== task.title) void change(() => updateTask(task.id, { title }));
   }
-  // The newest link per todo whose session still runs.
-  const sessionFor = (task: Task) => {
-    const mine = links.filter((link) => link.task_id === task.id && !link.archived_at)
-      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.session_name.localeCompare(a.session_name));
-    for (const link of mine) {
-      const session = sessions.find((item) => item.name === link.session_name);
-      if (session) return session;
-    }
-    return null;
-  };
+  const sessionFor = (task: Task) => launchedSession(task, links, sessions);
   return <section className="glass-project-tasks" aria-label={`Tasks for ${projectName}`}>
     <header><div><strong>{projectName}</strong><small title={sessionLabel(sessionName)}>{sessionLabel(sessionName)}</small></div>
       <button aria-label="Refresh tasks" onClick={() => setRevision(r => r + 1)}><RefreshCw size={14} /></button>
     </header>
-    <form onSubmit={e => { e.preventDefault(); if (draft.trim() && !busy) void change(() => createTask(projectId, draft.trim()), true); }}>
+    <form onSubmit={e => { e.preventDefault(); if (draft.trim() && !busy) void change(() => createTask(projectId, draft.trim(), '', { session_name: sessionName }), true); }}>
       <textarea ref={draftInput} rows={1} aria-label={`New task for ${projectName}`} placeholder="Add a task…" value={draft} onChange={e => setDraft(e.target.value)} disabled={busy} onKeyDown={e => {
         if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
           e.preventDefault(); e.currentTarget.form?.requestSubmit();
@@ -170,12 +163,10 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName,
     {launchMessage && <p role="alert" className="glass-task-message">{launchMessage}<button type="button" aria-label="Dismiss message" onClick={() => setLaunchMessage('')}>×</button></p>}
     {loading ? <p role="status">Loading tasks…</p> : <motion.div className="glass-task-list" layoutScroll>
       {!tasks.length && !error && <p>No tasks yet for this project.</p>}
-      {[false, true].map(done => {
-        const group = tasks.filter(task => task.is_done === done);
-        if (!group.length) return null;
-        return <Disclosure key={String(done)} defaultOpen={!done} layout bodyClassName="glass-task-group" summary={<>{done ? 'Completed' : 'To do'} <span>{group.length}</span></>}>
+      {groupTasks(tasks, links, sessions, sessionName).map(group => {
+        return <Disclosure key={group.key} defaultOpen={group.key !== 'done'} layout className={group.key === 'session' ? 'glass-task-session-group' : undefined} bodyClassName="glass-task-group" summary={<>{group.title} <span>{group.tasks.length}</span></>}>
           <AnimatePresence initial={false} mode="popLayout">
-          {group.map(task => {
+          {group.tasks.map(task => {
             const session = sessionFor(task);
             const checked = settling[task.id] ?? task.is_done;
             const row = (content: ReactNode) => <motion.div className="glass-task-item" key={task.id} layout="position" transition={settleTransition} variants={rowVariants} {...presence}>{content}</motion.div>;

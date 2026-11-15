@@ -376,6 +376,8 @@ function makeApi(endpoint: Endpoint) {
       priority?: number;
       due_date?: string | null;
       execution_prompt?: string;
+      /** The tmux session selected when the todo is added. */
+      session_name?: string;
     } = {},
   ): Promise<Task> {
     return request<Task>('/api/tasks', {
@@ -387,6 +389,7 @@ function makeApi(endpoint: Endpoint) {
         priority: options.priority ?? 4,
         due_date: options.due_date ?? null,
         execution_prompt: options.execution_prompt ?? '',
+        ...(options.session_name ? { session_name: options.session_name } : {}),
       }),
     });
   }

@@ -23,7 +23,7 @@ def test_migration_adds_session_links_and_hidden_projects(tmp_path, monkeypatch)
     raw.commit()
     raw.close()
 
-    assert migrations.upgrade() == "92e8549e6f2b"
+    assert migrations.upgrade() == "0c122761af16"
 
     engine = create_engine(f"sqlite:///{path}", future=True)
     try:

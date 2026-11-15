@@ -1,0 +1,194 @@
+diff --git a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts
+index 44136ee..51adddf 100644
+--- a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts
++++ b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts
+@@ -5,6 +5,12 @@ export interface PathCandidate {
+     lookup: string;
+     start: number;
+     end: number;
++    /** A path its program wrapped onto later lines: each piece's span and text. */
++    parts?: {
++        start: number;
++        end: number;
++        raw: string;
++    }[];
+ }
+ export type SnapshotSegment = {
+     kind: 'text';
+diff --git a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts.map b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts.map
+index 744af42..279c15c 100644
+--- a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts.map
++++ b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.d.ts.map
+@@ -1 +1 @@
+-{"version":3,"file":"terminalFilePaths.d.ts","sourceRoot":"","sources":["../src/terminalFilePaths.ts"],"names":[],"mappings":"AAgBA,eAAO,MAAM,mBAAmB,OAAO,CAAC;AACxC,eAAO,MAAM,6BAA6B,MAAM,CAAC;AAGjD,MAAM,WAAW,aAAa;IAE5B,GAAG,EAAE,MAAM,CAAC;IAGZ,MAAM,EAAE,MAAM,CAAC;IACf,KAAK,EAAE,MAAM,CAAC;IACd,GAAG,EAAE,MAAM,CAAC;CACb;AAED,MAAM,MAAM,eAAe,GACvB;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,IAAI,EAAE,MAAM,CAAA;CAAE,GAC9B;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,IAAI,EAAE,MAAM,CAAC;IAAC,SAAS,EAAE,MAAM,CAAA;CAAE,CAAC;AAoFtD,wBAAgB,qBAAqB,CAAC,IAAI,EAAE,MAAM,GAAG,aAAa,EAAE,CAoDnE;AAED,wBAAgB,oBAAoB,CAAC,UAAU,EAAE,MAAM,EAAE,GAAG,MAAM,EAAE,EAAE,CAYrE;AAED,wBAAgB,qBAAqB,CACnC,IAAI,EAAE,MAAM,EACZ,UAAU,EAAE,aAAa,EAAE,EAC3B,UAAU,EAAE,CAAC,SAAS,EAAE,MAAM,KAAK,OAAO,GACzC,eAAe,EAAE,CA6BnB"}
+\ No newline at end of file
++{"version":3,"file":"terminalFilePaths.d.ts","sourceRoot":"","sources":["../src/terminalFilePaths.ts"],"names":[],"mappings":"AAgBA,eAAO,MAAM,mBAAmB,OAAO,CAAC;AACxC,eAAO,MAAM,6BAA6B,MAAM,CAAC;AAGjD,MAAM,WAAW,aAAa;IAE5B,GAAG,EAAE,MAAM,CAAC;IAGZ,MAAM,EAAE,MAAM,CAAC;IACf,KAAK,EAAE,MAAM,CAAC;IACd,GAAG,EAAE,MAAM,CAAC;CACb;AAED,MAAM,MAAM,eAAe,GACvB;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,IAAI,EAAE,MAAM,CAAA;CAAE,GAC9B;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,IAAI,EAAE,MAAM,CAAC;IAAC,SAAS,EAAE,MAAM,CAAA;CAAE,CAAC;AAoFtD,wBAAgB,qBAAqB,CAAC,IAAI,EAAE,MAAM,GAAG,aAAa,EAAE,CAkEnE;AAED,wBAAgB,oBAAoB,CAAC,UAAU,EAAE,MAAM,EAAE,GAAG,MAAM,EAAE,EAAE,CAYrE;AAED,wBAAgB,qBAAqB,CACnC,IAAI,EAAE,MAAM,EACZ,UAAU,EAAE,aAAa,EAAE,EAC3B,UAAU,EAAE,CAAC,SAAS,EAAE,MAAM,KAAK,OAAO,GACzC,eAAe,EAAE,CA+BnB"}
+\ No newline at end of file
+diff --git a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js
+index f20cead..0b22d59 100644
+--- a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js
++++ b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js
+@@ -90,6 +90,62 @@ function candidateFromToken(token, tokenStart) {
+         return null;
+     return { raw, lookup, start, end: start + raw.length };
+ }
++/* Programs that wrap their own output (Claude Code, Codex) break a long path
++   with a real newline, often indenting the rest; tmux's -J cannot rejoin
++   that. A token that runs to the end of its line, joined to the token that
++   starts the next line (and on, while each of those fills its line), is one
++   more candidate. It keeps every piece's place, so the newline and the
++   indent stay text and each piece becomes a link to the same file. */
++const MAX_WRAPPED_LINES = 8;
++function joinedCandidate(pieces) {
++    const joined = pieces.map((piece) => piece.text).join('');
++    const candidate = candidateFromToken(joined, 0);
++    if (!candidate)
++        return null;
++    const parts = [];
++    let offset = 0;
++    for (const piece of pieces) {
++        const from = Math.max(candidate.start, offset);
++        const to = Math.min(candidate.end, offset + piece.text.length);
++        if (to > from) {
++            parts.push({ start: piece.start + from - offset, end: piece.start + to - offset, raw: joined.slice(from, to) });
++        }
++        offset += piece.text.length;
++    }
++    if (parts.length < 2)
++        return null;
++    return { raw: candidate.raw, lookup: candidate.lookup, start: parts[0].start, end: parts[parts.length - 1].end, parts };
++}
++function wrappedPathCandidates(text) {
++    const lines = [];
++    let at = 0;
++    for (const line of text.split('\n')) {
++        const body = line.trimEnd();
++        const tokens = [...body.matchAll(TOKEN_PATTERN)].map((match) => ({ start: at + (match.index ?? 0), text: match[0] }));
++        lines.push({ start: at, end: at + body.length, lead: at + body.length - body.trimStart().length, tokens });
++        at += line.length + 1;
++    }
++    const found = [];
++    for (let row = 0; row + 1 < lines.length; row += 1) {
++        const last = lines[row].tokens[lines[row].tokens.length - 1];
++        if (!last || last.start + last.text.length !== lines[row].end)
++            continue;
++        const pieces = [last];
++        for (let next = row + 1; next < lines.length && pieces.length < MAX_WRAPPED_LINES; next += 1) {
++            const first = lines[next].tokens[0];
++            if (!first || first.start !== lines[next].lead)
++                break;
++            pieces.push(first);
++            const candidate = joinedCandidate(pieces);
++            if (candidate)
++                found.push(candidate);
++            // The path goes on only while a whole line is one piece of it.
++            if (lines[next].tokens.length !== 1 || first.start + first.text.length !== lines[next].end)
++                break;
++        }
++    }
++    return found;
++}
+ export function extractPathCandidates(text) {
+     const found = [];
+     /* Quoting is how shells and Markdown preserve paths containing spaces. Scan
+@@ -108,6 +164,16 @@ export function extractPathCandidates(text) {
+             const closeAt = text.indexOf(close, openAt + open.length);
+             if (closeAt < 0)
+                 break;
++            /* A wrapper closes on the line it opened, or it is not a wrapper.
++               Paired across a newline, one stray quote swallows every path up to
++               the next one — tmux's status bar prints one on every screen. No
++               closer before the newline means none for any later opener on this
++               line either, so resume on the next line. */
++            const lineEnd = text.indexOf('\n', openAt);
++            if (lineEnd >= 0 && closeAt > lineEnd) {
++                cursor = lineEnd + 1;
++                continue;
++            }
+             const innerStart = openAt + open.length;
+             const candidate = candidateFromToken(text.slice(innerStart, closeAt), innerStart);
+             if (candidate) {
+@@ -127,19 +193,24 @@ export function extractPathCandidates(text) {
+         if (candidate)
+             found.push(candidate);
+     }
+-    /* A generic token inside a quoted path overlaps the wrapper candidate. Keep
+-       the widest candidate at a given position and discard only overlaps, while
+-       retaining repeated paths at distinct positions. */
++    if (text.includes('\n'))
++        found.push(...wrappedPathCandidates(text));
++    /* A generic token inside a quote overlaps the wrapper candidate, and only
++       the resolver knows which of them is a real file: `"fix src/api.ts now"`
++       is not one, the `src/api.ts` inside it is. Keep both, widest first at each
++       position, and let buildSnapshotSegments choose once resolution is in.
++       Only an exact duplicate span — a quote around a single token — is
++       dropped. */
+     found.sort((left, right) => left.start - right.start || right.end - left.end);
+     const candidates = [];
+-    let occupiedUntil = -1;
+     for (const candidate of found) {
+         if (candidates.length >= MAX_PATH_CANDIDATES)
+             break;
+-        if (candidate.start < occupiedUntil)
++        const previous = candidates[candidates.length - 1];
++        if (previous?.start === candidate.start && previous.end === candidate.end) {
+             continue;
++        }
+         candidates.push(candidate);
+-        occupiedUntil = candidate.end;
+     }
+     return candidates;
+ }
+@@ -154,26 +225,33 @@ export function buildSnapshotSegments(text, candidates, isLinkable) {
+     const segments = [];
+     let cursor = 0;
+     for (const candidate of candidates) {
++        // Candidates may overlap and arrive widest-first at each position, so the
++        // first linkable one wins and whatever it covers is skipped.
+         if (candidate.start < cursor)
+             continue;
+         if (!isLinkable(candidate.lookup))
+             continue;
++        // A path wrapped onto later lines comes in pieces; what lies between
++        // them (the newline, an indent) stays text.
++        const parts = candidate.parts ?? [{ start: candidate.start, end: candidate.end, raw: candidate.raw }];
+         // Offsets can only be stale if the snapshot changed under us. Re-checking
+         // is what keeps the round-trip property true rather than merely intended.
+-        if (text.slice(candidate.start, candidate.end) !== candidate.raw)
++        if (parts.some((part) => text.slice(part.start, part.end) !== part.raw))
+             continue;
+-        if (candidate.start > cursor) {
++        for (const part of parts) {
++            if (part.start > cursor) {
++                segments.push({
++                    kind: 'text',
++                    text: text.slice(cursor, part.start),
++                });
++            }
+             segments.push({
+-                kind: 'text',
+-                text: text.slice(cursor, candidate.start),
++                kind: 'path',
++                text: part.raw,
++                candidate: candidate.lookup,
+             });
++            cursor = part.end;
+         }
+-        segments.push({
+-            kind: 'path',
+-            text: candidate.raw,
+-            candidate: candidate.lookup,
+-        });
+-        cursor = candidate.end;
+     }
+     if (cursor < text.length || segments.length === 0) {
+         segments.push({ kind: 'text', text: text.slice(cursor) });
+diff --git a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js.map b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js.map
+index 23951c6..29487ea 100644
+--- a/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js.map
++++ b/node_modules/@dolphin-terminal/core/dist/terminalFilePaths.js.map
+@@ -1 +1 @@
+-{"version":3,"file":"terminalFilePaths.js","sourceRoot":"","sources":["../src/terminalFilePaths.ts"],"names":[],"mappings":"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"}
+\ No newline at end of file
++{"version":3,"file":"terminalFilePaths.js","sourceRoot":"","sources":["../src/terminalFilePaths.ts"],"names":[],"mappings":"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"}
+\ No newline at end of file
