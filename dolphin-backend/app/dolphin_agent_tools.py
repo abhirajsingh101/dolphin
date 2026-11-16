@@ -67,6 +67,15 @@ class TaskArgs(ProjectArgs):
     title: Annotated[str, Field(min_length=1, max_length=200)]
     description: Text
 
+class Suggestion(Args):
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    why: Annotated[str, Field(min_length=1, max_length=200)]
+
+class SuggestArgs(ProjectArgs):
+    suggestions: Annotated[list[Suggestion], Field(max_length=5)] = Field(default_factory=list)
+    next_task_id: Id | None = None
+    next_reason: Annotated[str, Field(min_length=1, max_length=160)] | None = None
+
 TOOL_MODELS = {
     'start_project_work': ProjectWorkArgs,
     'run_native_task': NativeArgs,
@@ -74,7 +83,10 @@ TOOL_MODELS = {
     'list_sessions': ProjectArgs, 'read_session': SessionArgs,
     'create_session': CreateArgs, 'send_work': SendArgs,
     'create_task': TaskArgs,
+    'suggest_tasks': SuggestArgs,
 }
+# Only a project companion's conversation offers these.
+COMPANION_TOOLS = {'suggest_tasks'}
 DESCRIPTIONS = {
     'start_project_work': 'Preferred for user-requested project implementation, fixes, investigations and deliverables. Create a FRESH persistent tmux session, launch Claude Code (Codex if Claude is not installed), and give it the self-contained task prompt. Returns a dashboard session link and submission status, not completion. Supply exact project_id and relevant context. Do not retry an unknown start; inspect the returned session instead.',
     'run_native_task': 'Execute authorized work in a NEW persistent tmux agent session, with native shell, files, web, skills and configured integrations. project_id is REQUIRED: resolve the relevant project from inventory; use the {general_project} project for general work. This is an alias for start_project_work, never a hidden background worker. Returns a session to open, not completed work. For an existing session use read_session/send_work.',
@@ -85,6 +97,10 @@ DESCRIPTIONS = {
     'create_session': 'Create a new Codex or Claude session in a known project, only for work the user requests. Returns exact session name.',
     'send_work': 'Submit a task to an observed Codex/Claude session. Requires reading that session in this turn first. Never claim submission is completion. Do not interrupt unrelated ongoing work.',
     'create_task': 'Create a task in the exact selected project. Only for user-requested work; does not start it.',
+    'suggest_tasks': ('Show the user up to 5 suggested tasks as rows they can add or dismiss, and optionally mark one '
+                      'existing open task as Next up with a one-line reason. Saves nothing. Each call replaces the '
+                      'previous suggestions, so include every suggestion you still stand behind. Use this instead '
+                      'of create_task unless the user asked you to add a task.'),
 }
 # Words that carry no meaning in a session name.
 _FILLER = set('''a about after again all also an and any are as at be been before being but by can could
@@ -122,8 +138,10 @@ def _looks_like_id(name: str) -> bool:
 
 MUTATIONS = {'start_project_work', 'run_native_task', 'create_session', 'send_work', 'create_task'}
 
-def tool_definitions():
+def tool_definitions(companion: bool = False):
     hidden = set() if memory_available() else set(MEMORY_MODELS)
+    if not companion:
+        hidden |= COMPANION_TOOLS
     return [{'type': 'function', 'function': {'name': name, 'description': DESCRIPTIONS[name],
             'parameters': model.model_json_schema()}} for name, model in TOOL_MODELS.items() if name not in hidden]
 
@@ -326,6 +344,16 @@ class DolphinTools:
             return result
         if name == 'create_task':
             return await self.api_call('POST', '/api/tasks', json=args.model_dump())
+        if name == 'suggest_tasks':
+            tasks = await self.api_call('GET', '/api/tasks', params={'project_id': project})
+            open_ids = {t.get('id') for t in tasks if not t.get('is_done')}
+            if args.next_task_id and args.next_task_id not in open_ids:
+                raise ToolError('next_task_id must be an open task of this project.')
+            existing = {str(t.get('title', '')).strip().lower() for t in tasks}
+            return {'project_id': project, 'shown': True,
+                    'suggestions': [s.model_dump() for s in args.suggestions if s.title.strip().lower() not in existing],
+                    'next': {'task_id': args.next_task_id, 'reason': args.next_reason or ''} if args.next_task_id else None,
+                    'note': 'Shown to the user as suggestions; nothing was saved.'}
         if EXTENSION and name in EXTENSION.TOOLS:
             return await EXTENSION.execute(name, args, self.turn_id)
         if name in MEMORY_MODELS:

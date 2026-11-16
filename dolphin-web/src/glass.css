@@ -1429,3 +1429,51 @@
 .glass-task-group { position: relative; }
 .glass-task-item { position: relative; }
 .glass-task-row[data-settling='true'] .glass-task-content > span > span:first-child { text-decoration: line-through; color: var(--glass-muted); }
+
+/* Project companion (companion/). The character stands in its project's
+   window and heads its Tasks tab; its chat sits at the foot of the tab. Colour
+   is the project's identity slot on the body and glass tokens on the face.
+   Only status moves: a slow bob while working, a pulse on alert. */
+.glass-workspace .dt-companion:not(:focus-visible) { background: transparent; box-shadow: none; }
+.dt-companion { position: absolute; left: 0; top: 0; z-index: 4; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; border-radius: var(--r-full); transition: transform 200ms var(--glass-ease), opacity 160ms; }
+.dt-companion[data-held] { cursor: grabbing; transition: opacity 160ms; }
+.dt-companion:focus:not(:focus-visible) { outline: none; }
+/* Typing in the terminal: the character steps back until you look at it. */
+.glass-session-window:has(.xterm-helper-textarea:focus) .dt-companion:not(:hover, :focus-visible, [data-held]) { opacity: .35; }
+.dt-companion-face { display: block; overflow: visible; }
+.dt-companion-fill { fill: var(--companion-body); stroke: var(--glass-term-text); stroke-width: 1.4; stroke-opacity: .55; paint-order: stroke; }
+.dt-companion-line { fill: none; stroke: var(--companion-body); }
+.dt-companion-plate { fill: var(--glass-solid); }
+.dt-companion-eyes { fill: var(--glass-text); stroke: var(--glass-text); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 120ms; }
+.dt-companion-eyes path { fill: none; }
+.dt-companion-shadow { fill: var(--glass-text); opacity: .12; }
+.dt-companion-alert { fill: var(--glass-alert); stroke: var(--glass-solid); stroke-width: 1.5; }
+.dt-companion-body { transform-box: view-box; transform-origin: 24px 42px; transition: transform 160ms var(--glass-ease), opacity 160ms; }
+.dt-companion-face[data-mood='working'] .dt-companion-body { animation: dt-companion-bob 1.8s ease-in-out infinite; }
+.dt-companion-face[data-mood='alert'] .dt-companion-alert { animation: dt-companion-pulse 1.4s ease-in-out infinite; }
+.dt-companion-face[data-mood='sleep'] .dt-companion-body { opacity: .7; }
+.dt-companion-face[data-held] .dt-companion-body { transform: translateY(-3px) rotate(-6deg); }
+.dt-companion:hover .dt-companion-face:not([data-held]) .dt-companion-body { transform: translateY(-1px); }
+@keyframes dt-companion-bob { 50% { transform: translateY(-1.5px); } }
+@keyframes dt-companion-pulse { 50% { opacity: .45; } }
+.dt-companion-nudge { position: absolute; left: 0; top: 0; z-index: 4; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 10px; border: 1px solid var(--glass-edge); border-radius: var(--r-lg); background: var(--glass-float-fill-solid); box-shadow: var(--glass-float-shadow-sm); color: var(--glass-text); font-size: var(--fs-xs); cursor: pointer; animation: dt-companion-nudge-in 200ms var(--glass-ease); }
+@keyframes dt-companion-nudge-in { from { opacity: 0; } to { opacity: 1; } }
+
+.glass-project-tasks header .dt-companion-face { flex: none; margin-right: 6px; }
+.glass-task-row.glass-task-suggested { margin: 4px 0; border: 1px dashed var(--glass-accent); cursor: default; }
+.glass-task-suggested .glass-task-content { cursor: default; }
+.glass-task-row small.glass-task-next { color: var(--glass-accent-ink); font-weight: 600; }
+
+/* The list takes the room between the header and the chat, so the chat sits at the foot. */
+.glass-project-tasks .glass-task-list { flex: 1; }
+.dt-companion-chat { flex: none; display: flex; flex-direction: column; gap: 8px; min-height: 0; max-height: 45%; padding-top: 10px; border-top: 1px solid var(--glass-edge); }
+.dt-companion-messages { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; font-size: var(--fs-xs); line-height: 1.45; scrollbar-width: thin; scrollbar-color: var(--glass-scrollbar) transparent; }
+.dt-companion-message { max-width: 100%; overflow-wrap: anywhere; color: var(--glass-text); }
+.dt-companion-message.user { align-self: flex-end; max-width: 88%; padding: 6px 10px; border-radius: var(--r-lg); background: var(--glass-selection); }
+.dt-companion-message.assistant :is(p, ul, ol) { margin: 0 0 6px; }
+.dt-companion-message.assistant :is(p, ul, ol):last-child { margin-bottom: 0; }
+.dt-companion-typing { display: inline-flex; gap: 3px; padding: 4px 0; }
+.dt-companion-typing i { width: 5px; height: 5px; border-radius: var(--r-full); background: var(--glass-muted); animation: dt-companion-pulse 1.2s ease-in-out infinite; }
+.dt-companion-typing i:nth-child(2) { animation-delay: .2s; }
+.dt-companion-typing i:nth-child(3) { animation-delay: .4s; }
+.dt-companion-chat .dt-companion-error { margin: 0; }

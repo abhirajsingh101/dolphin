@@ -255,6 +255,7 @@ async def test_independent_chat_threads_can_reason_concurrently(monkeypatch):
         return SimpleNamespace(
             begin_turn=AsyncMock(return_value=SimpleNamespace(response_bytes=None, should_generate=True, turn_request_id=thread, user_message_id=thread)),
             list_recent_messages=AsyncMock(return_value=[]), complete_turn=AsyncMock(),
+            get_thread=AsyncMock(return_value=SimpleNamespace(project_fingerprint=None)),
         )
     first, second = await asyncio.gather(
         dolphin_agent.run_agent(repository('first'), 'first', 'First tab', 'key-first', None),

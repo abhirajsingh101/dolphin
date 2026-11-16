@@ -108,6 +108,8 @@ import { arrivalVariants, presence, settleTransition, swapVariants, windowVarian
 import { useStable } from './workspace/useStable';
 import { trackPanelOpeners } from './useModalPanel';
 import { MotionDialogs } from './motion/MotionDialog';
+import WindowCompanion from './companion/WindowCompanion';
+import { sessionMoods } from './companion/companionModel';
 
 trackPanelOpeners();
 type DashboardContext = { open_windows: { project_id: string; session_name: string; minimized: boolean; tab_hidden?: boolean }[]; pinned_sessions: { project_id: string; session_name: string }[]; focused_session: { project_id: string; session_name: string } | null };
@@ -924,6 +926,17 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const reviewStable = useStable((target: Target) => setReviewing(target));
   const terminatedStable = useStable(terminated);
   const focusTargetStable = useStable(focusTarget);
+  // A project's character opens its Tasks tab, with the chat ready to type in.
+  const [companionFocus, setCompanionFocus] = useState(0);
+  const projectSessions = (target: Target) => projects.find((project) => project.id === target.projectId && project.machine === (machineOfTarget(target) ?? 'local'))?.sessions ?? [];
+  const openCompanion = (target: Target) => {
+    focusTarget(target);
+    setSidebarTab('tasks');
+    if (narrow) setSidebarOpen(true);
+    else if (fullscreenOn) setFullscreenShows((shows) => ({ ...shows, sidebar: true }));
+    else setSidebarCollapsed(false);
+    setCompanionFocus((n) => n + 1);
+  };
   const refreshAllStable = useStable(refreshAll);
   // The server decides whether a worktree may be archived and says why not in
   // plain words; a refusal leaves the session and its folder exactly as they were.
@@ -1461,7 +1474,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             projectName={active.projectName}
             sessionName={active.sessionName}
             machine={machineOfTarget(active) ?? 'local'}
-            sessions={projects.find((project) => project.id === active.projectId && project.machine === (machineOfTarget(active) ?? 'local'))?.sessions ?? []}
+            sessions={projectSessions(active)}
+            focusChat={companionFocus}
             onOpenSession={(name) => {
               const target = { projectId: active.projectId, projectName: active.projectName, sessionName: name, machine: machineOfTarget(active) };
               void refresh().then(() => open(target));
@@ -1678,6 +1692,12 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
                 />
                 </ApiContext.Provider>
               </div>)}
+              {!group.collapsed && <WindowCompanion
+                projectId={group.projectId}
+                projectName={group.selected.projectName || group.projectId}
+                sessions={sessionMoods(projectSessions(group.selected), machineOfTarget(group.selected) ?? 'local', group.projectId)}
+                onOpen={() => openCompanion(group.selected)}
+              />}
               {resizable && <WindowHeightResizer
                 label={group.selected.projectName || group.projectId}
                 remembered={height ?? null}

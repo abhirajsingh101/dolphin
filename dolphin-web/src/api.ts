@@ -43,6 +43,7 @@ import type {
   HistoryItem,
   SkillSuggestions,
 } from './types';
+import type { Message } from './workspace/chatTypes';
 
 const browserLocation =
   typeof window === 'undefined'
@@ -277,6 +278,23 @@ function makeApi(endpoint: Endpoint) {
 
   function deleteProject(projectId: string): Promise<void> {
     return request<void>(`/api/projects/${projectId}`, { method: 'DELETE' });
+  }
+
+  /** The project companion's one conversation, made on first use. */
+  function openCompanion(projectId: string): Promise<CompanionThread> {
+    return request<CompanionThread>(`/api/projects/${encodeURIComponent(projectId)}/companion`, { method: 'POST' });
+  }
+
+  function sendCompanionTurn(threadId: string, text: string, idempotencyKey: string): Promise<{ status: string; display_text: string }> {
+    return request(`/api/dolphin/threads/${encodeURIComponent(threadId)}/turns`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  function fetchCompanionProgress(threadId: string): Promise<{ turn_id?: string; text?: string }> {
+    return request(`/api/dolphin/threads/${encodeURIComponent(threadId)}/progress`);
   }
 
   function fetchTasks(projectId: string): Promise<Task[]> {
@@ -848,6 +866,9 @@ function makeApi(endpoint: Endpoint) {
     updateProject,
     deleteProject,
     fetchTasks,
+    openCompanion,
+    sendCompanionTurn,
+    fetchCompanionProgress,
     fetchTask,
     fetchTaskQuality,
     fetchQualitySummary,
@@ -895,6 +916,7 @@ function makeApi(endpoint: Endpoint) {
   };
 }
 
+export type CompanionThread = { id: string; title: string; messages: Message[]; pending_idempotency_keys: string[] };
 export type Api = ReturnType<typeof makeApi>;
 
 /** This window's own backend: the web app's, or this computer's helper. */

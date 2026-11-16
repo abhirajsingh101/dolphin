@@ -35,6 +35,20 @@ MAX_RECENT_MESSAGES = 8
 MAX_RECENT_CHARACTERS = 12_000
 
 
+COMPANION_PREFIX = "companion:"
+
+
+def companion_fingerprint(project_id: str) -> str:
+    return COMPANION_PREFIX + project_id
+
+
+def companion_project(fingerprint: str | None) -> str | None:
+    """The project a companion thread belongs to, or None for an ordinary chat."""
+    if fingerprint and fingerprint.startswith(COMPANION_PREFIX):
+        return fingerprint[len(COMPANION_PREFIX):] or None
+    return None
+
+
 class ChiefConversationNotFound(RuntimeError):
     """Sanitized ownership/not-found result safe to translate to HTTP 404."""
 
@@ -222,6 +236,30 @@ class ChiefConversationRepository:
             raise ChiefConversationNotFound()
         return self._thread_record(row[0], row[1], row[2])
 
+    async def project_thread(self, project_id: str, *, title: str) -> ChiefThreadRecord:
+        """The one conversation a project's companion keeps, made on first use."""
+        fingerprint = companion_fingerprint(project_id)
+        found = (await self._db.execute(
+            select(ChiefThread.id).where(ChiefThread.project_fingerprint == fingerprint)
+        )).scalar_one_or_none()
+        if found:
+            return await self.get_thread(found)
+        _validate_title(title)
+        timestamp = _now(None)
+        thread = ChiefThread(id=generate_id(), title=title, project_fingerprint=fingerprint,
+                             created_at=timestamp, updated_at=timestamp, version=1)
+        self._db.add(thread)
+        try:
+            await self._db.commit()
+        except IntegrityError:
+            # Another request made it first; the unique index kept one.
+            await self._db.rollback()
+            found = (await self._db.execute(
+                select(ChiefThread.id).where(ChiefThread.project_fingerprint == fingerprint)
+            )).scalar_one()
+            return await self.get_thread(found)
+        return await self.get_thread(thread.id)
+
     async def list_threads(self, *, limit: int = 100) -> list[ChiefThreadRecord]:
         if not isinstance(limit, int) or isinstance(limit, bool) or not (
             1 <= limit <= 100
@@ -237,6 +275,9 @@ class ChiefConversationRepository:
                 ChiefProjectSnapshot,
                 ChiefProjectSnapshot.thread_id == ChiefThread.id,
             )
+            # A project companion's conversation lives in that project's Tasks tab.
+            .where(ChiefThread.project_fingerprint.is_(None)
+                   | ~ChiefThread.project_fingerprint.startswith(COMPANION_PREFIX))
             .order_by(
                 ChiefThread.updated_at.desc(),
                 ChiefThread.created_at.desc(),

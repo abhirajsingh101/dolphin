@@ -999,6 +999,34 @@ async def list_chief_threads(
         _raise_chief_error(error)
 
 
+@app.post(
+    "/api/projects/{project_id}/companion",
+    response_model=ChiefThreadDetailResponse,
+)
+async def open_project_companion(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ChiefThreadDetailResponse:
+    """The project companion's one conversation, made on first use. Turns go
+    through /api/dolphin/threads/{id}/turns like any chat; the agent sees the
+    thread is a companion's and works only on this project."""
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    repository = ChiefConversationRepository(db)
+    try:
+        record = await repository.project_thread(project_id, title=(project.name or "Project")[:80])
+        messages = await repository.list_messages(record.id)
+        pending_keys = await repository.list_pending_idempotency_keys(record.id)
+        return ChiefThreadDetailResponse(
+            **thread_response(record).model_dump(),
+            messages=[message_response(message) for message in messages],
+            pending_idempotency_keys=pending_keys,
+        )
+    except Exception as error:
+        _raise_chief_error(error)
+
+
 @app.get(
     "/api/chief/threads/{thread_id}",
     response_model=ChiefThreadDetailResponse,
