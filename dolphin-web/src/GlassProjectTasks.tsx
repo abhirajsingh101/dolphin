@@ -11,7 +11,7 @@ import { getSetting } from './settings';
 import { groupTasks, launchedSession } from './taskSession';
 import type { ControlCenterSession, SessionLink, Task } from './types';
 import CompanionChat from './companion/CompanionChat';
-import CompanionFace from './companion/CompanionFace';
+import CompanionPicker from './companion/CompanionPicker';
 import { dismissTitle, dismissedTitles, latestPlan, moodOf, sameTitle, sessionMoods, type Plan } from './companion/companionModel';
 
 /* The selected terminal's project's todos. Each open todo can start its own
@@ -22,7 +22,7 @@ import { dismissTitle, dismissedTitles, latestPlan, moodOf, sameTitle, sessionMo
    it suggests shows as dashed rows to add or dismiss, and the open todo it
    would do next carries a Next up line. Nothing is saved without a click. */
 
-export default function GlassProjectTasks({ projectId, projectName, sessionName, machine, sessions, onOpenSession, focusChat = 0 }: {
+export default function GlassProjectTasks({ projectId, projectName, sessionName, machine, sessions, onOpenSession, focusChat = 0, companion, companionChosen = false, onCompanionChanged }: {
   projectId: string;
   projectName: string;
   sessionName: string;
@@ -31,6 +31,10 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName,
   onOpenSession: (sessionName: string) => void;
   /** Changes when the project's character is clicked; the chat takes focus. */
   focusChat?: number;
+  /** The project's character, and whether the user chose it. */
+  companion?: string | null;
+  companionChosen?: boolean;
+  onCompanionChanged?: () => void;
 }) {
   const { createTask, deleteTask, fetchSessionLinks, fetchTasks, launchSession, updateTask } = useApi();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -157,9 +161,10 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName,
   const suggestions = (plan?.suggestions ?? []).filter((s) => !dismissed.some((t) => sameTitle(t, s.title)) && !tasks.some((t) => sameTitle(t.title, s.title)));
   const next = plan?.next && tasks.some((t) => t.id === plan.next?.task_id && !t.is_done) ? plan.next : null;
   const { mood, label } = moodOf(sessionMoods(sessions, machine, projectId), Date.now());
+  const [thinking, setThinking] = useState(false);
   function dismiss(title: string) { dismissTitle(projectId, title); setDismissed(dismissedTitles(projectId)); }
   return <section className="glass-project-tasks" aria-label={`Tasks for ${projectName}`}>
-    <header><CompanionFace seed={projectId} mood={mood} size={30} follow={false} /><div><strong>{projectName}</strong><small title={sessionLabel(sessionName)}>{label}</small></div>
+    <header><CompanionPicker projectId={projectId} projectName={projectName} kind={companion} chosen={companionChosen} mood={thinking ? 'thinking' : mood} onChanged={() => onCompanionChanged?.()} /><div><strong>{projectName}</strong><small title={sessionLabel(sessionName)}>{label}</small></div>
       <button aria-label="Refresh tasks" onClick={() => setRevision(r => r + 1)}><RefreshCw size={14} /></button>
     </header>
     <form onSubmit={e => { e.preventDefault(); if (draft.trim() && !busy) void change(() => createTask(projectId, draft.trim(), '', { session_name: sessionName }), true); }}>
@@ -235,6 +240,6 @@ export default function GlassProjectTasks({ projectId, projectName, sessionName,
         </Disclosure>;
       })}
     </motion.div>}
-    <CompanionChat projectId={projectId} projectName={projectName} focusSignal={focusChat} onMessages={(messages) => { setPlan(latestPlan(messages)); setRevision(r => r + 1); }} />
+    <CompanionChat projectId={projectId} projectName={projectName} focusSignal={focusChat} onBusy={setThinking} onMessages={(messages) => { setPlan(latestPlan(messages)); setRevision(r => r + 1); }} />
   </section>;
 }

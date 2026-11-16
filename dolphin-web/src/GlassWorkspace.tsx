@@ -928,7 +928,8 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
   const focusTargetStable = useStable(focusTarget);
   // A project's character opens its Tasks tab, with the chat ready to type in.
   const [companionFocus, setCompanionFocus] = useState(0);
-  const projectSessions = (target: Target) => projects.find((project) => project.id === target.projectId && project.machine === (machineOfTarget(target) ?? 'local'))?.sessions ?? [];
+  const projectOf = (target: Target) => projects.find((project) => project.id === target.projectId && project.machine === (machineOfTarget(target) ?? 'local'));
+  const projectSessions = (target: Target) => projectOf(target)?.sessions ?? [];
   const openCompanion = (target: Target) => {
     focusTarget(target);
     setSidebarTab('tasks');
@@ -1476,6 +1477,9 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
             machine={machineOfTarget(active) ?? 'local'}
             sessions={projectSessions(active)}
             focusChat={companionFocus}
+            companion={projectOf(active)?.companion}
+            companionChosen={projectOf(active)?.companion_chosen ?? false}
+            onCompanionChanged={() => void refresh()}
             onOpenSession={(name) => {
               const target = { projectId: active.projectId, projectName: active.projectName, sessionName: name, machine: machineOfTarget(active) };
               void refresh().then(() => open(target));
@@ -1695,6 +1699,7 @@ export default function GlassWorkspace({ desktop = false, renderSignals }: {
               {!group.collapsed && <WindowCompanion
                 projectId={group.projectId}
                 projectName={group.selected.projectName || group.projectId}
+                kind={projectOf(group.selected)?.companion}
                 sessions={sessionMoods(projectSessions(group.selected), machineOfTarget(group.selected) ?? 'local', group.projectId)}
                 onOpen={() => openCompanion(group.selected)}
               />}

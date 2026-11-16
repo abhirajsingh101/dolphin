@@ -1431,35 +1431,32 @@
 .glass-task-row[data-settling='true'] .glass-task-content > span > span:first-child { text-decoration: line-through; color: var(--glass-muted); }
 
 /* Project companion (companion/). The character stands in its project's
-   window and heads its Tasks tab; its chat sits at the foot of the tab. Colour
-   is the project's identity slot on the body and glass tokens on the face.
-   Only status moves: a slow bob while working, a pulse on alert. */
+   window and heads its Tasks tab; its chat sits at the foot of the tab. The
+   rig (companion/rig.ts) draws and moves it; its art palette lives in
+   companion/cast.ts, the same in both themes. */
 .glass-workspace .dt-companion:not(:focus-visible) { background: transparent; box-shadow: none; }
 .dt-companion { position: absolute; left: 0; top: 0; z-index: 4; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; border-radius: var(--r-full); transition: transform 200ms var(--glass-ease), opacity 160ms; }
 .dt-companion[data-held] { cursor: grabbing; transition: opacity 160ms; }
 .dt-companion:focus:not(:focus-visible) { outline: none; }
 /* Typing in the terminal: the character steps back until you look at it. */
 .glass-session-window:has(.xterm-helper-textarea:focus) .dt-companion:not(:hover, :focus-visible, [data-held]) { opacity: .35; }
-.dt-companion-face { display: block; overflow: visible; }
-.dt-companion-fill { fill: var(--companion-body); stroke: var(--glass-term-text); stroke-width: 1.4; stroke-opacity: .55; paint-order: stroke; }
-.dt-companion-line { fill: none; stroke: var(--companion-body); }
-.dt-companion-plate { fill: var(--glass-solid); }
-.dt-companion-eyes { fill: var(--glass-text); stroke: var(--glass-text); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 120ms; }
-.dt-companion-eyes path { fill: none; }
-.dt-companion-shadow { fill: var(--glass-text); opacity: .12; }
-.dt-companion-alert { fill: var(--glass-alert); stroke: var(--glass-solid); stroke-width: 1.5; }
-.dt-companion-body { transform-box: view-box; transform-origin: 24px 42px; transition: transform 160ms var(--glass-ease), opacity 160ms; }
-.dt-companion-face[data-mood='working'] .dt-companion-body { animation: dt-companion-bob 1.8s ease-in-out infinite; }
-.dt-companion-face[data-mood='alert'] .dt-companion-alert { animation: dt-companion-pulse 1.4s ease-in-out infinite; }
-.dt-companion-face[data-mood='sleep'] .dt-companion-body { opacity: .7; }
-.dt-companion-face[data-held] .dt-companion-body { transform: translateY(-3px) rotate(-6deg); }
-.dt-companion:hover .dt-companion-face:not([data-held]) .dt-companion-body { transform: translateY(-1px); }
-@keyframes dt-companion-bob { 50% { transform: translateY(-1.5px); } }
-@keyframes dt-companion-pulse { 50% { opacity: .45; } }
+.dt-companion-character { flex: none; pointer-events: none; }
+.dt-companion-svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .dt-companion-nudge { position: absolute; left: 0; top: 0; z-index: 4; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 10px; border: 1px solid var(--glass-edge); border-radius: var(--r-lg); background: var(--glass-float-fill-solid); box-shadow: var(--glass-float-shadow-sm); color: var(--glass-text); font-size: var(--fs-xs); cursor: pointer; animation: dt-companion-nudge-in 200ms var(--glass-ease); }
 @keyframes dt-companion-nudge-in { from { opacity: 0; } to { opacity: 1; } }
 
-.glass-project-tasks header .dt-companion-face { flex: none; margin-right: 6px; }
+.glass-project-tasks header > .dt-companion-picker { position: relative; flex: none; min-width: 0; margin-right: 6px; }
+.glass-workspace .dt-companion-pick { display: block; padding: 0; border: 0; background: transparent; border-radius: var(--r-md); cursor: pointer; }
+.dt-companion-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: var(--z-popover); width: 180px; max-width: calc(100vw - 32px); padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; border: 1px solid var(--glass-edge); border-radius: var(--r-lg); background: var(--glass-float-fill-solid); box-shadow: var(--glass-float-shadow); animation: dt-companion-nudge-in 160ms var(--glass-ease); }
+.dt-companion-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; }
+.glass-workspace .dt-companion-option { display: grid; justify-items: center; gap: 1px; min-width: 0; padding: 5px 0 4px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--glass-text); font-size: var(--fs-2xs); cursor: pointer; }
+.glass-workspace .dt-companion-option:hover { background: var(--glass-bubble); }
+.glass-workspace .dt-companion-option[aria-checked='true'] { background: var(--glass-selection); font-weight: 600; }
+.glass-workspace .dt-companion-auto { display: flex; align-items: flex-start; gap: 6px; padding: 7px 8px; border: 0; border-top: 1px solid var(--glass-edge); border-radius: 0; background: transparent; color: var(--glass-text); text-align: left; cursor: pointer; }
+.dt-companion-auto > span:first-child { width: 13px; flex: none; color: var(--glass-accent-ink); padding-top: 2px; }
+.dt-companion-auto b { display: block; font-size: var(--fs-xs); font-weight: 600; }
+.glass-project-tasks .dt-companion-auto small { display: block; margin: 1px 0 0; overflow: visible; white-space: normal; color: var(--glass-muted-small); font-size: var(--fs-2xs); }
+.dt-companion-menu [role='alert'] { margin: 0; }
 .glass-task-row.glass-task-suggested { margin: 4px 0; border: 1px dashed var(--glass-accent); cursor: default; }
 .glass-task-suggested .glass-task-content { cursor: default; }
 .glass-task-row small.glass-task-next { color: var(--glass-accent-ink); font-weight: 600; }

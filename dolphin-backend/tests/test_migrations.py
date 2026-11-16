@@ -35,7 +35,7 @@ DIRECTION_REVISION = "e2c8b4195a7d"
 PRE_PLANNING_REVISION = "f6b4c8d21e30"
 # The last revision that still had Learn/Active automation and learned planning.
 PRE_REMOVAL_REVISION = "9324cf29e61e"
-HEAD_REVISION = "0c122761af16"
+HEAD_REVISION = "8242627a251e"
 FLEET_TABLES = {
     "fleet_missions",
     "fleet_tasks",
@@ -636,6 +636,7 @@ def _domain_rows(path):
             if table == "projects":
                 for row in rows:
                     row.pop("is_hidden", None)  # added by c41d7e9a2b58
+                    row.pop("companion", None)  # added by 8242627a251e
             snapshot[table] = rows
         return snapshot
     finally:

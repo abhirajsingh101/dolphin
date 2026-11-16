@@ -268,6 +268,8 @@ function makeApi(endpoint: Endpoint) {
     data: {
       name?: string;
       path?: string;
+      /** A character from the cast, or null to let Dolphin pick. */
+      companion?: string | null;
     },
   ): Promise<Project> {
     return request<Project>(`/api/projects/${projectId}`, {

@@ -5,24 +5,6 @@ import { seenAt, sessionState, type SessionState } from '../sessionState';
 import type { ControlCenterSession } from '../types';
 
 export type Mood = 'idle' | 'working' | 'done' | 'alert' | 'sleep';
-export type Shape = 'pebble' | 'drop' | 'bean' | 'cube';
-export type Accessory = 'none' | 'sprout' | 'antenna' | 'ears';
-
-const SHAPES: Shape[] = ['pebble', 'drop', 'bean', 'cube'];
-const ACCESSORIES: Accessory[] = ['none', 'sprout', 'antenna', 'ears'];
-
-function hash(seed: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < seed.length; i += 1) { h ^= seed.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-  h ^= h >>> 16; h = Math.imul(h, 0x7feb352d); h ^= h >>> 15;
-  return h >>> 0;
-}
-
-/** The same project always gets the same character. */
-export function faceOf(seed: string): { shape: Shape; accessory: Accessory } {
-  const h = hash(seed);
-  return { shape: SHAPES[h % SHAPES.length], accessory: ACCESSORIES[(h >>> 8) % ACCESSORIES.length] };
-}
 
 export type SessionMood = { name: string; state: SessionState; activityAt?: number };
 

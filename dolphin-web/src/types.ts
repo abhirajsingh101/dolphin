@@ -10,6 +10,9 @@ export interface Project {
   updated_at: string;
   task_count: number;
   done_count: number;
+  /** The companion character in effect, and whether the user chose it (else Dolphin picked it). */
+  companion?: string | null;
+  companion_chosen?: boolean;
   research_instance_id: string | null;
   is_temporary_workspace: boolean;
   serial_queue_id: string | null;
@@ -410,6 +413,9 @@ export interface ControlCenterSession {
 export interface ControlCenterProject {
   id: string;
   name: string;
+  /** The companion character in effect, and whether the user chose it (else Dolphin picked it). */
+  companion?: string | null;
+  companion_chosen?: boolean;
   emoji: string;
   color: string;
   path: string | null;

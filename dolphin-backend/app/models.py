@@ -51,6 +51,9 @@ class Project(Base):
     # (control center "Other sessions"). Left out of every project list.
     is_hidden = Column(Boolean, default=False, server_default=false(), nullable=False)
     position = Column(Integer, default=0)
+    # The companion character the user chose; empty means Dolphin picks one
+    # from the folder (companion_pick.py).
+    companion = Column(String, nullable=True)
     serial_queue_id = Column(String, nullable=True, index=True)
     serial_queue_status = Column(
         String,

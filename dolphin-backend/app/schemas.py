@@ -17,12 +17,17 @@ class ProjectCreate(BaseModel):
     position: int = 0
 
 
+CompanionKey = Literal["pip", "mochi", "bolt", "ember", "luna", "pebble", "fizz", "nori"]
+
+
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     emoji: Optional[str] = None
     color: Optional[str] = None
     path: Optional[str] = None
     position: Optional[int] = None
+    # null puts the choice back with Dolphin.
+    companion: Optional[CompanionKey] = None
 
 
 class ProjectResponse(BaseModel):
@@ -37,6 +42,9 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
     task_count: int = 0
     done_count: int = 0
+    # The character in effect: the user's choice, or Dolphin's pick.
+    companion: Optional[str] = None
+    companion_chosen: bool = False
     research_instance_id: Optional[str] = None
     is_temporary_workspace: bool = False
     serial_queue_id: Optional[str] = None
@@ -449,6 +457,8 @@ class ControlCenterProjectResponse(BaseModel):
     open_task_count: int
     session_count: int
     codex_session_count: int
+    companion: str = "pip"
+    companion_chosen: bool = False
     serial_queue_id: Optional[str] = None
     serial_queue_status: Literal[
         "idle", "running", "paused", "completed", "cancelled"

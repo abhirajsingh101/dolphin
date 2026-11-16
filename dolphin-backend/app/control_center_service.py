@@ -9,6 +9,7 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
+from .companion_pick import companion_for
 from . import run_service, tmux_service
 from .models import Project, Run, Task
 from .schemas import (
@@ -497,6 +498,7 @@ async def build_control_center(
         project_tasks = tasks_by_project[project.id]
         tasks = [_task_response(task, latest_runs) for task in project_tasks]
         sessions = sessions_by_project[project.id]
+        companion, companion_chosen = companion_for(project.id, project.path, project.name, project.companion)
         project_responses.append(
             ControlCenterProjectResponse(
                 id=project.id,
@@ -516,6 +518,8 @@ async def build_control_center(
                 codex_session_count=sum(
                     session.is_codex_running for session in sessions
                 ),
+                companion=companion,
+                companion_chosen=companion_chosen,
                 serial_queue_id=project.serial_queue_id,
                 serial_queue_status=project.serial_queue_status or "idle",
                 serial_queue_session_name=project.serial_queue_session_name,

@@ -71,6 +71,7 @@ from .dictation_service import (
     transcribe_audio,
 )
 from . import quality_service
+from .companion_pick import companion_for
 from .models import (
     Label,
     Notification,
@@ -914,6 +915,7 @@ def _project_response_with_counts(
     research_instance_id: str | None,
 ) -> ProjectResponse:
     resp = ProjectResponse.model_validate(project)
+    resp.companion, resp.companion_chosen = companion_for(project.id, project.path, project.name, project.companion)
     resp.task_count = task_count
     resp.done_count = done_count
     resp.research_instance_id = research_instance_id

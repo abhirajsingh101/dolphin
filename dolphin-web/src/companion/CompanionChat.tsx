@@ -10,12 +10,14 @@ import type { Message } from '../workspace/chatTypes';
 
 let consumedFocus = 0;
 
-export default function CompanionChat({ projectId, projectName, focusSignal, onMessages }: {
+export default function CompanionChat({ projectId, projectName, focusSignal, onMessages, onBusy }: {
   projectId: string;
   projectName: string;
   /** Changes when the character is clicked; the composer takes focus. */
   focusSignal: number;
   onMessages: (messages: Message[]) => void;
+  /** Whether a reply is being written; the character thinks meanwhile. */
+  onBusy?: (busy: boolean) => void;
 }) {
   const { openCompanion, sendCompanionTurn, fetchCompanionProgress } = useApi();
   const [thread, setThread] = useState<string | null>(null);
@@ -58,6 +60,7 @@ export default function CompanionChat({ projectId, projectName, focusSignal, onM
   }, [pending, sending]);
 
   const running = !!sending || pending;
+  useEffect(() => { onBusy?.(running); }, [running, onBusy]);
   useEffect(() => {
     setLive('');
     if (!thread || !running) return;

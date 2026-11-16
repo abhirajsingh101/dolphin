@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import CompanionFace from './CompanionFace';
+import Character, { type CharacterHandle } from './Character';
 import { clampPoint, fromFraction, moodOf, nudgeFor, savePlace, savedPlace, snapPoint, toFraction, type Box, type Mood, type Point, type SessionMood } from './companionModel';
 
 /* The project's character, standing in its window. One click opens the
@@ -12,16 +12,19 @@ const HEADER = 30;
 const NUDGE_MS = 6000;
 const NUDGES_PER_HOUR = 4;
 
-export default function WindowCompanion({ projectId, projectName, sessions, onOpen }: {
+export default function WindowCompanion({ projectId, projectName, kind, sessions, onOpen }: {
   projectId: string;
   projectName: string;
+  /** The character from the cast. */
+  kind?: string | null;
   sessions: readonly SessionMood[];
   onOpen: () => void;
 }) {
   const self = useRef<HTMLButtonElement>(null);
   const [place, setPlace] = useState<Point | null>(null);
   const [held, setHeld] = useState(false);
-  const drag = useRef<{ id: number; start: Point; from: Point; moved: boolean } | null>(null);
+  const drag = useRef<{ id: number; start: Point; from: Point; moved: boolean; last: Point; at: number } | null>(null);
+  const character = useRef<CharacterHandle>(null);
   // A drag ends in a click too; only a press that stayed put opens.
   const dragged = useRef(false);
   const box = (): Box | null => {
@@ -69,20 +72,32 @@ export default function WindowCompanion({ projectId, projectName, sessions, onOp
   function down(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0 || !place) return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, from: place, moved: false };
+    const at = { x: event.clientX, y: event.clientY };
+    drag.current = { id: event.pointerId, start: at, from: place, moved: false, last: at, at: performance.now() };
+    character.current?.critter?.press();
   }
   function move(event: ReactPointerEvent<HTMLButtonElement>) {
     const d = drag.current, b = box();
     if (!d || d.id !== event.pointerId || !b) return;
     const dx = event.clientX - d.start.x, dy = event.clientY - d.start.y;
     if (!d.moved && Math.hypot(dx, dy) < 4) return;
-    if (!d.moved) { d.moved = true; setHeld(true); setNudge(null); }
+    const critter = character.current?.critter;
+    if (!d.moved) { d.moved = true; setHeld(true); setNudge(null); if (critter) critter.held = true; }
+    // How fast it is carried: it leans and stretches into the pull.
+    const now = performance.now(), dt = Math.max(1, now - d.at) / 1000;
+    if (critter) {
+      critter.vx = critter.vx * .7 + ((event.clientX - d.last.x) / dt) * .3;
+      critter.vy = critter.vy * .7 + ((event.clientY - d.last.y) / dt) * .3;
+    }
+    d.last = { x: event.clientX, y: event.clientY }; d.at = now;
     setPlace(clampPoint({ x: d.from.x + dx, y: d.from.y + dy }, b, SIZE));
   }
   function up(event: ReactPointerEvent<HTMLButtonElement>) {
     const d = drag.current, b = box();
     if (!d || d.id !== event.pointerId) return;
     drag.current = null;
+    const critter = character.current?.critter;
+    if (critter) { critter.held = false; critter.vx = 0; critter.vy = 0; }
     if (!d.moved || !b || !place) return;
     dragged.current = true;
     setHeld(false);
@@ -107,7 +122,7 @@ export default function WindowCompanion({ projectId, projectName, sessions, onOp
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
-      onPointerCancel={() => { drag.current = null; setHeld(false); }}
+      onPointerCancel={() => { drag.current = null; setHeld(false); const c = character.current?.critter; if (c) c.held = false; }}
       onKeyDown={(event) => {
         // The arrow keys move it, for anyone not using a pointer.
         const step = { ArrowLeft: [-16, 0], ArrowRight: [16, 0], ArrowUp: [0, -16], ArrowDown: [0, 16] }[event.key];
@@ -121,10 +136,11 @@ export default function WindowCompanion({ projectId, projectName, sessions, onOp
       onClick={(event) => {
         if (dragged.current) { dragged.current = false; event.preventDefault(); return; }
         setNudge(null);
+        character.current?.critter?.boop();
         onOpen();
       }}
     >
-      <CompanionFace seed={projectId} mood={mood} size={SIZE} held={held} />
+      <Character ref={character} kind={kind} mood={nudge && (mood === 'idle' || mood === 'working') ? 'talk' : mood} size={SIZE} />
     </button>
     {nudge && place && <button
       type="button"

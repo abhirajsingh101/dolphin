@@ -158,3 +158,18 @@ async def test_main_chat_cannot_call_companion_tools(monkeypatch):
     assert "suggest_tasks" not in answers[0]
     assert "Unknown tool" in answers[1]
     assert all(c.args[1] not in ("suggest_tasks", "project_status") for c in executed.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_the_user_can_choose_a_character_and_give_the_choice_back(client):
+    http, _ = client
+    response = await http.put("/api/projects/alpha", json={})
+    assert response.status_code == 200, response.text
+    alpha = response.json()
+    assert alpha["companion_chosen"] is False and alpha["companion"] in {"pip", "fizz"}
+    chosen = await http.put("/api/projects/alpha", json={"companion": "nori"})
+    assert chosen.status_code == 200
+    assert (chosen.json()["companion"], chosen.json()["companion_chosen"]) == ("nori", True)
+    assert (await http.put("/api/projects/alpha", json={"companion": "dragon"})).status_code == 422
+    back = await http.put("/api/projects/alpha", json={"companion": None})
+    assert back.json()["companion_chosen"] is False
